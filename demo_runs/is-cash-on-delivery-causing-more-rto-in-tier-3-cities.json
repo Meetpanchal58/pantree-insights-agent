@@ -1,0 +1,1195 @@
+{
+ "question": "Is cash on delivery causing more RTO in tier 3 cities?",
+ "recorded_at": "2026-11-14T12:28:51",
+ "data_size": "full",
+ "data_as_of": "2026-11-14",
+ "seconds": 27.9,
+ "order": 3,
+ "events": [
+  {
+   "type": "step",
+   "step": "check_input",
+   "status": "started",
+   "detail": {},
+   "t": 0.0
+  },
+  {
+   "type": "step",
+   "step": "check_input",
+   "status": "done",
+   "detail": {
+    "seconds": 0.0
+   },
+   "t": 0.0
+  },
+  {
+   "type": "step",
+   "step": "retrieve",
+   "status": "started",
+   "detail": {},
+   "t": 0.01
+  },
+  {
+   "type": "step",
+   "step": "retrieve",
+   "status": "done",
+   "detail": {
+    "seconds": 0.08,
+    "tables": [
+     "sales",
+     "product_master",
+     "customers",
+     "customer_addresses",
+     "marketing_spend",
+     "support_contacts",
+     "sellers"
+    ],
+    "metrics": [
+     "rto_rate",
+     "late_delivery_rate",
+     "avg_delivery_days",
+     "units_sold"
+    ],
+    "values": [
+     "COD",
+     "Returned to Origin",
+     "Tier 2",
+     "Tier 3",
+     "Metro Enterprises 231",
+     "Bengaluru"
+    ],
+    "examples": [
+     "How does the RTO rate compare between COD and prepaid orders?",
+     "Which couriers deliver late most often?",
+     "What share of buyers order again within 90 days of their first order?"
+    ]
+   },
+   "t": 0.09
+  },
+  {
+   "type": "step",
+   "step": "plan",
+   "status": "started",
+   "detail": {},
+   "t": 0.09
+  },
+  {
+   "type": "step",
+   "step": "plan",
+   "status": "done",
+   "detail": {
+    "seconds": 6.3,
+    "decision": "proceed",
+    "plan": "Question: Among orders placed for delivery to Tier 3 addresses, is the RTO rate higher for COD than prepaid payments?\nMetrics: rto_rate, Shipped lines: count of sale lines with shipped_at IS NOT NULL, RTO lines: count of sale lines with rto_at IS NOT NULL\nBreakdowns: Payment type: COD when payment_method = 'COD'; otherwise prepaid\nFilters: sales.line_type = 'Sale'; customer_addresses.city_tier = 'Tier 3'\nTime window: 2025-01-01 to 2026-10-24 inclusive, by sales.placed_at\nComparison: COD versus prepaid within Tier 3 delivery addresses\nExpected result: One row per payment type, with RTO rate, shipped lines and RTO lines.\nAssumptions: Use the delivery address tier linked through sales.address_id.; Exclude the last three weeks of orders to reduce RTO reporting lag; some earlier outcomes may still be incomplete.; Following the verified payment-type definition, all non-COD methods are grouped as prepaid.; An observed difference indicates association, not proof that COD causes RTO."
+   },
+   "t": 6.39
+  },
+  {
+   "type": "step",
+   "step": "write_sql",
+   "status": "started",
+   "detail": {},
+   "t": 6.4
+  },
+  {
+   "type": "step",
+   "step": "write_sql",
+   "status": "done",
+   "detail": {
+    "seconds": 4.92,
+    "attempt": 1,
+    "sql": "SELECT CASE WHEN s.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type,\n       (COUNT(*) FILTER (WHERE s.rto_at IS NOT NULL)) / NULLIF(COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL), 0) AS rto_rate,\n       COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL) AS shipped_lines,\n       COUNT(*) FILTER (WHERE s.rto_at IS NOT NULL) AS rto_lines\nFROM sales s\nJOIN customer_addresses a ON s.address_id = a.address_id\nWHERE s.line_type = 'Sale'\n  AND a.city_tier = 'Tier 3'\n  AND s.placed_at >= TIMESTAMP '2025-01-01'\n  AND s.placed_at < TIMESTAMP '2026-10-04'\nGROUP BY 1\nORDER BY rto_rate DESC NULLS LAST",
+    "explanation": "Compares RTO rates for COD and all non-COD payment methods at Tier 3 delivery addresses. Orders from the final three weeks are excluded to reduce reporting lag; any difference is an association, not proof of causation."
+   },
+   "t": 11.31
+  },
+  {
+   "type": "step",
+   "step": "check_sql",
+   "status": "started",
+   "detail": {},
+   "t": 11.31
+  },
+  {
+   "type": "step",
+   "step": "check_sql",
+   "status": "done",
+   "detail": {
+    "seconds": 0.05,
+    "tables": [
+     "customer_addresses",
+     "sales"
+    ]
+   },
+   "t": 11.36
+  },
+  {
+   "type": "step",
+   "step": "run_query",
+   "status": "started",
+   "detail": {},
+   "t": 11.36
+  },
+  {
+   "type": "step",
+   "step": "run_query",
+   "status": "done",
+   "detail": {
+    "seconds": 0.04,
+    "rows": 2,
+    "columns": [
+     "payment_type",
+     "rto_rate",
+     "shipped_lines",
+     "rto_lines"
+    ],
+    "query_seconds": 0.04,
+    "truncated": false
+   },
+   "t": 11.41
+  },
+  {
+   "type": "step",
+   "step": "validate",
+   "status": "started",
+   "detail": {},
+   "t": 11.41
+  },
+  {
+   "type": "step",
+   "step": "validate",
+   "status": "done",
+   "detail": {
+    "seconds": 1.55,
+    "ok": true
+   },
+   "t": 12.96
+  },
+  {
+   "type": "step",
+   "step": "analyse",
+   "status": "started",
+   "detail": {},
+   "t": 12.97
+  },
+  {
+   "type": "step",
+   "step": "analyse",
+   "status": "done",
+   "detail": {
+    "seconds": 14.68,
+    "headline": "Tier 3 COD shipments had a 9.4% RTO rate versus 1.0% for prepaid, but the comparison does not prove COD causes RTO.",
+    "number_check": "passed",
+    "rewritten": true,
+    "unverified": []
+   },
+   "t": 27.64
+  },
+  {
+   "type": "step",
+   "step": "chart",
+   "status": "started",
+   "detail": {},
+   "t": 27.64
+  },
+  {
+   "type": "step",
+   "step": "chart",
+   "status": "done",
+   "detail": {
+    "seconds": 0.21,
+    "kind": "bar"
+   },
+   "t": 27.85
+  },
+  {
+   "type": "step",
+   "step": "remember",
+   "status": "started",
+   "detail": {},
+   "t": 27.85
+  },
+  {
+   "type": "step",
+   "step": "remember",
+   "status": "done",
+   "detail": {
+    "seconds": 0.0,
+    "facts": 1,
+    "gaps_closed": 0
+   },
+   "t": 27.85
+  },
+  {
+   "type": "final",
+   "run_id": "de9e0719a469",
+   "status": "done",
+   "message": null,
+   "question": "Is cash on delivery causing more RTO in tier 3 cities?",
+   "plan": {
+    "decision": "proceed",
+    "decline_reason": null,
+    "clarifying_questions": [],
+    "restated_question": "Among orders placed for delivery to Tier 3 addresses, is the RTO rate higher for COD than prepaid payments?",
+    "metrics": [
+     "rto_rate",
+     "Shipped lines: count of sale lines with shipped_at IS NOT NULL",
+     "RTO lines: count of sale lines with rto_at IS NOT NULL"
+    ],
+    "breakdowns": [
+     "Payment type: COD when payment_method = 'COD'; otherwise prepaid"
+    ],
+    "filters": [
+     "sales.line_type = 'Sale'",
+     "customer_addresses.city_tier = 'Tier 3'"
+    ],
+    "time_window": "2025-01-01 to 2026-10-24 inclusive, by sales.placed_at",
+    "comparison": "COD versus prepaid within Tier 3 delivery addresses",
+    "output_shape": "One row per payment type, with RTO rate, shipped lines and RTO lines.",
+    "assumptions": [
+     "Use the delivery address tier linked through sales.address_id.",
+     "Exclude the last three weeks of orders to reduce RTO reporting lag; some earlier outcomes may still be incomplete.",
+     "Following the verified payment-type definition, all non-COD methods are grouped as prepaid.",
+     "An observed difference indicates association, not proof that COD causes RTO."
+    ]
+   },
+   "sql": "SELECT\n  CASE WHEN s.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type,\n  (\n    COUNT(*) FILTER(WHERE\n      NOT s.rto_at IS NULL)\n  ) / NULLIF(COUNT(*) FILTER(WHERE\n    NOT s.shipped_at IS NULL), 0) AS rto_rate,\n  COUNT(*) FILTER(WHERE\n    NOT s.shipped_at IS NULL) AS shipped_lines,\n  COUNT(*) FILTER(WHERE\n    NOT s.rto_at IS NULL) AS rto_lines\nFROM sales AS s\nJOIN customer_addresses AS a\n  ON s.address_id = a.address_id\nWHERE\n  s.line_type = 'Sale'\n  AND a.city_tier = 'Tier 3'\n  AND s.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND s.placed_at < CAST('2026-10-04' AS TIMESTAMP)\nGROUP BY\n  1\nORDER BY\n  rto_rate DESC",
+   "result": {
+    "columns": [
+     "payment_type",
+     "rto_rate",
+     "shipped_lines",
+     "rto_lines"
+    ],
+    "data": [
+     [
+      "COD",
+      0.0941869021,
+      4077,
+      384
+     ],
+     [
+      "Prepaid",
+      0.0104613734,
+      3728,
+      39
+     ]
+    ],
+    "truncated": false
+   },
+   "analysis": {
+    "headline": "Tier 3 COD shipments had a 9.4% RTO rate versus 1.0% for prepaid, but the comparison does not prove COD causes RTO.",
+    "findings": [
+     "COD had 384 RTO lines against 4,077 shipped lines, a 9.4% RTO rate.",
+     "Prepaid had 39 RTO lines against 3,728 shipped lines, a 1.0% RTO rate; COD's rate was about 9.0 times as high."
+    ],
+    "recommendations": [
+     "Test incentives for prepaid payment in Tier 3 cities and measure whether RTO falls.",
+     "Investigate COD RTO by delivery location and carrier before changing payment availability."
+    ],
+    "caveats": [
+     "This is an association, not proof of causation; COD and prepaid customers may differ in other ways.",
+     "Rates are based on sale lines, not orders. All non-COD payment methods are grouped as prepaid.",
+     "The query covers orders placed from 2025-01-01 through 2026-10-03; some RTO outcomes may still be incomplete. The data is simulated."
+    ],
+    "follow_up_questions": [
+     "Does the COD RTO gap persist across Tier 3 locations and carriers?",
+     "Would a prepaid incentive reduce RTO without materially reducing orders?"
+    ],
+    "memory": [
+     {
+      "statement": "For Tier 3 delivery addresses, orders placed from 2025-01-01 through 2026-10-03 had a line-based RTO rate of 9.4% for COD versus 1.0% for prepaid.",
+      "type": "fact"
+     }
+    ],
+    "explains_gap_ids": [],
+    "chart_title": "Tier 3 RTO rate by payment type",
+    "chart_subtitle": "Sale lines placed from 2025-01-01 through 2026-10-03",
+    "chart_metric": "rto_rate"
+   },
+   "chart": {
+    "kind": "bar",
+    "title": "Tier 3 RTO rate by payment type",
+    "metric": "rto_rate",
+    "figure": {
+     "data": [
+      {
+       "customdata": {
+        "dtype": "i2",
+        "bdata": "7Q+AAZAOJwA=",
+        "shape": "2, 2"
+       },
+       "hovertemplate": "%{x}<br>Rto rate: %{y:,.4~g}<br>Shipped lines: %{customdata[0]:,.4~g}<br>Rto lines: %{customdata[1]:,.4~g}<extra></extra>",
+       "marker": {
+        "color": "#4F46E5"
+       },
+       "orientation": "v",
+       "x": [
+        "COD",
+        "Prepaid"
+       ],
+       "y": {
+        "dtype": "f8",
+        "bdata": "ViY7AKIcuD/Pc/7ExWyFPw=="
+       },
+       "type": "bar"
+      }
+     ],
+     "layout": {
+      "template": {
+       "data": {
+        "barpolar": [
+         {
+          "marker": {
+           "line": {
+            "color": "white",
+            "width": 0.5
+           },
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "barpolar"
+         }
+        ],
+        "bar": [
+         {
+          "error_x": {
+           "color": "#2a3f5f"
+          },
+          "error_y": {
+           "color": "#2a3f5f"
+          },
+          "marker": {
+           "line": {
+            "color": "white",
+            "width": 0.5
+           },
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "bar"
+         }
+        ],
+        "carpet": [
+         {
+          "aaxis": {
+           "endlinecolor": "#2a3f5f",
+           "gridcolor": "#C8D4E3",
+           "linecolor": "#C8D4E3",
+           "minorgridcolor": "#C8D4E3",
+           "startlinecolor": "#2a3f5f"
+          },
+          "baxis": {
+           "endlinecolor": "#2a3f5f",
+           "gridcolor": "#C8D4E3",
+           "linecolor": "#C8D4E3",
+           "minorgridcolor": "#C8D4E3",
+           "startlinecolor": "#2a3f5f"
+          },
+          "type": "carpet"
+         }
+        ],
+        "choropleth": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "choropleth"
+         }
+        ],
+        "contourcarpet": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "contourcarpet"
+         }
+        ],
+        "contour": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "contour"
+         }
+        ],
+        "heatmap": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "heatmap"
+         }
+        ],
+        "histogram2dcontour": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "histogram2dcontour"
+         }
+        ],
+        "histogram2d": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "histogram2d"
+         }
+        ],
+        "histogram": [
+         {
+          "marker": {
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "histogram"
+         }
+        ],
+        "mesh3d": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "mesh3d"
+         }
+        ],
+        "parcoords": [
+         {
+          "line": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "parcoords"
+         }
+        ],
+        "pie": [
+         {
+          "automargin": true,
+          "type": "pie"
+         }
+        ],
+        "scatter3d": [
+         {
+          "line": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatter3d"
+         }
+        ],
+        "scattercarpet": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattercarpet"
+         }
+        ],
+        "scattergeo": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattergeo"
+         }
+        ],
+        "scattergl": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattergl"
+         }
+        ],
+        "scattermap": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattermap"
+         }
+        ],
+        "scatterpolargl": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterpolargl"
+         }
+        ],
+        "scatterpolar": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterpolar"
+         }
+        ],
+        "scatter": [
+         {
+          "fillpattern": {
+           "fillmode": "overlay",
+           "size": 10,
+           "solidity": 0.2
+          },
+          "type": "scatter"
+         }
+        ],
+        "scatterternary": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterternary"
+         }
+        ],
+        "surface": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "surface"
+         }
+        ],
+        "table": [
+         {
+          "cells": {
+           "fill": {
+            "color": "#EBF0F8"
+           },
+           "line": {
+            "color": "white"
+           }
+          },
+          "header": {
+           "fill": {
+            "color": "#C8D4E3"
+           },
+           "line": {
+            "color": "white"
+           }
+          },
+          "type": "table"
+         }
+        ]
+       },
+       "layout": {
+        "annotationdefaults": {
+         "arrowcolor": "#2a3f5f",
+         "arrowhead": 0,
+         "arrowwidth": 1
+        },
+        "autotypenumbers": "strict",
+        "coloraxis": {
+         "colorbar": {
+          "outlinewidth": 0,
+          "ticks": ""
+         }
+        },
+        "colorscale": {
+         "diverging": [
+          [
+           0,
+           "#8e0152"
+          ],
+          [
+           0.1,
+           "#c51b7d"
+          ],
+          [
+           0.2,
+           "#de77ae"
+          ],
+          [
+           0.3,
+           "#f1b6da"
+          ],
+          [
+           0.4,
+           "#fde0ef"
+          ],
+          [
+           0.5,
+           "#f7f7f7"
+          ],
+          [
+           0.6,
+           "#e6f5d0"
+          ],
+          [
+           0.7,
+           "#b8e186"
+          ],
+          [
+           0.8,
+           "#7fbc41"
+          ],
+          [
+           0.9,
+           "#4d9221"
+          ],
+          [
+           1,
+           "#276419"
+          ]
+         ],
+         "sequential": [
+          [
+           0.0,
+           "#0d0887"
+          ],
+          [
+           0.1111111111111111,
+           "#46039f"
+          ],
+          [
+           0.2222222222222222,
+           "#7201a8"
+          ],
+          [
+           0.3333333333333333,
+           "#9c179e"
+          ],
+          [
+           0.4444444444444444,
+           "#bd3786"
+          ],
+          [
+           0.5555555555555556,
+           "#d8576b"
+          ],
+          [
+           0.6666666666666666,
+           "#ed7953"
+          ],
+          [
+           0.7777777777777778,
+           "#fb9f3a"
+          ],
+          [
+           0.8888888888888888,
+           "#fdca26"
+          ],
+          [
+           1.0,
+           "#f0f921"
+          ]
+         ],
+         "sequentialminus": [
+          [
+           0.0,
+           "#0d0887"
+          ],
+          [
+           0.1111111111111111,
+           "#46039f"
+          ],
+          [
+           0.2222222222222222,
+           "#7201a8"
+          ],
+          [
+           0.3333333333333333,
+           "#9c179e"
+          ],
+          [
+           0.4444444444444444,
+           "#bd3786"
+          ],
+          [
+           0.5555555555555556,
+           "#d8576b"
+          ],
+          [
+           0.6666666666666666,
+           "#ed7953"
+          ],
+          [
+           0.7777777777777778,
+           "#fb9f3a"
+          ],
+          [
+           0.8888888888888888,
+           "#fdca26"
+          ],
+          [
+           1.0,
+           "#f0f921"
+          ]
+         ]
+        },
+        "colorway": [
+         "#636efa",
+         "#EF553B",
+         "#00cc96",
+         "#ab63fa",
+         "#FFA15A",
+         "#19d3f3",
+         "#FF6692",
+         "#B6E880",
+         "#FF97FF",
+         "#FECB52"
+        ],
+        "font": {
+         "color": "#2a3f5f"
+        },
+        "geo": {
+         "bgcolor": "white",
+         "lakecolor": "white",
+         "landcolor": "white",
+         "showlakes": true,
+         "showland": true,
+         "subunitcolor": "#C8D4E3"
+        },
+        "hoverlabel": {
+         "align": "left"
+        },
+        "hovermode": "closest",
+        "paper_bgcolor": "white",
+        "plot_bgcolor": "white",
+        "polar": {
+         "angularaxis": {
+          "gridcolor": "#EBF0F8",
+          "linecolor": "#EBF0F8",
+          "ticks": ""
+         },
+         "bgcolor": "white",
+         "radialaxis": {
+          "gridcolor": "#EBF0F8",
+          "linecolor": "#EBF0F8",
+          "ticks": ""
+         }
+        },
+        "scene": {
+         "xaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         },
+         "yaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         },
+         "zaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         }
+        },
+        "shapedefaults": {
+         "line": {
+          "color": "#2a3f5f"
+         }
+        },
+        "ternary": {
+         "aaxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         },
+         "baxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         },
+         "bgcolor": "white",
+         "caxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         }
+        },
+        "title": {
+         "x": 0.05
+        },
+        "xaxis": {
+         "automargin": true,
+         "gridcolor": "#EBF0F8",
+         "linecolor": "#EBF0F8",
+         "ticks": "",
+         "title": {
+          "standoff": 15
+         },
+         "zerolinecolor": "#EBF0F8",
+         "zerolinewidth": 2
+        },
+        "yaxis": {
+         "automargin": true,
+         "gridcolor": "#EBF0F8",
+         "linecolor": "#EBF0F8",
+         "ticks": "",
+         "title": {
+          "standoff": 15
+         },
+         "zerolinecolor": "#EBF0F8",
+         "zerolinewidth": 2
+        }
+       }
+      },
+      "xaxis": {
+       "type": "category"
+      },
+      "yaxis": {
+       "title": {
+        "text": "Rto rate"
+       },
+       "tickformat": ".1%"
+      },
+      "title": {
+       "text": "Tier 3 RTO rate by payment type<br><sup>Sale lines placed from 2025-01-01 through 2026-10-03</sup>",
+       "x": 0,
+       "xanchor": "left"
+      },
+      "margin": {
+       "l": 60,
+       "r": 20,
+       "t": 70,
+       "b": 50
+      },
+      "legend": {
+       "orientation": "h",
+       "y": -0.18
+      },
+      "font": {
+       "family": "Inter, system-ui, sans-serif"
+      },
+      "height": 420,
+      "showlegend": false
+     }
+    }
+   },
+   "warnings": [],
+   "insight_id": "2026-11-14_122851_cash-delivery-causing-more-rto-tier",
+   "attempts": 1,
+   "data_as_of": "2026-11-14",
+   "data_size": "full",
+   "cost": {
+    "usd": 0.02061,
+    "calls": 5,
+    "input": 12794,
+    "cached": 1089,
+    "output": 1771
+   },
+   "calls": [
+    {
+     "agent": "planner",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 4393,
+     "cached_tokens": 1089,
+     "output_tokens": 384,
+     "usd": 0.005278,
+     "seconds": 5.63
+    },
+    {
+     "agent": "sql_writer",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 3846,
+     "cached_tokens": 0,
+     "output_tokens": 313,
+     "usd": 0.005411,
+     "seconds": 4.91
+    },
+    {
+     "agent": "validator",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 1460,
+     "cached_tokens": 0,
+     "output_tokens": 17,
+     "usd": 0.001545,
+     "seconds": 1.55
+    },
+    {
+     "agent": "analyst",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 1530,
+     "cached_tokens": 0,
+     "output_tokens": 531,
+     "usd": 0.004185,
+     "seconds": 7.41
+    },
+    {
+     "agent": "analyst",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 1565,
+     "cached_tokens": 0,
+     "output_tokens": 526,
+     "usd": 0.004195,
+     "seconds": 7.25
+    }
+   ],
+   "t": 27.86
+  }
+ ]
+}

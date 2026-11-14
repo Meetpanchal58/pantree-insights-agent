@@ -35,3 +35,29 @@ def test_unique_label_wins_over_parent_category():
 
 def test_empty_result_has_no_chart():
     assert build_chart(pd.DataFrame({"x": []})) is None
+
+
+def test_labels_with_years_are_categories_not_dates():
+    frame = pd.DataFrame({"event_name": ["Diwali 2025", "Diwali 2026"], "start_date": ["2025-10-15", "2026-11-03"],
+                          "orders": [1423, 1960], "realized_revenue": [2070933.6, 2936003.7]})
+    fig = build_chart(frame)["figure"]
+    axis = fig["layout"]["xaxis"] if fig["data"][0].get("orientation") != "h" else fig["layout"]["yaxis"]
+    assert axis["type"] == "category"
+
+
+def test_string_dates_from_json_are_detected():
+    frame = pd.DataFrame({"event_name": ["Diwali 2025", "Diwali 2026"],
+                          "start_date": ["2025-10-15T00:00:00.000", "2026-11-03T00:00:00.000"],
+                          "realized_revenue": [2070933.6, 2936003.7]})
+    chart = build_chart(frame)
+    labels = chart["figure"]["data"][0].get("x") or chart["figure"]["data"][0].get("y")
+    assert list(labels) == ["Diwali 2025", "Diwali 2026"]
+
+
+def test_stacked_breakdowns_become_labelled_bars():
+    frame = pd.DataFrame({"breakdown": ["category", "category", "segment", "segment"],
+                          "category": ["Apparel", "Footwear", "Footwear", "Footwear"],
+                          "sub_category": [None, None, "Shoes", "Sandals"], "return_rate": [0.23, 0.25, 0.26, 0.25]})
+    chart = build_chart(frame)
+    assert chart["kind"] == "bar_h" and len(chart["figure"]["data"]) == 2
+    assert chart["figure"]["data"][1]["y"][0] == "Footwear · Shoes"

@@ -25,8 +25,10 @@ TIME = re.compile(r"^(day|date|week|month|quarter|year|period|.*_(date|day|week|
 
 def _is_time(frame: pd.DataFrame, col: str) -> bool:
     s = frame[col]
-    return pd.api.types.is_datetime64_any_dtype(s) or (bool(TIME.match(col)) and s.dtype == object and
-                                                        pd.to_datetime(s, errors="coerce").notna().all())
+    if pd.api.types.is_datetime64_any_dtype(s):
+        return True
+    textual = s.dtype == object or pd.api.types.is_string_dtype(s)        # pandas 3 has a str dtype
+    return bool(TIME.match(col)) and textual and bool(pd.to_datetime(s, errors="coerce").notna().all())
 
 
 def _fmt(col: str, series: pd.Series) -> dict[str, str]:
@@ -57,7 +59,7 @@ def choose_columns(frame: pd.DataFrame) -> tuple[list[str], list[str], list[str]
     # A category with one value per row is the label; any other category then only colours it.
     unique = [c for c in cats if frame[c].nunique() == len(frame)]
     if unique and len(cats) > 1:
-        cats = [max(unique, key=lambda c: frame[c].astype(str).str.len().mean())]
+        cats = [unique[0]]                       # the first such column is normally the name
     return times, cats, numeric
 
 
@@ -111,6 +113,18 @@ def build_chart(frame: pd.DataFrame, title: str = "", subtitle: str = "",
                                          line={"color": PALETTE[i % len(PALETTE)], "width": 2}))
             metric = lines[0]
         fig.update_xaxes(title=None)
+    elif len(cats) >= 2 and frame[cats].isna().any().any():
+        # several breakdowns stacked in one table (empty cells where a breakdown does not apply):
+        # one bar per row, labelled by its filled-in values, coloured by the first column (the group)
+        kind = "bar_h"
+        group, rest = cats[0], cats[1:]
+        frame["_label"] = frame[rest].apply(lambda r: " · ".join(str(v) for v in r if pd.notna(v)), axis=1)
+        frame["_label"] = frame["_label"].where(frame["_label"] != "", frame[group].astype(str))
+        for i, (name, part) in enumerate(frame.groupby(group, sort=False)):
+            fig.add_trace(go.Bar(x=part[metric], y=part["_label"], orientation="h", name=str(name),
+                                 marker_color=PALETTE[i % len(PALETTE)]))
+        fig.update_yaxes(autorange="reversed", title=None, type="category")
+        fig.update_layout(height=max(420, 26 * len(frame) + 120))
     elif len(cats) >= 2:
         kind = "grouped_bar"
         a, b = cats[0], cats[1]
@@ -118,6 +132,7 @@ def build_chart(frame: pd.DataFrame, title: str = "", subtitle: str = "",
             fig.add_trace(go.Bar(x=part[a].astype(str), y=part[metric], name=str(name),
                                  marker_color=PALETTE[i % len(PALETTE)]))
         fig.update_layout(barmode="group")
+        fig.update_xaxes(type="category")
     elif cats and len(series := _series(numeric, metric)) >= 2:
         kind = "grouped_bar"                     # e.g. revenue_2025 vs revenue_2026 per month
         labels = frame[cats[0]].astype(str)
@@ -138,9 +153,12 @@ def build_chart(frame: pd.DataFrame, title: str = "", subtitle: str = "",
                                    f"%{{{'x' if horizontal else 'y'}:,.4~g}}" + (f"<br>{hover}" if hover else "")
                                    + "<extra></extra>")
         fig.add_trace(bar)
+        # labels like "Diwali 2025" must not be read as dates: force a category axis
         if horizontal:
-            fig.update_yaxes(autorange="reversed", title=None)
+            fig.update_yaxes(autorange="reversed", title=None, type="category")
             kind = "bar_h"
+        else:
+            fig.update_xaxes(type="category")
     elif len(numeric) >= 2:
         kind = "scatter"
         fig.add_trace(go.Scatter(x=frame[numeric[0]], y=frame[numeric[1]], mode="markers",
@@ -152,9 +170,11 @@ def build_chart(frame: pd.DataFrame, title: str = "", subtitle: str = "",
 
     value_axis = fig.update_xaxes if kind == "bar_h" else fig.update_yaxes
     value_axis(title=_label(metric), **_fmt(metric, frame[metric]))
+    if fig.layout.height is None:
+        fig.update_layout(height=420)
     full_title = title + (f"<br><sup>{subtitle}</sup>" if subtitle else "")
     fig.update_layout(title={"text": full_title, "x": 0, "xanchor": "left"}, template="plotly_white",
-                      margin={"l": 60, "r": 20, "t": 70 if subtitle else 50, "b": 50}, height=420,
+                      margin={"l": 60, "r": 20, "t": 70 if subtitle else 50, "b": 50},
                       legend={"orientation": "h", "y": -0.18}, font={"family": "Inter, system-ui, sans-serif"},
                       showlegend=len(fig.data) > 1)
     return {"kind": kind, "title": title, "metric": metric, "figure": json.loads(fig.to_json())}

@@ -8,9 +8,22 @@ Data: 22 months of shop history (catalogue, customers, browsing, orders, returns
 support) from my [ecommerce-simulator](https://github.com/Meetpanchal58/ecommerce-simulator), refreshed
 nightly. Sister project: [pantree-recommendation-system](https://github.com/Meetpanchal58/pantree-recommendation-system).
 
-> **Status: step 3 of 5 done.** Data layer, metric definitions, guardrails, KPI pulse, hybrid retrieval
-> and the multi-agent flow with memory work end to end (`pantree-ask`). The web UI and deployment come
-> next (see [Roadmap](#roadmap)).
+> **Status: step 4 of 5 done.** The full app runs locally: sign-in, chats and projects, live agent
+> activity, charts, exports and memory. Evals and deployment on Google Cloud Run come next
+> (see [Roadmap](#roadmap)).
+
+## The app
+
+| Left | Middle | Right |
+|---|---|---|
+| Projects (with their own instructions and memory) and chats; Pulse; Memory | The conversation. Clarifying questions appear as clickable choices with a recommended default | The agents working, step by step (plan, SQL, checks), then the chart, findings, recommendations, result table and exports: **Copy, PNG, CSV, PPT, SQL** |
+
+- **Sign-in:** Google, or a one-time code by email. Visitors who do not sign in can replay recorded demo runs
+  (`demo_runs/`) at no cost; signed-in users get 10 live questions a day (admins: unlimited).
+- **Memory in four levels:** the chat (follow-up questions work), the project (instructions + insights from
+  its chats), the user (preferences, insights outside projects) and shared business knowledge (the business
+  profile, the pulse's open gaps, and insights an admin chose to share).
+- **Pulse:** this week's unusual KPI changes, each with an "Investigate" button that starts a chat.
 
 ## How it will work
 
@@ -38,6 +51,9 @@ question
 | `src/pantree_insights/graph.py` | The LangGraph flow: retries with the exact error when the guardrails, the database or the validator reject a query (max 3 attempts); pauses for clarifying questions and resumes with the answers; checks every number in the answer against the result; picks a chart; saves the insight to memory. Streams a progress event per step. |
 | `src/pantree_insights/memory.py` | Saves each answer as an insight (facts with numbers, SQL and data date), finds related insights and open gaps for new questions, and closes gaps an answer explains. |
 | `src/pantree_insights/charts.py` | Picks the chart from the result's shape (line, bar, grouped bars, scatter or KPI cards) and builds Plotly JSON for the browser and exports. |
+| `src/pantree_insights/web.py`, `static/` | FastAPI app and the HTML/CSS/JS front end (no build step): runs in background threads streamed over Server-Sent Events, clarifying-question pause and resume, daily limits, memory, pulse, demo replays. Exports are made in the browser (Plotly for PNG, PptxGenJS for PowerPoint). |
+| `src/pantree_insights/store.py`, `auth.py` | Database (SQLite locally, Neon Postgres in production): users, projects, chats, messages, memory, sign-in codes, usage. Google OAuth and email codes with signed session cookies. |
+| `src/pantree_insights/demos.py` | Records real runs and replays them with their original timing. |
 | `src/pantree_insights/llm.py` | One interface to the model (LangChain `init_chat_model`, so OpenAI or Anthropic is a setting), cost per call and per question, and a daily budget. Tests use a scripted fake model. |
 | `src/pantree_insights/pulse.py` | Builds the daily history of 18 KPIs (143 series), compares the latest week with the 8 before it, explains changes caused by sale events and records the rest as open gaps in `memory/gaps/`. |
 
@@ -81,6 +97,14 @@ uv run pantree-ask "How did Diwali 2026 do compared with Diwali 2025?"   # needs
 A typical question takes 30-50 seconds and costs about Rs 2-3 (US$0.02-0.04) with `gpt-6.1-terra`.
 
 ```bash
+uv run pantree-web                            # the app at http://127.0.0.1:8000 (sign-in codes print in the log)
+```
+
+```bash
+uv run pantree-demo record "Why are footwear returns so high?"   # save a run visitors can replay
+```
+
+```bash
 uv run pytest -q                              # guardrail tests + checks on the small shop
 ```
 
@@ -91,7 +115,7 @@ Settings come from environment variables or `.env` (see `.env.example`), e.g. `D
 1. ✅ Data layer, metric definitions, guardrails, KPI pulse
 2. ✅ Retrieval: hybrid search (BM25 + local embeddings) over tables, metrics, examples and column values
 3. ✅ Agents (planner, SQL writer, validator, analyst) as a LangGraph flow, with memory
-4. FastAPI app: chats and projects, live agent activity, charts, exports (Copy, PNG, CSV, PPT), demo replays
+4. ✅ FastAPI app: sign-in, chats and projects, live agent activity, charts, exports (Copy, PNG, CSV, PPT), 4-level memory, pulse, demo replays
 5. Evals and deployment on Google Cloud Run
 
 ## License

@@ -22,6 +22,13 @@ dependencies = [
     "langchain-openai>=1.8.0",
     "langgraph>=1.2.22",
     "plotly>=7.1.0",
+    "fastapi>=0.162.7",
+    "uvicorn[standard]>=0.54.0",
+    "sqlalchemy>=2.1.8",
+    "psycopg[binary]>=3.3.9",
+    "authlib>=1.9.5",
+    "itsdangerous>=2.2.0",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]
@@ -35,6 +42,8 @@ pantree-data = "pantree_insights.db:main"
 pantree-pulse = "pantree_insights.pulse:main"
 pantree-context = "pantree_insights.retrieval:main"
 pantree-ask = "pantree_insights.graph:main"
+pantree-web = "pantree_insights.web:main"
+pantree-demo = "pantree_insights.demos:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -54,3 +63,6 @@ ignore = ["SIM905"]   # "a b c".split() reads better for word lists
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["data: needs the downloaded simulator data (small size)"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.params.Depends"]   # standard FastAPI dependency style

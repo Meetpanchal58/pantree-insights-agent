@@ -33,6 +33,25 @@ class Settings(BaseSettings):
     max_sql_attempts: int = 3                    # SQL writer tries (guardrail / database / validator feedback)
     daily_budget_usd: float = 1.00               # live LLM calls stop for the day after this
 
+    # Web app
+    app_env: Literal["development", "production"] = "development"
+    public_url: str = "http://127.0.0.1:8000"
+    database_url: str = f"sqlite:///{ROOT / '.cache' / 'app.db'}"   # Neon Postgres in production
+    session_secret: str = "dev-only-change-me"                       # signs the session cookie
+    admin_emails: list[str] = []                                     # may update shared business memory
+    daily_question_limit: int = 10                                   # live questions per user per day
+    demo_dir: Path = ROOT / "demo_runs"
+
+    # Sign-in: Google (OAuth client in Google Cloud) and/or email codes (SMTP, e.g. Gmail app password)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "Pantree Insights"
+
     # USD per 1M tokens: (input, cached input, output). Standard tier, OpenAI pricing page Nov 2026.
     prices: dict[str, tuple[float, float, float]] = {
         "gpt-6.1-terra": (1.00, 0.05, 5.00),

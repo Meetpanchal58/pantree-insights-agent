@@ -19,7 +19,8 @@ planner: |
   Decide one of:
   - "proceed": the question is clear enough, or any missing detail has an obvious business default.
   - "clarify": a missing detail would change the numbers materially AND has no safe default. Ask at
-    most 3 short questions. Each needs 2-4 concrete options and the option you recommend as default.
+    most 3 short questions. Each needs 2-4 concrete options and the option you recommend as default
+    (plain labels; do not write "(recommended)" in them).
     Good reasons to ask: which metric ("sales" could be orders, net sales or realized revenue when the
     choice changes the conclusion), which period when none is implied, which comparison baseline.
     Do not ask about things you can decide sensibly (sort order, chart type, rounding, top-N size).
