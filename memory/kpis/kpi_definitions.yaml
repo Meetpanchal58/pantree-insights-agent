@@ -1,0 +1,33 @@
+# KPIs the pulse tracks every day (metric names from semantic/metrics.yaml).
+#
+# breakdowns: dimensions of the metric's source to track separately (the total is always tracked).
+# mature_after_days: how long the number keeps changing after the day it describes. Returns, RTO and
+#   refunds happen days or weeks after the order, so these KPIs are only judged on windows that ended
+#   at least this many days before the last day of data.
+
+defaults:
+  window_days: 7          # compare the latest 7 days ...
+  baseline_windows: 8     # ... with the 8 weeks before them
+  min_z: 2.5              # how unusual (in standard deviations of the weekly values) a change must be
+  min_change: 0.15        # and at least this relative change (15%)
+  min_denominator: 50     # ratios need at least this many cases in the window
+
+kpis:
+  net_sales:          {breakdowns: [category, payment_type, customer_type, traffic_source], mature_after_days: 3}
+  orders:             {breakdowns: [device, traffic_source, customer_type], mature_after_days: 0}
+  aov:                {breakdowns: [category, payment_type, customer_type], mature_after_days: 3}
+  avg_discount_pct:   {breakdowns: [category], mature_after_days: 0}
+  cancellation_rate:  {breakdowns: [payment_type, category], mature_after_days: 3}
+  rto_rate:           {breakdowns: [payment_type, courier], mature_after_days: 21}
+  return_rate:        {breakdowns: [category], mature_after_days: 25}
+  late_delivery_rate: {breakdowns: [courier], mature_after_days: 21}
+  gross_margin_pct:   {breakdowns: [category], mature_after_days: 25}
+  sessions:           {breakdowns: [traffic_source, device], mature_after_days: 0}
+  conversion_rate:    {breakdowns: [device, traffic_source], mature_after_days: 0}
+  ctr:                {breakdowns: [surface], mature_after_days: 0}
+  marketing_spend:    {breakdowns: [channel_group], mature_after_days: 0}
+  platform_roas:      {breakdowns: [channel_group], mature_after_days: 1}
+  support_tickets:    {breakdowns: [issue_category], mature_after_days: 0}
+  avg_csat:           {breakdowns: [channel], mature_after_days: 3}
+  avg_rating:         {breakdowns: [category], mature_after_days: 0}
+  lost_sales_units:   {breakdowns: [category], mature_after_days: 0}
