@@ -26,7 +26,7 @@ question
 | Part | What it does |
 |---|---|
 | `semantic/schema.yaml` | The 22 tables the agent may query: grain, keys, column notes, join paths. Blocked tables and columns are listed with the reason. |
-| `semantic/metrics.yaml` | **One definition per business number**: realized revenue, AOV, return rate, RTO rate, conversion, ROAS, CAC and 25 more. The agent must use these, so "revenue" always means the same thing. |
+| `semantic/metrics.yaml` | **One definition per business number**: realized revenue, AOV, return rate, RTO rate, conversion, ROAS, CAC and 25 more (32 in total). The agent must use these, so "revenue" always means the same thing. |
 | `semantic/examples.yaml` | 28 verified question → SQL pairs (easy to hard), used as examples and in evals. |
 | `src/pantree_insights/db.py` | Downloads the shop and exposes it as DuckDB views. After setup the connection cannot read other files, write, install extensions or change settings. |
 | `src/pantree_insights/guardrails.py` | Code checks (no LLM): one read-only SELECT, allowed tables and columns only, no table functions, no `SELECT *`, results must be summarised or limited; question checks (personal data, prompt injection); and a check that every number in an answer comes from the query result. |
