@@ -162,10 +162,22 @@ uv run python evals/run_eval.py --dry-run     # free: checks the gold SQL
 ```
 
 ```bash
-uv run python evals/run_eval.py --yes         # real run, about US$0.60-1.30
+uv run python evals/run_eval.py --yes         # real run, about US$0.70
 ```
 
-EVAL_RESULTS_PLACEHOLDER
+**Latest run** (full shop, `gpt-6.1-terra`, report in `evals/reports/`): US$0.70 for 44 questions, median 21 s each.
+
+| Measure | Result |
+|---|---|
+| Main number correct (extra rows/columns allowed) | **36 / 44 (82%)** |
+| Exact result match | 34 / 44 (77%) |
+| Easy / medium / hard (exact) | 11/11 · 15/21 · 8/12 |
+| Declines personal-data, off-topic and injection requests | 3 / 3 |
+| Asks clarifying questions when vague | 2 / 3 |
+
+Most misses are reasonable alternative readings (e.g. top 20 instead of top 10, crediting realized instead of
+booked revenue). One real miss (an out-of-stock list declined as a "raw dump") was fixed in the planner prompt
+and passes on re-run.
 
 ## Roadmap
 

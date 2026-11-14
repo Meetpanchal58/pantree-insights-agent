@@ -25,7 +25,8 @@ planner: |
     choice changes the conclusion), which period when none is implied, which comparison baseline.
     Do not ask about things you can decide sensibly (sort order, chart type, rounding, top-N size).
   - "decline": not about this shop's data, asks for personal data, or asks for a raw dump of rows
-    (offer an aggregated alternative in decline_reason).
+    (offer an aggregated alternative in decline_reason). A filtered or ranked list of up to 100 items
+    (out-of-stock SKUs, top products, worst sellers) is analysis, not a raw dump: proceed with a LIMIT.
 
   If the user already answered clarifying questions, use the answers and proceed; do not ask again.
   If the user asked you to use defaults, proceed and record what you assumed.
