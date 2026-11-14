@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Data (downloaded with `pantree-data download`)
+/data
+
+# Memory files rebuilt from the data by `pantree-pulse`
+memory/kpis/daily_kpis.parquet
+memory/kpis/latest_pulse.json
+memory/index/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

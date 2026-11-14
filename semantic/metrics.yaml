@@ -1,0 +1,387 @@
+# Pantree business metrics: the ONE definition of each number the agent reports.
+#
+# A metric = numerator (/ denominator) over a source. The value of a ratio over any period is
+# SUM-able: compute numerator and denominator over the period, then divide (never average daily ratios).
+# Agents must use these definitions; the validator checks SQL against them.
+#
+# Money is in Rs, GST included unless the metric says otherwise.
+
+sources:
+  sales:
+    description: Order lines (items bought). Exchange replacement lines are excluded.
+    from: sales s LEFT JOIN product_master p ON p.product_id = s.product_id
+    time_column: s.placed_at
+    where: s.line_type = 'Sale'
+    dimensions:
+      category: p.category
+      sub_category: p.sub_category
+      article_type: p.article_type
+      brand: p.brand_name
+      product_gender: p.gender
+      payment_method: s.payment_method
+      payment_type: CASE WHEN s.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END
+      device: s.device
+      traffic_source: s.traffic_source
+      ship_city: s.ship_city
+      courier: s.courier
+      warehouse: s.warehouse_id
+      customer_type: CASE WHEN s.is_first_order THEN 'New' ELSE 'Repeat' END
+      sale_event: CASE WHEN s.event_id IS NULL THEN 'Normal day' ELSE 'Sale event' END
+
+  sessions:
+    description: Website and app visits (clickstream events grouped by session_id).
+    from: clickstream c
+    time_column: c.event_at
+    dimensions:
+      device: c.device
+      traffic_source: c.traffic_source
+
+  impressions:
+    description: Products shown in lists (home recommendations, listings, search, similar products).
+    from: impressions i
+    time_column: i.shown_at
+    dimensions:
+      surface: i.surface
+      position: CASE WHEN i.position <= 4 THEN CAST(i.position AS VARCHAR) ELSE '5+' END
+
+  marketing:
+    description: Actual hourly marketing spend and what ad platforms report.
+    from: marketing_spend m JOIN campaigns cp ON cp.campaign_id = m.campaign_id
+    time_column: m.date_hour
+    dimensions:
+      channel: cp.channel
+      channel_group: cp.channel_group
+      campaign_type: cp.campaign_type
+      region: m.region
+
+  support:
+    description: Customer support contacts.
+    from: support_contacts sc
+    time_column: sc.contact_at
+    dimensions:
+      channel: sc.channel
+      issue_category: sc.issue_category
+      resolution_status: sc.resolution_status
+
+  reviews:
+    description: Published product reviews.
+    from: product_reviews r LEFT JOIN product_master p ON p.product_id = r.product_id
+    time_column: r.reviewed_at
+    where: r.moderation_status = 'Published'
+    dimensions:
+      category: p.category
+      aspect: r.aspect
+      sentiment: r.sentiment
+
+  stock:
+    description: Daily stock movements per SKU (only days on which stock moved).
+    from: inventory_history ih LEFT JOIN product_master p ON p.product_id = ih.product_id
+    time_column: ih.date
+    dimensions:
+      category: p.category
+      warehouse: ih.warehouse_id
+
+metrics:
+  # ------------------------------------------------------------------ sales volume and revenue
+  orders:
+    label: Orders
+    description: Orders placed (any status, including later cancelled or returned).
+    source: sales
+    numerator: COUNT(DISTINCT s.order_id)
+    unit: count
+    higher_is_better: true
+
+  units_sold:
+    label: Units sold
+    description: Units in orders that were not cancelled.
+    source: sales
+    numerator: SUM(CASE WHEN s.cancelled_at IS NULL THEN s.quantity ELSE 0 END)
+    unit: count
+    higher_is_better: true
+
+  gross_sales:
+    label: Gross sales (GMV)
+    description: Value of everything ordered at selling price, before coupons, cancellations and returns.
+    source: sales
+    numerator: SUM(s.gross_amount)
+    unit: inr
+    higher_is_better: true
+
+  net_sales:
+    label: Net sales
+    description: What customers agreed to pay (after coupons, incl. shipping) for orders not cancelled. Returns not yet deducted.
+    source: sales
+    numerator: SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END)
+    unit: inr
+    higher_is_better: true
+
+  realized_revenue:
+    label: Realized revenue
+    description: >-
+      Money the shop keeps: delivered lines minus refunds. Excludes cancelled, returned-to-origin,
+      lost and undelivered lines. THE default meaning of "revenue" or "sales" unless the user asks otherwise.
+    source: sales
+    numerator: SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END)
+    unit: inr
+    higher_is_better: true
+    notes: Recent orders still in transit are not realized yet, so the last ~7 days look low.
+
+  aov:
+    label: Average order value
+    description: Net sales per order, over orders that were not fully cancelled.
+    source: sales
+    numerator: SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END)
+    denominator: COUNT(DISTINCT CASE WHEN s.cancelled_at IS NULL THEN s.order_id END)
+    unit: inr
+    higher_is_better: true
+
+  gross_margin_pct:
+    label: Gross margin %
+    description: >-
+      (Revenue excl. GST and shipping - product cost) / revenue excl. GST and shipping, on delivered
+      lines that were not refunded.
+    source: sales
+    numerator: >-
+      SUM(CASE WHEN s.delivered_at IS NOT NULL AND s.refunded_at IS NULL
+      THEN s.net_amount - s.tax_amount - s.shipping_fee - s.unit_cost * s.quantity END)
+    denominator: >-
+      SUM(CASE WHEN s.delivered_at IS NOT NULL AND s.refunded_at IS NULL
+      THEN s.net_amount - s.tax_amount - s.shipping_fee END)
+    unit: ratio
+    higher_is_better: true
+
+  avg_discount_pct:
+    label: Average discount
+    description: How far below list price (MRP) items sold, before coupons. 0.25 = 25% off.
+    source: sales
+    numerator: SUM((s.mrp - s.unit_price) * s.quantity)
+    denominator: SUM(s.mrp * s.quantity)
+    unit: ratio
+
+  new_customer_order_share:
+    label: Orders from new customers
+    description: Share of orders that were the customer's first ever order.
+    source: sales
+    numerator: COUNT(DISTINCT CASE WHEN s.is_first_order THEN s.order_id END)
+    denominator: COUNT(DISTINCT s.order_id)
+    unit: ratio
+
+  # ------------------------------------------------------------------ fulfilment and returns
+  cancellation_rate:
+    label: Cancellation rate
+    description: Share of order lines cancelled before shipping.
+    source: sales
+    numerator: COUNT(*) FILTER (WHERE s.cancelled_at IS NOT NULL)
+    denominator: COUNT(*)
+    unit: ratio
+    higher_is_better: false
+
+  rto_rate:
+    label: RTO rate
+    description: Share of shipped lines that came back undelivered (return to origin), mostly COD refusals.
+    source: sales
+    numerator: COUNT(*) FILTER (WHERE s.rto_at IS NOT NULL)
+    denominator: COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL)
+    unit: ratio
+    higher_is_better: false
+
+  return_rate:
+    label: Return rate
+    description: Share of delivered lines the customer asked to return (refund, store credit or exchange).
+    source: sales
+    numerator: COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL)
+    denominator: COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL)
+    unit: ratio
+    higher_is_better: false
+
+  late_delivery_rate:
+    label: Late deliveries
+    description: Share of delivered lines that arrived after the promised date.
+    source: sales
+    numerator: COUNT(*) FILTER (WHERE CAST(s.delivered_at AS DATE) > CAST(s.promised_delivery_date AS DATE))
+    denominator: COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL)
+    unit: ratio
+    higher_is_better: false
+
+  avg_delivery_days:
+    label: Average delivery time
+    description: Days from order to delivery, for delivered lines.
+    source: sales
+    numerator: SUM(date_diff('hour', s.placed_at, s.delivered_at)) / 24.0
+    denominator: COUNT(s.delivered_at)
+    unit: days
+    higher_is_better: false
+
+  # ------------------------------------------------------------------ traffic and conversion
+  sessions:
+    label: Sessions
+    description: Visits to the website or app.
+    source: sessions
+    numerator: COUNT(DISTINCT c.session_id)
+    unit: count
+    higher_is_better: true
+
+  conversion_rate:
+    label: Conversion rate
+    description: Share of visits that ended in a purchase.
+    source: sessions
+    numerator: COUNT(DISTINCT CASE WHEN c.event_type = 'purchase' THEN c.session_id END)
+    denominator: COUNT(DISTINCT c.session_id)
+    unit: ratio
+    higher_is_better: true
+
+  ctr:
+    label: Click-through rate
+    description: Share of products shown in a list that were clicked.
+    source: impressions
+    numerator: COUNT(*) FILTER (WHERE i.clicked)
+    denominator: COUNT(*)
+    unit: ratio
+    higher_is_better: true
+
+  # ------------------------------------------------------------------ marketing
+  marketing_spend:
+    label: Marketing spend
+    description: Money spent on paid media, affiliates and CRM messages.
+    source: marketing
+    numerator: SUM(m.spend)
+    unit: inr
+
+  platform_roas:
+    label: Platform-reported ROAS
+    description: Revenue the ad platforms claim per Rs spent. Platforms over-report; compare with roas_last_click.
+    source: marketing
+    numerator: SUM(m.platform_revenue)
+    denominator: SUM(m.spend)
+    unit: ratio
+    higher_is_better: true
+
+  cpc:
+    label: Cost per click
+    description: Spend per ad click.
+    source: marketing
+    numerator: SUM(m.spend)
+    denominator: SUM(m.clicks)
+    unit: inr
+    higher_is_better: false
+
+  # ------------------------------------------------------------------ service and quality
+  support_tickets:
+    label: Support tickets
+    description: Distinct support tickets opened (a ticket can have several contacts).
+    source: support
+    numerator: COUNT(DISTINCT sc.ticket_id)
+    unit: count
+    higher_is_better: false
+
+  avg_csat:
+    label: Customer satisfaction (CSAT)
+    description: Average satisfaction score (1-5) of contacts that were rated.
+    source: support
+    numerator: SUM(sc.csat)
+    denominator: COUNT(sc.csat)
+    unit: rating
+    higher_is_better: true
+
+  avg_first_response_minutes:
+    label: First response time
+    description: Average minutes until an agent first replied.
+    source: support
+    numerator: SUM(sc.first_response_minutes)
+    denominator: COUNT(sc.first_response_minutes)
+    unit: minutes
+    higher_is_better: false
+
+  avg_rating:
+    label: Average product rating
+    description: Average stars (1-5) of published reviews.
+    source: reviews
+    numerator: SUM(r.rating)
+    denominator: COUNT(r.rating)
+    unit: rating
+    higher_is_better: true
+
+  negative_review_share:
+    label: Negative reviews
+    description: Share of published reviews with negative sentiment.
+    source: reviews
+    numerator: COUNT(*) FILTER (WHERE r.sentiment = 'Negative')
+    denominator: COUNT(*)
+    unit: ratio
+    higher_is_better: false
+
+  lost_sales_units:
+    label: Lost sales (units)
+    description: Units customers wanted (added to cart) that could not be sold because the size was out of stock.
+    source: stock
+    numerator: SUM(ih.lost_sales_units)
+    unit: count
+    higher_is_better: false
+
+# Metrics that need more than one source or a per-customer step: full reference SQL.
+custom_metrics:
+  roas_last_click:
+    label: ROAS (last-click, shop-measured)
+    description: >-
+      Revenue the shop credits to each channel under last-click attribution, per Rs spent.
+      Use this, not platform_roas, to judge channels.
+    unit: ratio
+    sql: |
+      WITH revenue AS (
+        SELECT c.channel, SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue
+        FROM marketing_attribution a JOIN campaigns c ON c.campaign_id = a.campaign_id
+        GROUP BY 1),
+      spend AS (
+        SELECT c.channel, SUM(m.spend) AS spend
+        FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id
+        GROUP BY 1)
+      SELECT s.channel, r.attributed_revenue, s.spend, r.attributed_revenue / NULLIF(s.spend, 0) AS roas
+      FROM spend s LEFT JOIN revenue r USING (channel)
+      ORDER BY roas DESC
+
+  repeat_purchase_rate:
+    label: Repeat purchase rate
+    description: Share of customers with at least one order who ordered again.
+    unit: ratio
+    sql: |
+      WITH per_customer AS (
+        SELECT customer_id, COUNT(DISTINCT order_id) AS orders
+        FROM sales WHERE line_type = 'Sale' GROUP BY 1)
+      SELECT AVG(CASE WHEN orders >= 2 THEN 1.0 ELSE 0 END) AS repeat_purchase_rate FROM per_customer
+
+  cart_abandonment_rate:
+    label: Cart abandonment rate
+    description: Share of visits with an add-to-cart that did not end in a purchase.
+    unit: ratio
+    sql: |
+      WITH visits AS (
+        SELECT session_id,
+               MAX(CASE WHEN event_type = 'add_to_cart' THEN 1 ELSE 0 END) AS carted,
+               MAX(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) AS bought
+        FROM clickstream GROUP BY 1)
+      SELECT 1 - SUM(bought) * 1.0 / NULLIF(COUNT(*), 0) AS cart_abandonment_rate
+      FROM visits WHERE carted = 1
+
+  stockout_share:
+    label: SKUs out of stock now
+    description: Share of active products' sizes (SKUs) with nothing in stock today.
+    unit: ratio
+    sql: |
+      SELECT AVG(CASE WHEN il.on_hand_qty <= 0 THEN 1.0 ELSE 0 END) AS stockout_share
+      FROM inventory_live il JOIN product_master p ON p.product_id = il.product_id
+      WHERE p.is_active
+
+  customer_acquisition_cost:
+    label: Customer acquisition cost (CAC)
+    description: Paid marketing spend per new customer (first order), by month.
+    unit: inr
+    sql: |
+      WITH spend AS (
+        SELECT date_trunc('month', date_hour) AS month, SUM(spend) AS spend
+        FROM marketing_spend GROUP BY 1),
+      new_customers AS (
+        SELECT date_trunc('month', placed_at) AS month, COUNT(DISTINCT customer_id) AS new_customers
+        FROM sales WHERE line_type = 'Sale' AND is_first_order GROUP BY 1)
+      SELECT s.month, s.spend, n.new_customers, s.spend / NULLIF(n.new_customers, 0) AS cac
+      FROM spend s LEFT JOIN new_customers n USING (month)
+      ORDER BY s.month
