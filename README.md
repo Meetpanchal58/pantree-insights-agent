@@ -8,9 +8,8 @@ Data: 22 months of shop history (catalogue, customers, browsing, orders, returns
 support) from my [ecommerce-simulator](https://github.com/Meetpanchal58/ecommerce-simulator), refreshed
 nightly. Sister project: [pantree-recommendation-system](https://github.com/Meetpanchal58/pantree-recommendation-system).
 
-> **Status: step 4 of 5 done.** The full app runs locally: sign-in, chats and projects, live agent
-> activity, charts, exports and memory. Evals and deployment on Google Cloud Run come next
-> (see [Roadmap](#roadmap)).
+> **Status: complete.** The app runs locally and is ready for Google Cloud Run
+> ([deploy guide](#deploy-on-google-cloud-run)); it is scored on 44 evaluation questions ([results](#evaluation)).
 
 ## The app
 
