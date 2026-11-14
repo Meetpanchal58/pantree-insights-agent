@@ -108,3 +108,14 @@ def test_raw_rows_through_cte_still_blocked():
 def test_window_function_is_not_aggregation():
     sql = "SELECT customer_id, SUM(net_amount) OVER (PARTITION BY customer_id) AS total FROM sales"
     assert not check_sql(sql).ok
+
+
+def test_dates_are_not_number_claims():
+    frame = pd.DataFrame({"event": ["Diwali 2025"], "orders": [1423]})
+    text = "Diwali 2025 ran October 15–21 (from 2025-10-15) and 3 Nov - 8 Nov 2026 had 1,423 orders."
+    assert unsupported_numbers(text, frame) == []
+
+
+def test_month_year_is_a_date():
+    frame = pd.DataFrame({"m": [10], "revenue": [9054000.0]})
+    assert unsupported_numbers("October 2026 revenue reached Rs 90.54 lakh, on the 1st-14th of November.", frame) == []
