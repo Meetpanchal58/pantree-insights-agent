@@ -26,3 +26,6 @@ memory/index/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Downloaded models (embeddings)
+.cache/

@@ -159,6 +159,17 @@ class Examples(BaseModel):
         return self
 
 
+# ----------------------------------------------------------------------------- glossary.yaml
+class Glossary(BaseModel):
+    value_aliases: dict[str, list[str]] = {}     # stored value -> other names people use
+    terms: dict[str, str] = {}                   # business word -> meaning
+
+    def terms_in(self, text: str) -> dict[str, str]:
+        """Glossary terms mentioned in a question (whole words, any case)."""
+        return {term: meaning for term, meaning in self.terms.items()
+                if re.search(rf"(?<![\w-]){re.escape(term)}(?![\w-])", text, re.I)}
+
+
 # ----------------------------------------------------------------------------- loading
 def _read(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -177,6 +188,11 @@ def load_metrics(folder: Path | None = None) -> Metrics:
 @lru_cache
 def load_examples(folder: Path | None = None) -> Examples:
     return Examples.model_validate(_read((folder or get_settings().semantic_dir) / "examples.yaml"))
+
+
+@lru_cache
+def load_glossary(folder: Path | None = None) -> Glossary:
+    return Glossary.model_validate(_read((folder or get_settings().semantic_dir) / "glossary.yaml"))
 
 
 def tables_in(sql: str) -> set[str]:

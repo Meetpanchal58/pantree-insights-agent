@@ -1,0 +1,57 @@
+# Words people use for things in the data.
+#
+# value_aliases: other names for values stored in the data; they are added to the value index so
+#   "cash on delivery" finds payment_method = 'COD'.
+# terms: business words; when a question uses one, its meaning is added to the agent's context.
+
+value_aliases:
+  COD: [cash on delivery, pay on delivery]
+  UPI: [gpay, phonepe, paytm upi]
+  Net Banking: [netbanking, internet banking]
+  Wallet: [paytm wallet, mobile wallet]
+  Returned to Origin: [rto, return to origin, refused delivery]
+  Undelivered: [failed delivery, delivery failed]
+  Cancelled: [cancellations, canceled]
+  Refunded: [refunds, money back]
+  Exchanged: [exchange, size exchange]
+  Footwear: [shoes, sneakers, sandals, slippers]
+  Apparel: [clothes, clothing, garments]
+  Accessories: [bags, wallets, watches, belts, jewellery]
+  Meta: [facebook ads, fb ads, meta ads]
+  Google Search: [google ads, search ads, adwords]
+  Instagram: [insta, instagram ads]
+  Affiliate Network: [affiliates, affiliate marketing]
+  Paid Social: [social media ads, social ads]
+  Paid Search: [sem, search marketing]
+  CRM: [email marketing, push notifications, retention marketing]
+  Android App: [android]
+  iOS App: [iphone, ios]
+  Mobile Web: [mobile site, msite]
+  Desktop Web: [desktop, website on laptop]
+  organic_search: [seo, organic, google organic]
+  paid_social: [social ads traffic]
+  Tier 1: [metro, metros, big cities]
+  Tier 3: [small towns, smaller cities]
+  Size Issue: [wrong size, sizing problem]
+  Fit Issue: [bad fit, does not fit]
+  Out of Stock: [stockout, stock out, sold out]
+  Prime: [prime members, loyalty members, paid members]
+
+terms:
+  GMV: Gross merchandise value = gross_sales (everything ordered at selling price, before coupons and returns).
+  AOV: Average order value (metric aov).
+  RTO: Return to origin - a shipped parcel that came back undelivered, mostly COD refusals (metric rto_rate).
+  COD: Cash on delivery (sales.payment_method = 'COD'); everything else is prepaid.
+  prepaid: Any payment method other than COD.
+  ROAS: Return on ad spend. Use roas_last_click (shop-measured); platform_roas is what ad platforms claim.
+  CAC: Customer acquisition cost (metric customer_acquisition_cost).
+  CTR: Click-through rate on products shown in lists (metric ctr).
+  CSAT: Customer satisfaction score 1-5, only given when a ticket is resolved (metric avg_csat).
+  MRP: Maximum retail price = list price (mrp columns); discounts are measured against it.
+  sell-through: Units sold compared with stock available; use inventory_history (sold, closing_stock).
+  churn: A customer who has stopped ordering; no fixed definition in the data - state the window used (e.g. no order in 90 days).
+  repeat customer: A customer with more than one order (sales.is_first_order = false for later orders).
+  new customer: An order that was the customer's first (sales.is_first_order = true).
+  festive season: The Navratri, Diwali and Grand Festive Sale events (September to November; see sale_events).
+  sale event: A festival or sale in sale_events, live between start_date and end_date.
+  revenue: Unless the user says otherwise, realized revenue (delivered minus refunds).
