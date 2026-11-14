@@ -27,7 +27,7 @@ kpis:
   ctr:                {breakdowns: [surface], mature_after_days: 0}
   marketing_spend:    {breakdowns: [channel_group], mature_after_days: 0}
   platform_roas:      {breakdowns: [channel_group], mature_after_days: 1}
-  support_tickets:    {breakdowns: [issue_category], mature_after_days: 0}
+  support_tickets:    {breakdowns: [issue_category, channel], mature_after_days: 0}
   avg_csat:           {breakdowns: [channel], mature_after_days: 3}
   avg_rating:         {breakdowns: [category], mature_after_days: 0}
   lost_sales_units:   {breakdowns: [category], mature_after_days: 0}
