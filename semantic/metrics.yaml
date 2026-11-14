@@ -63,6 +63,20 @@ sources:
       issue_category: sc.issue_category
       resolution_status: sc.resolution_status
 
+  tickets:
+    description: >-
+      Support tickets, one row per ticket (a ticket can have several contacts on different days).
+      Dated by the first contact; channel and issue from the first contact, status from the last.
+    from: >-
+      (SELECT ticket_id, MIN(contact_at) AS opened_at,
+              arg_min(channel, contact_at) AS channel, arg_min(issue_category, contact_at) AS issue_category,
+              arg_max(resolution_status, contact_at) AS resolution_status, COUNT(*) AS contacts
+       FROM support_contacts GROUP BY ticket_id) tk
+    time_column: tk.opened_at
+    dimensions:
+      channel: tk.channel
+      issue_category: tk.issue_category
+
   reviews:
     description: Published product reviews.
     from: product_reviews r LEFT JOIN product_master p ON p.product_id = r.product_id
@@ -93,7 +107,7 @@ metrics:
 
   units_sold:
     label: Units sold
-    description: Units in orders that were not cancelled.
+    description: Units ordered and not cancelled (includes units later returned or not delivered).
     source: sales
     numerator: SUM(CASE WHEN s.cancelled_at IS NULL THEN s.quantity ELSE 0 END)
     unit: count
@@ -124,7 +138,10 @@ metrics:
     numerator: SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END)
     unit: inr
     higher_is_better: true
-    notes: Recent orders still in transit are not realized yet, so the last ~7 days look low.
+    notes: >-
+      Recent orders are still in transit, so the last ~7 days look low; returns requested but not yet
+      refunded still count until the refund is made. Refunds after a return exclude the shipping fee
+      (the shop keeps it); refunds for prepaid cancellations and failed deliveries are in full.
 
   aov:
     label: Average order value
@@ -149,6 +166,9 @@ metrics:
       THEN s.net_amount - s.tax_amount - s.shipping_fee END)
     unit: ratio
     higher_is_better: true
+    notes: >-
+      Product margin only: excludes the cost of replacement items sent for exchanges (~3% of delivered
+      lines), shipping costs, affiliate commissions and marketing.
 
   avg_discount_pct:
     label: Average discount
@@ -184,6 +204,7 @@ metrics:
     denominator: COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL)
     unit: ratio
     higher_is_better: false
+    notes: An RTO is recorded 4-8 days after the planned delivery, so orders from the last ~3 weeks look better than they are.
 
   return_rate:
     label: Return rate
@@ -193,6 +214,7 @@ metrics:
     denominator: COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL)
     unit: ratio
     higher_is_better: false
+    notes: Customers have 7 days after delivery to ask for a return, so orders from the last ~3 weeks look better than they are.
 
   late_delivery_rate:
     label: Late deliveries
@@ -249,39 +271,55 @@ metrics:
 
   platform_roas:
     label: Platform-reported ROAS
-    description: Revenue the ad platforms claim per Rs spent. Platforms over-report; compare with roas_last_click.
+    description: >-
+      Revenue the ad platforms and affiliate networks claim per Rs spent (CRM has no platform reporting,
+      so it is excluded). Platforms over-report; compare with roas_last_click.
     source: marketing
-    numerator: SUM(m.platform_revenue)
-    denominator: SUM(m.spend)
+    numerator: SUM(m.platform_revenue) FILTER (WHERE cp.channel_group <> 'CRM')
+    denominator: SUM(m.spend) FILTER (WHERE cp.channel_group <> 'CRM')
     unit: ratio
     higher_is_better: true
 
   cpc:
     label: Cost per click
-    description: Spend per ad click.
+    description: >-
+      Paid media spend per ad click (paid search, paid social, display). Affiliates are paid mostly per sale
+      and CRM clicks are message clicks, so both are excluded.
     source: marketing
-    numerator: SUM(m.spend)
-    denominator: SUM(m.clicks)
+    numerator: SUM(m.spend) FILTER (WHERE cp.channel_group IN ('Paid Search', 'Paid Social', 'Display'))
+    denominator: SUM(m.clicks) FILTER (WHERE cp.channel_group IN ('Paid Search', 'Paid Social', 'Display'))
     unit: inr
     higher_is_better: false
 
   # ------------------------------------------------------------------ service and quality
   support_tickets:
     label: Support tickets
-    description: Distinct support tickets opened (a ticket can have several contacts).
-    source: support
-    numerator: COUNT(DISTINCT sc.ticket_id)
+    description: Support tickets opened, dated by their first contact.
+    source: tickets
+    numerator: COUNT(*)
     unit: count
     higher_is_better: false
 
+  ticket_resolution_rate:
+    label: Tickets resolved
+    description: Share of tickets resolved so far (the rest are pending or escalated).
+    source: tickets
+    numerator: COUNT(*) FILTER (WHERE tk.resolution_status = 'Resolved')
+    denominator: COUNT(*)
+    unit: ratio
+    higher_is_better: true
+
   avg_csat:
     label: Customer satisfaction (CSAT)
-    description: Average satisfaction score (1-5) of contacts that were rated.
+    description: Average satisfaction score (1-5) given when a ticket is resolved.
     source: support
     numerator: SUM(sc.csat)
     denominator: COUNT(sc.csat)
     unit: rating
     higher_is_better: true
+    notes: >-
+      Only resolved tickets are rated, so CSAT says nothing about pending or escalated tickets and
+      looks better than overall satisfaction; report it together with ticket_resolution_rate.
 
   avg_first_response_minutes:
     label: First response time
@@ -291,6 +329,7 @@ metrics:
     denominator: COUNT(sc.first_response_minutes)
     unit: minutes
     higher_is_better: false
+    notes: Chat is answered in minutes, phone and email in about an hour; compare channels separately.
 
   avg_rating:
     label: Average product rating
@@ -323,8 +362,10 @@ custom_metrics:
   roas_last_click:
     label: ROAS (last-click, shop-measured)
     description: >-
-      Revenue the shop credits to each channel under last-click attribution, per Rs spent.
-      Use this, not platform_roas, to judge channels.
+      Booked order revenue the shop credits to each channel under last-click attribution, per Rs spent.
+      Use this, not platform_roas, to judge channels. order_revenue is the net amount when the order was
+      placed (later cancellations and returns are not deducted). Orders with no campaign touch
+      (Direct/Organic) are not credited to any channel.
     unit: ratio
     sql: |
       WITH revenue AS (
@@ -341,7 +382,9 @@ custom_metrics:
 
   repeat_purchase_rate:
     label: Repeat purchase rate
-    description: Share of customers with at least one order who ordered again.
+    description: >-
+      Share of customers with at least one order who ordered again. Customers who first bought recently
+      have had less time to come back; for a fair comparison use a fixed window (examples: h08).
     unit: ratio
     sql: |
       WITH per_customer AS (
@@ -372,13 +415,17 @@ custom_metrics:
       WHERE p.is_active
 
   customer_acquisition_cost:
-    label: Customer acquisition cost (CAC)
-    description: Paid marketing spend per new customer (first order), by month.
+    label: Customer acquisition cost (CAC, blended)
+    description: >-
+      Paid media and affiliate spend per new customer (first order from any channel), by month.
+      CRM spend is excluded: it targets existing customers.
     unit: inr
     sql: |
       WITH spend AS (
-        SELECT date_trunc('month', date_hour) AS month, SUM(spend) AS spend
-        FROM marketing_spend GROUP BY 1),
+        SELECT date_trunc('month', m.date_hour) AS month, SUM(m.spend) AS spend
+        FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id
+        WHERE c.channel_group <> 'CRM'
+        GROUP BY 1),
       new_customers AS (
         SELECT date_trunc('month', placed_at) AS month, COUNT(DISTINCT customer_id) AS new_customers
         FROM sales WHERE line_type = 'Sale' AND is_first_order GROUP BY 1)
