@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+.cache
+data
+tests
+evals/reports
+memory/kpis/daily_kpis.parquet
+memory/kpis/latest_pulse.json
+memory/index
+__pycache__
+*.pyc
+.env
+.env.*
+HANDOFF.md
