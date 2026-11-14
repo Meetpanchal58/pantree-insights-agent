@@ -60,6 +60,22 @@ def results_match(gold: pd.DataFrame, agent: pd.DataFrame) -> bool:
     return all(any(same(g, a) for a in agent_cols) for g in gold_cols)
 
 
+def key_metric_match(gold: pd.DataFrame, agent: pd.DataFrame) -> bool:
+    """Lenient: the gold answer's main metric (first non-volume numeric column) is in the agent's result.
+    Extra rows (e.g. top 20 instead of top 10), extra or missing side columns are allowed."""
+    from pantree_insights.charts import main_metric
+
+    numeric = [c for c in gold.columns if pd.api.types.is_numeric_dtype(gold[c]) and gold[c].dtype != bool]
+    key = main_metric(numeric)
+    if key is None:
+        return gold.astype(str).values.tolist() == agent.astype(str).values.tolist()
+    wanted = [float(v) for v in gold[key].dropna()]
+    have = [float(v) for c in agent.columns if pd.api.types.is_numeric_dtype(agent[c]) and agent[c].dtype != bool
+            for v in agent[c].dropna()]
+    close = lambda x, y: abs(x - y) <= 0.01 * max(abs(x), abs(y), 1e-9) or abs(x - y) < 1e-6   # noqa: E731
+    return bool(wanted) and all(any(close(w, h) for h in have) for w in wanted)
+
+
 def run(items: list[dict], dry_run: bool) -> list[dict]:
     con = connect()
     agent = None
@@ -85,15 +101,16 @@ def run(items: list[dict], dry_run: bool) -> list[dict]:
                    cost=(final.get("cost") or {}).get("usd", 0.0), attempts=final.get("attempts"),
                    sql=final.get("sql"), warnings=final.get("warnings", []))
         if item["expect"] == "clarify":
-            row["passed"] = final["type"] == "clarify"
+            row["passed"] = row["key_metric_ok"] = final["type"] == "clarify"
         elif item["expect"] == "decline":
-            row["passed"] = final.get("status") == "declined"
+            row["passed"] = row["key_metric_ok"] = final.get("status") == "declined"
         else:
-            ok = final.get("status") == "done" and final.get("result") is not None
+            ok = lenient = final.get("status") == "done" and final.get("result") is not None
             if ok and gold is not None:
                 res = final["result"]
-                ok = results_match(gold, pd.DataFrame(res["data"], columns=res["columns"]))
-            row["passed"] = bool(ok)
+                frame = pd.DataFrame(res["data"], columns=res["columns"])
+                ok, lenient = results_match(gold, frame), key_metric_match(gold, frame)
+            row["passed"], row["key_metric_ok"] = bool(ok), bool(lenient)
         rows.append(row)
         print(f"{'PASS' if row['passed'] else 'FAIL'} {row['id']:4s} {row['seconds']:5.1f}s ${row['cost']:.3f} "
               f"{item['question'][:70]}", flush=True)
@@ -105,7 +122,10 @@ def summary(rows: list[dict]) -> str:
     settings = get_settings()
     lines = [f"# Eval {datetime.now():%Y-%m-%d %H:%M} ({settings.data_size} shop, {settings.model_main})", ""]
     total = frame["passed"].mean()
-    lines.append(f"**Overall: {frame['passed'].sum()}/{len(frame)} passed ({total:.0%})** · "
+    if "key_metric_ok" in frame:
+        lines.append(f"**Main number correct: {frame['key_metric_ok'].sum()}/{len(frame)} "
+                     f"({frame['key_metric_ok'].mean():.0%})** (lenient: extra rows/columns allowed)  ")
+    lines.append(f"**Exact result match: {frame['passed'].sum()}/{len(frame)} ({total:.0%})** · "
                  f"cost ${frame['cost'].sum():.2f} · median {frame['seconds'].median():.0f}s per question\n")
     for col in ("expect", "difficulty"):
         lines.append(f"| {col} | passed | total | rate |\n|---|---|---|---|")
@@ -118,13 +138,39 @@ def summary(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def rescore(report: Path) -> None:
+    """Recompute both scores from a saved report (re-runs only the SQL, no LLM calls)."""
+    rows = json.loads(report.read_text())
+    gold_by_id = {i["id"]: i for i in load_questions()}
+    con = connect()
+    for row in rows:
+        item = gold_by_id[row["id"]]
+        if item["expect"] != "answer":
+            row["key_metric_ok"] = row["passed"]
+            continue
+        if row.get("status") != "done" or not row.get("sql") or not item.get("gold_sql"):
+            row["passed"] = row["key_metric_ok"] = False
+            continue
+        gold = run_query(con, check_sql(item["gold_sql"]).sql).frame
+        agent = run_query(con, row["sql"]).frame
+        row["passed"], row["key_metric_ok"] = results_match(gold, agent), key_metric_match(gold, agent)
+    report.write_text(json.dumps(rows, indent=1, default=str))
+    text = summary(rows)
+    report.with_suffix(".md").write_text(text + "\n")
+    print(text)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="only check that gold SQL runs (free)")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--ids", help="comma-separated ids")
     parser.add_argument("--yes", action="store_true", help="confirm real LLM calls")
+    parser.add_argument("--rescore", type=Path, help="recompute scores of a saved report (no LLM calls)")
     args = parser.parse_args()
+    if args.rescore:
+        rescore(args.rescore)
+        return
     items = load_questions()
     if args.ids:
         wanted = set(args.ids.split(","))
