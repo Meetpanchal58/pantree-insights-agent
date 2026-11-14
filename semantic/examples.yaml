@@ -1,0 +1,340 @@
+# Verified question -> SQL pairs. Used as few-shot examples (retrieved by similarity) and in evals.
+# Every query here passes the guardrails and runs on the shop (tests/test_data.py checks this).
+# Conventions they demonstrate:
+#   - sales metrics filter line_type = 'Sale'; "revenue" means realized revenue (metrics.yaml)
+#   - events are compared by their date window (start_date..end_date), because events overlap
+#   - ratios are computed as SUM / SUM over the period, never as an average of daily ratios
+
+examples:
+  # ------------------------------------------------------------------ easy
+  - id: e01
+    difficulty: easy
+    question: How many customers have signed up?
+    sql: SELECT COUNT(*) AS customers FROM customers
+    tags: [customers]
+
+  - id: e02
+    difficulty: easy
+    question: How many products are on sale right now?
+    sql: SELECT COUNT(*) AS active_products FROM product_master WHERE is_active
+    tags: [catalogue]
+
+  - id: e03
+    difficulty: easy
+    question: How many orders have been placed?
+    sql: SELECT COUNT(DISTINCT order_id) AS orders FROM sales WHERE line_type = 'Sale'
+    tags: [sales, orders]
+
+  - id: e04
+    difficulty: easy
+    question: Which payment methods are used most?
+    sql: |
+      SELECT payment_method, COUNT(DISTINCT order_id) AS orders
+      FROM sales WHERE line_type = 'Sale'
+      GROUP BY 1 ORDER BY orders DESC
+    tags: [sales, payments]
+
+  - id: e05
+    difficulty: easy
+    question: What share of customers are Prime members?
+    sql: SELECT AVG(CASE WHEN is_prime THEN 1.0 ELSE 0 END) AS prime_share, COUNT(*) AS customers FROM customers
+    tags: [customers, prime]
+
+  - id: e06
+    difficulty: easy
+    question: What is our total revenue so far?
+    sql: |
+      SELECT SUM(CASE WHEN delivered_at IS NOT NULL THEN net_amount - COALESCE(refund_amount, 0) ELSE 0 END)
+             AS realized_revenue
+      FROM sales WHERE line_type = 'Sale'
+    tags: [sales, revenue]
+    notes: '"Revenue" = realized revenue: delivered lines minus refunds.'
+
+  # ------------------------------------------------------------------ medium
+  - id: m01
+    difficulty: medium
+    question: What is the average order value?
+    sql: |
+      SELECT SUM(CASE WHEN cancelled_at IS NULL THEN net_amount ELSE 0 END)
+             / COUNT(DISTINCT CASE WHEN cancelled_at IS NULL THEN order_id END) AS aov
+      FROM sales WHERE line_type = 'Sale'
+    tags: [sales, aov]
+
+  - id: m02
+    difficulty: medium
+    question: Monthly realized revenue and orders over time
+    sql: |
+      SELECT date_trunc('month', placed_at) AS month,
+             COUNT(DISTINCT order_id) AS orders,
+             SUM(CASE WHEN delivered_at IS NOT NULL THEN net_amount - COALESCE(refund_amount, 0) ELSE 0 END)
+               AS realized_revenue
+      FROM sales WHERE line_type = 'Sale'
+      GROUP BY 1 ORDER BY 1
+    tags: [sales, revenue, trend]
+
+  - id: m03
+    difficulty: medium
+    question: What is realized revenue by product category?
+    sql: |
+      SELECT p.category,
+             SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END)
+               AS realized_revenue
+      FROM sales s JOIN product_master p ON p.product_id = s.product_id
+      WHERE s.line_type = 'Sale'
+      GROUP BY 1 ORDER BY realized_revenue DESC
+    tags: [sales, revenue, category]
+
+  - id: m04
+    difficulty: medium
+    question: What is the return rate by category?
+    sql: |
+      SELECT p.category,
+             COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) * 1.0
+               / COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS return_rate,
+             COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS delivered_lines
+      FROM sales s JOIN product_master p ON p.product_id = s.product_id
+      WHERE s.line_type = 'Sale'
+      GROUP BY 1 ORDER BY return_rate DESC
+    tags: [returns, category]
+
+  - id: m05
+    difficulty: medium
+    question: Which return reasons are most common?
+    sql: |
+      SELECT return_reason, COUNT(*) AS returned_lines,
+             COUNT(*) * 1.0 / SUM(COUNT(*)) OVER () AS share
+      FROM sales WHERE line_type = 'Sale' AND return_requested_at IS NOT NULL
+      GROUP BY 1 ORDER BY returned_lines DESC
+    tags: [returns]
+
+  - id: m06
+    difficulty: medium
+    question: How does the RTO rate compare between COD and prepaid orders?
+    sql: |
+      SELECT CASE WHEN payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type,
+             COUNT(*) FILTER (WHERE rto_at IS NOT NULL) * 1.0
+               / COUNT(*) FILTER (WHERE shipped_at IS NOT NULL) AS rto_rate,
+             COUNT(*) FILTER (WHERE shipped_at IS NOT NULL) AS shipped_lines
+      FROM sales WHERE line_type = 'Sale'
+      GROUP BY 1 ORDER BY rto_rate DESC
+    tags: [rto, payments]
+
+  - id: m07
+    difficulty: medium
+    question: What is the click-through rate by listing position?
+    sql: |
+      SELECT position, AVG(CASE WHEN clicked THEN 1.0 ELSE 0 END) AS ctr, COUNT(*) AS impressions
+      FROM impressions WHERE position <= 10
+      GROUP BY 1 ORDER BY 1
+    tags: [impressions, ctr]
+
+  - id: m08
+    difficulty: medium
+    question: Which SKUs of active products are out of stock right now?
+    sql: |
+      SELECT il.sku_id, p.product_name, p.category, il.inbound_qty
+      FROM inventory_live il JOIN product_master p ON p.product_id = il.product_id
+      WHERE il.on_hand_qty <= 0 AND p.is_active
+      ORDER BY p.category, p.product_name
+      LIMIT 100
+    tags: [inventory, stockout]
+
+  - id: m09
+    difficulty: medium
+    question: How much did we spend on each marketing channel?
+    sql: |
+      SELECT c.channel_group, c.channel, SUM(m.spend) AS spend
+      FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id
+      GROUP BY 1, 2 ORDER BY spend DESC
+    tags: [marketing, spend]
+
+  - id: m10
+    difficulty: medium
+    question: Which product categories get the worst reviews?
+    sql: |
+      SELECT p.category, AVG(r.rating) AS avg_rating,
+             AVG(CASE WHEN r.sentiment = 'Negative' THEN 1.0 ELSE 0 END) AS negative_share,
+             COUNT(*) AS reviews
+      FROM product_reviews r JOIN product_master p ON p.product_id = r.product_id
+      WHERE r.moderation_status = 'Published'
+      GROUP BY 1 ORDER BY avg_rating
+    tags: [reviews, category]
+
+  - id: m11
+    difficulty: medium
+    question: What do customers contact support about most, and how satisfied are they?
+    sql: |
+      SELECT issue_category, COUNT(DISTINCT ticket_id) AS tickets,
+             AVG(csat) AS avg_csat, AVG(first_response_minutes) AS avg_first_response_minutes
+      FROM support_contacts
+      GROUP BY 1 ORDER BY tickets DESC
+    tags: [support]
+
+  - id: m12
+    difficulty: medium
+    question: How much revenue comes from new versus repeat customers?
+    sql: |
+      SELECT CASE WHEN is_first_order THEN 'New' ELSE 'Repeat' END AS customer_type,
+             COUNT(DISTINCT order_id) AS orders,
+             SUM(CASE WHEN delivered_at IS NOT NULL THEN net_amount - COALESCE(refund_amount, 0) ELSE 0 END)
+               AS realized_revenue
+      FROM sales WHERE line_type = 'Sale'
+      GROUP BY 1
+    tags: [customers, revenue]
+
+  # ------------------------------------------------------------------ hard
+  - id: h01
+    difficulty: hard
+    question: What is the conversion rate (orders per visit) by device?
+    sql: |
+      SELECT device,
+             COUNT(DISTINCT CASE WHEN event_type = 'purchase' THEN session_id END) * 1.0
+               / COUNT(DISTINCT session_id) AS conversion_rate,
+             COUNT(DISTINCT session_id) AS sessions
+      FROM clickstream
+      GROUP BY 1 ORDER BY conversion_rate DESC
+    tags: [conversion, device]
+
+  - id: h02
+    difficulty: hard
+    question: How did Diwali 2026 do compared with Diwali 2025?
+    sql: |
+      SELECT e.name, e.start_date, e.end_date,
+             COUNT(DISTINCT s.order_id) AS orders,
+             SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END)
+               AS realized_revenue,
+             SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) AS net_sales
+      FROM sale_events e
+      JOIN sales s ON s.placed_at >= e.start_date AND s.placed_at < e.end_date + INTERVAL 1 DAY
+      WHERE e.name IN ('Diwali 2025', 'Diwali 2026') AND s.line_type = 'Sale'
+      GROUP BY 1, 2, 3 ORDER BY e.start_date
+    tags: [sale_events, revenue, comparison]
+    notes: >-
+      Compare events by their date window, not by sales.event_id (events overlap). Events of different
+      lengths need per-day figures for a fair comparison; very recent events still have undelivered orders.
+
+  - id: h03
+    difficulty: hard
+    question: How much did each sale event lift daily net sales compared with the two weeks before it?
+    sql: |
+      WITH daily AS (
+        SELECT CAST(placed_at AS DATE) AS day,
+               SUM(CASE WHEN cancelled_at IS NULL THEN net_amount ELSE 0 END) AS net_sales
+        FROM sales WHERE line_type = 'Sale' GROUP BY 1)
+      SELECT e.name,
+             AVG(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date AND e.end_date) AS event_daily,
+             AVG(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date - INTERVAL 14 DAY
+                                                  AND e.start_date - INTERVAL 1 DAY) AS before_daily,
+             event_daily / NULLIF(before_daily, 0) - 1 AS lift
+      FROM sale_events e JOIN daily d ON d.day BETWEEN e.start_date - INTERVAL 14 DAY AND e.end_date
+      WHERE e.end_date <= (SELECT MAX(placed_at) FROM sales)
+      GROUP BY e.name, e.start_date ORDER BY lift DESC
+      LIMIT 20
+    tags: [sale_events, lift]
+
+  - id: h04
+    difficulty: hard
+    question: Which channels bring the best return on ad spend, using our own attribution?
+    sql: |
+      WITH revenue AS (
+        SELECT c.channel, SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue
+        FROM marketing_attribution a JOIN campaigns c ON c.campaign_id = a.campaign_id
+        GROUP BY 1),
+      spend AS (
+        SELECT c.channel, SUM(m.spend) AS spend
+        FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id
+        GROUP BY 1)
+      SELECT s.channel, r.attributed_revenue, s.spend, r.attributed_revenue / NULLIF(s.spend, 0) AS roas
+      FROM spend s LEFT JOIN revenue r USING (channel)
+      ORDER BY roas DESC
+    tags: [marketing, roas, attribution]
+
+  - id: h05
+    difficulty: hard
+    question: Which campaigns get the most last-click credited revenue?
+    sql: |
+      SELECT a.campaign_id, c.campaign_name, a.channel_group,
+             SUM(a.credit_last_click * a.order_revenue) AS last_click_revenue
+      FROM marketing_attribution a JOIN campaigns c ON c.campaign_id = a.campaign_id
+      GROUP BY 1, 2, 3 ORDER BY last_click_revenue DESC
+      LIMIT 10
+    tags: [marketing, attribution]
+    notes: The inner join drops the Direct/Organic rows (no campaign), which are not campaigns.
+
+  - id: h06
+    difficulty: hard
+    question: Which couriers deliver late most often?
+    sql: |
+      SELECT courier,
+             AVG(CASE WHEN CAST(delivered_at AS DATE) > CAST(promised_delivery_date AS DATE) THEN 1.0 ELSE 0 END)
+               AS late_share,
+             COUNT(*) AS delivered_lines
+      FROM sales WHERE line_type = 'Sale' AND delivered_at IS NOT NULL
+      GROUP BY 1 ORDER BY late_share DESC
+    tags: [delivery, courier]
+
+  - id: h07
+    difficulty: hard
+    question: How do ad platforms' reported orders compare with orders we recorded, by channel?
+    sql: |
+      WITH platform AS (
+        SELECT c.channel, SUM(m.platform_conversions) AS platform_orders
+        FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id
+        WHERE c.channel_group IN ('Paid Search', 'Paid Social', 'Display')
+        GROUP BY 1),
+      shop AS (
+        SELECT c.channel, COUNT(DISTINCT s.order_id) AS shop_orders
+        FROM sales s JOIN campaigns c ON c.campaign_id = s.campaign_id
+        WHERE s.line_type = 'Sale'
+        GROUP BY 1)
+      SELECT p.channel, p.platform_orders, sh.shop_orders,
+             p.platform_orders * 1.0 / NULLIF(sh.shop_orders, 0) AS over_reporting
+      FROM platform p LEFT JOIN shop sh USING (channel)
+      ORDER BY over_reporting DESC
+    tags: [marketing, attribution, platforms]
+
+  - id: h08
+    difficulty: hard
+    question: What share of buyers order again within 90 days of their first order?
+    sql: |
+      WITH firsts AS (
+        SELECT customer_id, MIN(placed_at) AS first_at
+        FROM sales WHERE line_type = 'Sale' GROUP BY 1),
+      eligible AS (
+        SELECT f.customer_id, f.first_at FROM firsts f
+        WHERE f.first_at <= (SELECT MAX(placed_at) FROM sales) - INTERVAL 90 DAY)
+      SELECT AVG(CASE WHEN EXISTS (
+                 SELECT 1 FROM sales s
+                 WHERE s.customer_id = e.customer_id AND s.line_type = 'Sale'
+                   AND s.placed_at > e.first_at AND s.placed_at <= e.first_at + INTERVAL 90 DAY)
+               THEN 1.0 ELSE 0 END) AS repeat_within_90d,
+             COUNT(*) AS buyers
+      FROM eligible e
+    tags: [customers, retention]
+    notes: Only buyers whose first order is at least 90 days old can be judged.
+
+  - id: h09
+    difficulty: hard
+    question: Which product sizes lose the most sales to stock-outs?
+    sql: |
+      SELECT p.category, ps.size, SUM(ih.lost_sales_units) AS lost_units, SUM(ih.demand_units) AS demand_units,
+             SUM(ih.lost_sales_units) * 1.0 / NULLIF(SUM(ih.demand_units), 0) AS lost_share
+      FROM inventory_history ih
+      JOIN product_skus ps ON ps.sku_id = ih.sku_id
+      JOIN product_master p ON p.product_id = ih.product_id
+      GROUP BY 1, 2 HAVING SUM(ih.lost_sales_units) > 0
+      ORDER BY lost_units DESC
+      LIMIT 20
+    tags: [inventory, stockout, size]
+
+  - id: h10
+    difficulty: hard
+    question: Do customers who get the wrong size return more in footwear or apparel?
+    sql: |
+      SELECT p.category, s.size_fit,
+             COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) * 1.0 / COUNT(*) AS return_rate,
+             COUNT(*) AS delivered_lines
+      FROM sales s JOIN product_master p ON p.product_id = s.product_id
+      WHERE s.line_type = 'Sale' AND s.delivered_at IS NOT NULL AND p.category IN ('Footwear', 'Apparel')
+      GROUP BY 1, 2 ORDER BY 1, 2
+    tags: [returns, size, category]

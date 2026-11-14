@@ -1,0 +1,45 @@
+[project]
+name = "pantree-insights"
+version = "0.1.0"
+description = "AI data analyst for Pantree, a simulated Indian fashion shop: text -> SQL -> business insights."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=1.1",
+    "pandas>=2.2",
+    "pyarrow>=17",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "sqlglot>=25.0",
+    "huggingface_hub>=0.24",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+pantree-data = "pantree_insights.db:main"
+pantree-pulse = "pantree_insights.pulse:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pantree_insights"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["data: needs the downloaded simulator data (small size)"]
