@@ -243,12 +243,13 @@ function streamRun(runId, since, status) {
   es.onerror = () => { es.close(); if (S.busy) { toast("Connection lost. Reopen the chat to see the result."); S.busy = false; $(".send").disabled = false; } };
 }
 
+const clean = (o) => String(o).replace(/\s*\((recommended|default)\)\s*/gi, " ").trim();
 function clarifyCard(e) {
   const el = document.createElement("div"); el.className = "msg";
   const qs = e.questions || [];
   el.innerHTML = `<div class="clarify"><h4>A few quick questions before I write the query</h4>
     ${qs.map((q, i) => `<div class="q">${esc(q.question)}</div><div class="why">${esc(q.why || "")}</div>
-      <div class="chips" data-q="${i}">${q.options.map((o) => `<button class="chip ${o === q.default ? "selected" : ""}" data-opt="${esc(o)}">${esc(o)}${o === q.default ? '<span class="rec">recommended</span>' : ""}</button>`).join("")}</div>`).join("")}
+      <div class="chips" data-q="${i}">${q.options.map((o) => { const rec = clean(o) === clean(q.default); return `<button class="chip ${rec ? "selected" : ""}" data-opt="${esc(o)}">${esc(clean(o))}${rec ? '<span class="rec">recommended</span>' : ""}</button>`; }).join("")}</div>`).join("")}
     <div class="row" style="margin-top:14px"><button class="btn primary small" data-go>Continue</button>
     <button class="btn small" data-defaults>Use recommended</button></div></div>`;
   el.querySelectorAll(".chips").forEach((group) => group.addEventListener("click", (ev) => {
@@ -259,7 +260,7 @@ function clarifyCard(e) {
     const answers = {};
     qs.forEach((q, i) => {
       const sel = el.querySelector(`.chips[data-q="${i}"] .chip.selected`);
-      answers[q.question] = useDefaults || !sel ? q.default : sel.dataset.opt;
+      answers[q.question] = clean(useDefaults || !sel ? q.default : sel.dataset.opt);
     });
     el.querySelectorAll("button").forEach((b) => (b.disabled = true));
     const summary = Object.entries(answers).map(([k, v]) => `${k} → ${v}`).join("\n");
@@ -310,7 +311,7 @@ function renderSteps() {
   const ol = $("#steps"); if (!ol) return;
   ol.innerHTML = S.run.steps.map((s, i) => {
     const detail = stepDetail(s);
-    const open = s.status === "running" || ["plan", "write_sql"].includes(s.step) || s.problems;
+    const open = s.open ?? (s.status === "running" || ["retry", "failed", "warning", "needs_input"].includes(s.status));
     return `<li class="step ${s.status}"><span class="dot">${STATUS_ICON[s.status] ?? "·"}</span>
       <div class="step-head" data-action="toggle-step" data-i="${i}"><span class="step-name">${esc(STEP_LABELS[s.step] || s.step)}</span>
       <span class="step-time">${s.detail && s.detail.seconds !== undefined ? s.detail.seconds + "s" : s.status === "running" ? "…" : ""}</span></div>
@@ -321,7 +322,10 @@ function renderSteps() {
 function showRunInPanel(run) {
   newTimeline(run.question || $("#chat-title").textContent, false);
   for (const e of run.events || []) if (e.type === "step") onEvent(e, null);
+  S.run.restoring = true;
   showResult(run);
+  S.run.restoring = false;
+  $("#panel-body").scrollTop = 0;
 }
 
 function showResult(run) {
@@ -357,6 +361,7 @@ function showResult(run) {
     li.addEventListener("click", () => { $("#question").value = li.textContent; $("#question").focus(); });
   });
   drawChart(run.chart);
+  if (!S.run.restoring) requestAnimationFrame(() => box.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
 
 function drawChart(chart) {
@@ -368,7 +373,7 @@ function drawChart(chart) {
   area.innerHTML = `<div class="chart" id="chart"></div>`;
   const fig = chart.figure;
   const layout = Object.assign({}, fig.layout, {
-    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", autosize: true, height: 380,
+    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", autosize: true, height: Math.min((fig.layout && fig.layout.height) || 380, 900),
     font: { family: "Inter, system-ui, sans-serif", color: cssVar("--text"), size: 12 },
   });
   ["xaxis", "yaxis"].forEach((ax) => { layout[ax] = Object.assign({}, layout[ax], { gridcolor: cssVar("--border"), zerolinecolor: cssVar("--border") }); });
@@ -558,7 +563,11 @@ document.addEventListener("click", async (ev) => {
     case "example": $("#question").value = t.dataset.q; ask(t.dataset.q); $("#question").value = ""; break;
     case "replay": replayDemo(t.dataset.slug, t.textContent.replace(/^▶ Demo · [\d.]+s/, "").trim()); break;
     case "toggle-panel": $("#app").classList.toggle("panel-closed"); break;
-    case "toggle-step": { const det = t.parentElement.querySelector(".step-detail"); if (det) det.hidden = !det.hidden; break; }
+    case "toggle-step": {
+      const det = t.parentElement.querySelector(".step-detail");
+      if (det) { det.hidden = !det.hidden; if (S.run && S.run.steps[t.dataset.i]) S.run.steps[t.dataset.i].open = !det.hidden; }
+      break;
+    }
     case "show-memory": memoryDialog(); break;
     case "show-pulse": pulseDialog(); break;
     case "signin": showSignin(); break;
