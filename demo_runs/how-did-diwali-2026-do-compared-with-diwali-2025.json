@@ -1,0 +1,1224 @@
+{
+ "question": "How did Diwali 2026 do compared with Diwali 2025?",
+ "recorded_at": "2026-11-14T12:27:40",
+ "data_size": "full",
+ "data_as_of": "2026-11-14",
+ "seconds": 35.0,
+ "order": 1,
+ "events": [
+  {
+   "type": "step",
+   "step": "check_input",
+   "status": "started",
+   "detail": {},
+   "t": 0.01
+  },
+  {
+   "type": "step",
+   "step": "check_input",
+   "status": "done",
+   "detail": {
+    "seconds": 0.0
+   },
+   "t": 0.01
+  },
+  {
+   "type": "step",
+   "step": "retrieve",
+   "status": "started",
+   "detail": {},
+   "t": 0.01
+  },
+  {
+   "type": "step",
+   "step": "retrieve",
+   "status": "done",
+   "detail": {
+    "seconds": 0.14,
+    "tables": [
+     "sale_events",
+     "sales",
+     "product_master",
+     "campaigns",
+     "marketing_attribution",
+     "marketing_spend",
+     "support_contacts"
+    ],
+    "metrics": [
+     "avg_discount_pct",
+     "roas_last_click",
+     "ticket_resolution_rate",
+     "cart_abandonment_rate"
+    ],
+    "values": [
+     "Diwali 2026",
+     "Diwali 2025",
+     "GSEARCH_Event_All_Diwali2025",
+     "Do",
+     "META_Event_All_Diwali2025",
+     "PriceSaathi Compare"
+    ],
+    "examples": [
+     "How did Diwali 2026 do compared with Diwali 2025?",
+     "How much did each sale event lift daily net sales compared with the two weeks before it?",
+     "How do ad platforms' reported orders compare with orders we recorded, by channel?"
+    ]
+   },
+   "t": 0.14
+  },
+  {
+   "type": "step",
+   "step": "plan",
+   "status": "started",
+   "detail": {},
+   "t": 0.15
+  },
+  {
+   "type": "step",
+   "step": "plan",
+   "status": "done",
+   "detail": {
+    "seconds": 7.0,
+    "decision": "proceed",
+    "plan": "Question: Compare shop-wide performance during the Diwali 2026 and Diwali 2025 sale-event windows.\nMetrics: Orders = COUNT(DISTINCT sales.order_id), Realized revenue = SUM(CASE WHEN delivered_at IS NOT NULL THEN net_amount - COALESCE(refund_amount, 0) ELSE 0 END), Net sales = SUM(CASE WHEN cancelled_at IS NULL THEN net_amount ELSE 0 END), Orders, realized revenue and net sales per day = each event total divided by its inclusive event-window length\nBreakdowns: sale event\nFilters: sale_events.name IN ('Diwali 2025', 'Diwali 2026'); sales.line_type = 'Sale'\nTime window: 2025-01-01 to 2026-11-14 inclusive; within this range, use each event's start_date through end_date inclusive. Exact event dates are not supplied and must be retrieved from sale_events.\nComparison: Diwali 2026 versus Diwali 2025, including per-day figures for differing event lengths.\nExpected result: One row per event, with event name, start and end dates, event days, orders, realized revenue, net sales and their per-day averages.\nAssumptions: Include all shop sales placed during each event window, not just lines linked to its event_id; events may overlap.; Recent realized revenue may be incomplete because delivery and returns are still pending."
+   },
+   "t": 7.15
+  },
+  {
+   "type": "step",
+   "step": "write_sql",
+   "status": "started",
+   "detail": {},
+   "t": 7.15
+  },
+  {
+   "type": "step",
+   "step": "write_sql",
+   "status": "done",
+   "detail": {
+    "seconds": 9.67,
+    "attempt": 1,
+    "sql": "WITH event_totals AS (\n  SELECT e.event_id, e.name AS event_name, e.start_date, e.end_date,\n         date_diff('day', CAST(e.start_date AS DATE), CAST(e.end_date AS DATE)) + 1 AS event_days,\n         COUNT(DISTINCT s.order_id) AS orders,\n         COALESCE(SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END), 0) AS realized_revenue,\n         COALESCE(SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END), 0) AS net_sales\n  FROM sale_events e\n  LEFT JOIN sales s ON s.placed_at >= CAST(CAST(e.start_date AS DATE) AS TIMESTAMP)\n    AND s.placed_at < CAST(CAST(e.end_date AS DATE) AS TIMESTAMP) + INTERVAL 1 DAY\n    AND s.placed_at >= TIMESTAMP '2025-01-01'\n    AND s.placed_at < TIMESTAMP '2026-11-15'\n    AND s.line_type = 'Sale'\n  WHERE e.name IN ('Diwali 2025', 'Diwali 2026')\n  GROUP BY e.event_id, e.name, e.start_date, e.end_date\n)\nSELECT event_name, start_date, end_date, event_days, orders, realized_revenue, net_sales,\n       orders * 1.0 / NULLIF(event_days, 0) AS orders_per_day,\n       realized_revenue / NULLIF(event_days, 0) AS realized_revenue_per_day,\n       net_sales / NULLIF(event_days, 0) AS net_sales_per_day\nFROM event_totals\nORDER BY start_date",
+    "explanation": "Compares shop-wide sales placed in each event window, including per-day figures based on the full inclusive event length. Recent realized revenue may be incomplete while deliveries and returns are pending."
+   },
+   "t": 16.82
+  },
+  {
+   "type": "step",
+   "step": "check_sql",
+   "status": "started",
+   "detail": {},
+   "t": 16.82
+  },
+  {
+   "type": "step",
+   "step": "check_sql",
+   "status": "done",
+   "detail": {
+    "seconds": 0.04,
+    "tables": [
+     "sale_events",
+     "sales"
+    ]
+   },
+   "t": 16.86
+  },
+  {
+   "type": "step",
+   "step": "run_query",
+   "status": "started",
+   "detail": {},
+   "t": 16.86
+  },
+  {
+   "type": "step",
+   "step": "run_query",
+   "status": "done",
+   "detail": {
+    "seconds": 0.05,
+    "rows": 2,
+    "columns": [
+     "event_name",
+     "start_date",
+     "end_date",
+     "event_days",
+     "orders",
+     "realized_revenue",
+     "net_sales",
+     "orders_per_day",
+     "realized_revenue_per_day",
+     "net_sales_per_day"
+    ],
+    "query_seconds": 0.05,
+    "truncated": false
+   },
+   "t": 16.92
+  },
+  {
+   "type": "step",
+   "step": "validate",
+   "status": "started",
+   "detail": {},
+   "t": 16.92
+  },
+  {
+   "type": "step",
+   "step": "validate",
+   "status": "done",
+   "detail": {
+    "seconds": 1.64,
+    "ok": true
+   },
+   "t": 18.55
+  },
+  {
+   "type": "step",
+   "step": "analyse",
+   "status": "started",
+   "detail": {},
+   "t": 18.57
+  },
+  {
+   "type": "step",
+   "step": "analyse",
+   "status": "done",
+   "detail": {
+    "seconds": 16.23,
+    "headline": "Diwali 2026 generated Rs 29.36 lakh in realized revenue, 41.8% more than Diwali 2025 despite a shorter event.",
+    "number_check": "passed",
+    "rewritten": true,
+    "unverified": []
+   },
+   "t": 34.79
+  },
+  {
+   "type": "step",
+   "step": "chart",
+   "status": "started",
+   "detail": {},
+   "t": 34.79
+  },
+  {
+   "type": "step",
+   "step": "chart",
+   "status": "done",
+   "detail": {
+    "seconds": 0.17,
+    "kind": "bar"
+   },
+   "t": 34.97
+  },
+  {
+   "type": "step",
+   "step": "remember",
+   "status": "started",
+   "detail": {},
+   "t": 34.97
+  },
+  {
+   "type": "step",
+   "step": "remember",
+   "status": "done",
+   "detail": {
+    "seconds": 0.0,
+    "facts": 2,
+    "gaps_closed": 0
+   },
+   "t": 34.97
+  },
+  {
+   "type": "final",
+   "run_id": "9a39da699e26",
+   "status": "done",
+   "message": null,
+   "question": "How did Diwali 2026 do compared with Diwali 2025?",
+   "plan": {
+    "decision": "proceed",
+    "decline_reason": null,
+    "clarifying_questions": [],
+    "restated_question": "Compare shop-wide performance during the Diwali 2026 and Diwali 2025 sale-event windows.",
+    "metrics": [
+     "Orders = COUNT(DISTINCT sales.order_id)",
+     "Realized revenue = SUM(CASE WHEN delivered_at IS NOT NULL THEN net_amount - COALESCE(refund_amount, 0) ELSE 0 END)",
+     "Net sales = SUM(CASE WHEN cancelled_at IS NULL THEN net_amount ELSE 0 END)",
+     "Orders, realized revenue and net sales per day = each event total divided by its inclusive event-window length"
+    ],
+    "breakdowns": [
+     "sale event"
+    ],
+    "filters": [
+     "sale_events.name IN ('Diwali 2025', 'Diwali 2026')",
+     "sales.line_type = 'Sale'"
+    ],
+    "time_window": "2025-01-01 to 2026-11-14 inclusive; within this range, use each event's start_date through end_date inclusive. Exact event dates are not supplied and must be retrieved from sale_events.",
+    "comparison": "Diwali 2026 versus Diwali 2025, including per-day figures for differing event lengths.",
+    "output_shape": "One row per event, with event name, start and end dates, event days, orders, realized revenue, net sales and their per-day averages.",
+    "assumptions": [
+     "Include all shop sales placed during each event window, not just lines linked to its event_id; events may overlap.",
+     "Recent realized revenue may be incomplete because delivery and returns are still pending."
+    ]
+   },
+   "sql": "WITH event_totals AS (\n  SELECT\n    e.event_id,\n    e.name AS event_name,\n    e.start_date,\n    e.end_date,\n    DATE_DIFF('DAY', CAST(e.start_date AS DATE), CAST(e.end_date AS DATE)) + 1 AS event_days,\n    COUNT(DISTINCT s.order_id) AS orders,\n    COALESCE(\n      SUM(\n        CASE\n          WHEN NOT s.delivered_at IS NULL\n          THEN s.net_amount - COALESCE(s.refund_amount, 0)\n          ELSE 0\n        END\n      ),\n      0\n    ) AS realized_revenue,\n    COALESCE(SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END), 0) AS net_sales\n  FROM sale_events AS e\n  LEFT JOIN sales AS s\n    ON s.placed_at >= CAST(CAST(e.start_date AS DATE) AS TIMESTAMP)\n    AND s.placed_at < CAST(CAST(e.end_date AS DATE) AS TIMESTAMP) + INTERVAL '1' DAY\n    AND s.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n    AND s.placed_at < CAST('2026-11-15' AS TIMESTAMP)\n    AND s.line_type = 'Sale'\n  WHERE\n    e.name IN ('Diwali 2025', 'Diwali 2026')\n  GROUP BY\n    e.event_id,\n    e.name,\n    e.start_date,\n    e.end_date\n)\nSELECT\n  event_name,\n  start_date,\n  end_date,\n  event_days,\n  orders,\n  realized_revenue,\n  net_sales,\n  orders * 1.0 / NULLIF(event_days, 0) AS orders_per_day,\n  realized_revenue / NULLIF(event_days, 0) AS realized_revenue_per_day,\n  net_sales / NULLIF(event_days, 0) AS net_sales_per_day\nFROM event_totals\nORDER BY\n  start_date",
+   "result": {
+    "columns": [
+     "event_name",
+     "start_date",
+     "end_date",
+     "event_days",
+     "orders",
+     "realized_revenue",
+     "net_sales",
+     "orders_per_day",
+     "realized_revenue_per_day",
+     "net_sales_per_day"
+    ],
+    "data": [
+     [
+      "Diwali 2025",
+      "2025-10-15T00:00:00.000",
+      "2025-10-21T00:00:00.000",
+      7,
+      1423,
+      2070933.6100000022,
+      2599822.020000004,
+      203.2857142857,
+      295847.6585714289,
+      371403.1457142863
+     ],
+     [
+      "Diwali 2026",
+      "2026-11-03T00:00:00.000",
+      "2026-11-08T00:00:00.000",
+      6,
+      1960,
+      2936003.6800000053,
+      3531079.100000006,
+      326.6666666667,
+      489333.9466666675,
+      588513.1833333344
+     ]
+    ],
+    "truncated": false
+   },
+   "analysis": {
+    "headline": "Diwali 2026 generated Rs 29.36 lakh in realized revenue, 41.8% more than Diwali 2025 despite a shorter event.",
+    "findings": [
+     "Realized revenue rose from Rs 20.71 lakh to Rs 29.36 lakh; per day, it rose 65.4%, from Rs 2.96 lakh to Rs 4.89 lakh.",
+     "Orders increased 37.7%, from 1,423 to 1,960. Orders per day rose 60.7%, from 203.286 to 326.667.",
+     "Net sales increased 35.8%, from Rs 26.00 lakh to Rs 35.31 lakh; per-day net sales rose 58.5%, from Rs 3.71 lakh to Rs 5.89 lakh.",
+     "Diwali 2026 ran for 6 days, compared with 7 days in 2025, so the stronger daily performance drove growth despite the shorter window."
+    ],
+    "recommendations": [
+     "Review the campaigns, product mix and stock availability behind the stronger 2026 daily performance, and apply the successful elements to future events.",
+     "Track pending deliveries and returns before finalizing the 2026 realized-revenue comparison."
+    ],
+    "caveats": [
+     "Recent realized revenue may change as deliveries and returns are completed.",
+     "Figures include all shop sales placed within each event window, not just sales linked to the event; the data is simulated."
+    ],
+    "follow_up_questions": [
+     "Which categories drove the increase in orders and realized revenue?",
+     "How did cancellations and returns compare across the two events?"
+    ],
+    "memory": [
+     {
+      "statement": "Diwali 2026 generated Rs 29.36 lakh in realized revenue across 6 days, versus Rs 20.71 lakh across 7 days in Diwali 2025.",
+      "type": "fact"
+     },
+     {
+      "statement": "Diwali 2026 had 1,960 orders versus 1,423 during Diwali 2025.",
+      "type": "fact"
+     }
+    ],
+    "explains_gap_ids": [],
+    "chart_title": "Diwali 2026 vs 2025",
+    "chart_subtitle": "Shop-wide performance during each event window",
+    "chart_metric": "realized_revenue"
+   },
+   "chart": {
+    "kind": "bar",
+    "title": "Diwali 2026 vs 2025",
+    "metric": "realized_revenue",
+    "figure": {
+     "data": [
+      {
+       "customdata": {
+        "dtype": "i2",
+        "bdata": "BwCPBQYAqAc=",
+        "shape": "2, 2"
+       },
+       "hovertemplate": "%{x}<br>Realized revenue: %{y:,.4~g}<br>Event days: %{customdata[0]:,.4~g}<br>Orders: %{customdata[1]:,.4~g}<extra></extra>",
+       "marker": {
+        "color": "#4F46E5"
+       },
+       "orientation": "v",
+       "x": [
+        "Diwali 2025",
+        "Diwali 2026"
+       ],
+       "y": {
+        "dtype": "f8",
+        "bdata": "zPUonJWZP0F8PQrXYWZGQQ=="
+       },
+       "type": "bar"
+      }
+     ],
+     "layout": {
+      "template": {
+       "data": {
+        "barpolar": [
+         {
+          "marker": {
+           "line": {
+            "color": "white",
+            "width": 0.5
+           },
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "barpolar"
+         }
+        ],
+        "bar": [
+         {
+          "error_x": {
+           "color": "#2a3f5f"
+          },
+          "error_y": {
+           "color": "#2a3f5f"
+          },
+          "marker": {
+           "line": {
+            "color": "white",
+            "width": 0.5
+           },
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "bar"
+         }
+        ],
+        "carpet": [
+         {
+          "aaxis": {
+           "endlinecolor": "#2a3f5f",
+           "gridcolor": "#C8D4E3",
+           "linecolor": "#C8D4E3",
+           "minorgridcolor": "#C8D4E3",
+           "startlinecolor": "#2a3f5f"
+          },
+          "baxis": {
+           "endlinecolor": "#2a3f5f",
+           "gridcolor": "#C8D4E3",
+           "linecolor": "#C8D4E3",
+           "minorgridcolor": "#C8D4E3",
+           "startlinecolor": "#2a3f5f"
+          },
+          "type": "carpet"
+         }
+        ],
+        "choropleth": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "choropleth"
+         }
+        ],
+        "contourcarpet": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "contourcarpet"
+         }
+        ],
+        "contour": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "contour"
+         }
+        ],
+        "heatmap": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "heatmap"
+         }
+        ],
+        "histogram2dcontour": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "histogram2dcontour"
+         }
+        ],
+        "histogram2d": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "histogram2d"
+         }
+        ],
+        "histogram": [
+         {
+          "marker": {
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "histogram"
+         }
+        ],
+        "mesh3d": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "mesh3d"
+         }
+        ],
+        "parcoords": [
+         {
+          "line": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "parcoords"
+         }
+        ],
+        "pie": [
+         {
+          "automargin": true,
+          "type": "pie"
+         }
+        ],
+        "scatter3d": [
+         {
+          "line": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatter3d"
+         }
+        ],
+        "scattercarpet": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattercarpet"
+         }
+        ],
+        "scattergeo": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattergeo"
+         }
+        ],
+        "scattergl": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattergl"
+         }
+        ],
+        "scattermap": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattermap"
+         }
+        ],
+        "scatterpolargl": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterpolargl"
+         }
+        ],
+        "scatterpolar": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterpolar"
+         }
+        ],
+        "scatter": [
+         {
+          "fillpattern": {
+           "fillmode": "overlay",
+           "size": 10,
+           "solidity": 0.2
+          },
+          "type": "scatter"
+         }
+        ],
+        "scatterternary": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterternary"
+         }
+        ],
+        "surface": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "surface"
+         }
+        ],
+        "table": [
+         {
+          "cells": {
+           "fill": {
+            "color": "#EBF0F8"
+           },
+           "line": {
+            "color": "white"
+           }
+          },
+          "header": {
+           "fill": {
+            "color": "#C8D4E3"
+           },
+           "line": {
+            "color": "white"
+           }
+          },
+          "type": "table"
+         }
+        ]
+       },
+       "layout": {
+        "annotationdefaults": {
+         "arrowcolor": "#2a3f5f",
+         "arrowhead": 0,
+         "arrowwidth": 1
+        },
+        "autotypenumbers": "strict",
+        "coloraxis": {
+         "colorbar": {
+          "outlinewidth": 0,
+          "ticks": ""
+         }
+        },
+        "colorscale": {
+         "diverging": [
+          [
+           0,
+           "#8e0152"
+          ],
+          [
+           0.1,
+           "#c51b7d"
+          ],
+          [
+           0.2,
+           "#de77ae"
+          ],
+          [
+           0.3,
+           "#f1b6da"
+          ],
+          [
+           0.4,
+           "#fde0ef"
+          ],
+          [
+           0.5,
+           "#f7f7f7"
+          ],
+          [
+           0.6,
+           "#e6f5d0"
+          ],
+          [
+           0.7,
+           "#b8e186"
+          ],
+          [
+           0.8,
+           "#7fbc41"
+          ],
+          [
+           0.9,
+           "#4d9221"
+          ],
+          [
+           1,
+           "#276419"
+          ]
+         ],
+         "sequential": [
+          [
+           0.0,
+           "#0d0887"
+          ],
+          [
+           0.1111111111111111,
+           "#46039f"
+          ],
+          [
+           0.2222222222222222,
+           "#7201a8"
+          ],
+          [
+           0.3333333333333333,
+           "#9c179e"
+          ],
+          [
+           0.4444444444444444,
+           "#bd3786"
+          ],
+          [
+           0.5555555555555556,
+           "#d8576b"
+          ],
+          [
+           0.6666666666666666,
+           "#ed7953"
+          ],
+          [
+           0.7777777777777778,
+           "#fb9f3a"
+          ],
+          [
+           0.8888888888888888,
+           "#fdca26"
+          ],
+          [
+           1.0,
+           "#f0f921"
+          ]
+         ],
+         "sequentialminus": [
+          [
+           0.0,
+           "#0d0887"
+          ],
+          [
+           0.1111111111111111,
+           "#46039f"
+          ],
+          [
+           0.2222222222222222,
+           "#7201a8"
+          ],
+          [
+           0.3333333333333333,
+           "#9c179e"
+          ],
+          [
+           0.4444444444444444,
+           "#bd3786"
+          ],
+          [
+           0.5555555555555556,
+           "#d8576b"
+          ],
+          [
+           0.6666666666666666,
+           "#ed7953"
+          ],
+          [
+           0.7777777777777778,
+           "#fb9f3a"
+          ],
+          [
+           0.8888888888888888,
+           "#fdca26"
+          ],
+          [
+           1.0,
+           "#f0f921"
+          ]
+         ]
+        },
+        "colorway": [
+         "#636efa",
+         "#EF553B",
+         "#00cc96",
+         "#ab63fa",
+         "#FFA15A",
+         "#19d3f3",
+         "#FF6692",
+         "#B6E880",
+         "#FF97FF",
+         "#FECB52"
+        ],
+        "font": {
+         "color": "#2a3f5f"
+        },
+        "geo": {
+         "bgcolor": "white",
+         "lakecolor": "white",
+         "landcolor": "white",
+         "showlakes": true,
+         "showland": true,
+         "subunitcolor": "#C8D4E3"
+        },
+        "hoverlabel": {
+         "align": "left"
+        },
+        "hovermode": "closest",
+        "paper_bgcolor": "white",
+        "plot_bgcolor": "white",
+        "polar": {
+         "angularaxis": {
+          "gridcolor": "#EBF0F8",
+          "linecolor": "#EBF0F8",
+          "ticks": ""
+         },
+         "bgcolor": "white",
+         "radialaxis": {
+          "gridcolor": "#EBF0F8",
+          "linecolor": "#EBF0F8",
+          "ticks": ""
+         }
+        },
+        "scene": {
+         "xaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         },
+         "yaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         },
+         "zaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         }
+        },
+        "shapedefaults": {
+         "line": {
+          "color": "#2a3f5f"
+         }
+        },
+        "ternary": {
+         "aaxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         },
+         "baxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         },
+         "bgcolor": "white",
+         "caxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         }
+        },
+        "title": {
+         "x": 0.05
+        },
+        "xaxis": {
+         "automargin": true,
+         "gridcolor": "#EBF0F8",
+         "linecolor": "#EBF0F8",
+         "ticks": "",
+         "title": {
+          "standoff": 15
+         },
+         "zerolinecolor": "#EBF0F8",
+         "zerolinewidth": 2
+        },
+        "yaxis": {
+         "automargin": true,
+         "gridcolor": "#EBF0F8",
+         "linecolor": "#EBF0F8",
+         "ticks": "",
+         "title": {
+          "standoff": 15
+         },
+         "zerolinecolor": "#EBF0F8",
+         "zerolinewidth": 2
+        }
+       }
+      },
+      "xaxis": {
+       "type": "category"
+      },
+      "yaxis": {
+       "title": {
+        "text": "Realized revenue"
+       },
+       "tickprefix": "₹",
+       "tickformat": "~s"
+      },
+      "title": {
+       "text": "Diwali 2026 vs 2025<br><sup>Shop-wide performance during each event window</sup>",
+       "x": 0,
+       "xanchor": "left"
+      },
+      "margin": {
+       "l": 60,
+       "r": 20,
+       "t": 70,
+       "b": 50
+      },
+      "legend": {
+       "orientation": "h",
+       "y": -0.18
+      },
+      "font": {
+       "family": "Inter, system-ui, sans-serif"
+      },
+      "height": 420,
+      "showlegend": false
+     }
+    }
+   },
+   "warnings": [],
+   "insight_id": "2026-11-14_122740_diwali-2026-compared-diwali-2025",
+   "attempts": 1,
+   "data_as_of": "2026-11-14",
+   "data_size": "full",
+   "cost": {
+    "usd": 0.02596,
+    "calls": 5,
+    "input": 14456,
+    "cached": 0,
+    "output": 2300
+   },
+   "calls": [
+    {
+     "agent": "planner",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 4670,
+     "cached_tokens": 0,
+     "output_tokens": 396,
+     "usd": 0.00665,
+     "seconds": 6.25
+    },
+    {
+     "agent": "sql_writer",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 4326,
+     "cached_tokens": 0,
+     "output_tokens": 671,
+     "usd": 0.007681,
+     "seconds": 9.67
+    },
+    {
+     "agent": "validator",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 1936,
+     "cached_tokens": 0,
+     "output_tokens": 17,
+     "usd": 0.002021,
+     "seconds": 1.63
+    },
+    {
+     "agent": "analyst",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 1742,
+     "cached_tokens": 0,
+     "output_tokens": 632,
+     "usd": 0.004902,
+     "seconds": 8.24
+    },
+    {
+     "agent": "analyst",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 1782,
+     "cached_tokens": 0,
+     "output_tokens": 584,
+     "usd": 0.004702,
+     "seconds": 7.97
+    }
+   ],
+   "t": 34.97
+  }
+ ]
+}

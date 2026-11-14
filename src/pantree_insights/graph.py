@@ -110,12 +110,16 @@ class Agent:
         info = data or manifest(settings.shop_dir)
         self.data = {"first_day": info["first_day"], "last_day": info["last_day"], "size": info["size"]}
         self._llms: dict[str, LLM] = {}
+        self._memories: dict[str, Any] = {}          # run_id -> memory scope for that question
         self.graph = self._build().compile(checkpointer=InMemorySaver())
 
     def llm(self, state: State) -> LLM:
         if state["run_id"] not in self._llms:
             self._llms[state["run_id"]] = self.llm_factory()
         return self._llms[state["run_id"]]
+
+    def mem(self, state: State):
+        return self._memories.get(state["run_id"], self.memory)
 
     # ------------------------------------------------------------------ nodes
     @step("check_input")
@@ -130,7 +134,7 @@ class Agent:
     def retrieve(self, state: State) -> dict:
         context = self.retriever.retrieve(state["question"])
         return {"context": context.to_prompt(self.retriever.schema, self.metrics), "metric_names": context.metrics,
-                "memory": self.memory.context(state["question"]),
+                "memory": self.mem(state).context(state["question"]),
                 "_detail": {"tables": context.tables, "metrics": context.metrics,
                             "values": [v.value for v in context.values[:6]],
                             "examples": [e.question for e in context.examples[:3]]}}
@@ -238,11 +242,10 @@ class Agent:
     @step("remember")
     def remember(self, state: State) -> dict:
         a = state["analysis"]
-        item = self.memory.save_insight(question=state["question"], plan=state["plan"], sql=state["sql"],
-                                        analysis=a, data_as_of=self.data["last_day"], chat_id=state.get("chat_id"))
-        open_ids = {g["id"] for g in self.memory.open_gaps()}
-        closed = self.memory.close_gaps([g for g in a.get("explains_gap_ids", []) if g in open_ids], item["id"],
-                                        self.data["last_day"])
+        memory = self.mem(state)
+        item = memory.save_insight(question=state["question"], plan=state["plan"], sql=state["sql"],
+                                   analysis=a, data_as_of=self.data["last_day"], chat_id=state.get("chat_id"))
+        closed = memory.close_gaps(a.get("explains_gap_ids", []), item["id"], self.data["last_day"])
         return {"insight_id": item["id"], "status": "done",
                 "_detail": {"facts": len(a.get("memory", [])), "gaps_closed": closed}}
 
@@ -273,8 +276,11 @@ class Agent:
 
     # ------------------------------------------------------------------ running
     def start(self, question: str, chat_id: str | None = None, history: str = "",
-              use_defaults: bool = False) -> tuple[str, Iterator[dict]]:
+              use_defaults: bool = False, memory: Any = None) -> tuple[str, Iterator[dict]]:
+        """memory: a scope with context(), save_insight() and close_gaps(); defaults to the file memory."""
         run_id = uuid.uuid4().hex[:12]
+        if memory is not None:
+            self._memories[run_id] = memory
         state = {"run_id": run_id, "chat_id": chat_id, "question": question, "history": history,
                  "use_defaults": use_defaults}
         return run_id, self._stream(run_id, state)
@@ -299,6 +305,7 @@ class Agent:
     def final(self, run_id: str) -> dict:
         state = self.graph.get_state({"configurable": {"thread_id": run_id}}).values
         llm = self._llms.pop(run_id, None)
+        self._memories.pop(run_id, None)
         return {"type": "final", "run_id": run_id, "status": state.get("status"), "message": state.get("message"),
                 "question": state.get("question"), "plan": state.get("plan"), "sql": state.get("sql"),
                 "result": state.get("result"), "analysis": state.get("analysis"), "chart": state.get("chart"),

@@ -1,0 +1,1490 @@
+{
+ "question": "Why are footwear returns so high?",
+ "recorded_at": "2026-11-14T12:28:18",
+ "data_size": "full",
+ "data_as_of": "2026-11-14",
+ "seconds": 32.1,
+ "order": 2,
+ "events": [
+  {
+   "type": "step",
+   "step": "check_input",
+   "status": "started",
+   "detail": {},
+   "t": 0.01
+  },
+  {
+   "type": "step",
+   "step": "check_input",
+   "status": "done",
+   "detail": {
+    "seconds": 0.0
+   },
+   "t": 0.01
+  },
+  {
+   "type": "step",
+   "step": "retrieve",
+   "status": "started",
+   "detail": {},
+   "t": 0.01
+  },
+  {
+   "type": "step",
+   "step": "retrieve",
+   "status": "done",
+   "detail": {
+    "seconds": 0.11,
+    "tables": [
+     "product_master",
+     "sales",
+     "agents",
+     "inventory_live",
+     "inventory_history"
+    ],
+    "metrics": [
+     "return_rate",
+     "realized_revenue",
+     "repeat_purchase_rate",
+     "stockout_share"
+    ],
+    "values": [
+     "Returns",
+     "Footwear",
+     "Returned",
+     "Shoes",
+     "Return",
+     "Topwear"
+    ],
+    "examples": [
+     "Do customers who get the wrong size return more in footwear or apparel?",
+     "Which return reasons are most common?",
+     "What is the return rate by category?"
+    ]
+   },
+   "t": 0.11
+  },
+  {
+   "type": "step",
+   "step": "plan",
+   "status": "started",
+   "detail": {},
+   "t": 0.12
+  },
+  {
+   "type": "step",
+   "step": "plan",
+   "status": "done",
+   "detail": {
+    "seconds": 7.34,
+    "decision": "proceed",
+    "plan": "Question: Investigate whether footwear return rates are unusually high and which product segments, fit outcomes and reported reasons are associated with returns.\nMetrics: return_rate, delivered_lines = count of sale lines with delivered_at not null, return_requested_lines = count of sale lines with return_requested_at not null\nBreakdowns: category; footwear sub_category and article_type, footwear return_reason; footwear size_fit\nFilters: sales.line_type = 'Sale'; product_master.category = 'Footwear' for footwear-specific analyses\nTime window: 2026-01-01 to 2026-10-24 inclusive, by sales.placed_at\nComparison: Footwear return_rate versus other categories in the same order cohort; compare rates across footwear segments and size_fit values.\nExpected result: Separate aggregated tables: one row per category; one row per footwear sub_category and article_type; one row per footwear size_fit; and one row per return_reason among footwear lines with a return request. Include return_rate, delivered_lines and return_requested_lines where applicable; reason table shows return_requested_lines. Limit each table to 50 rows, prioritizing the highest return-request volumes.\nAssumptions: Use a year-to-date order cohort, excluding the last three weeks to reduce return-maturity bias; some orders may still be in transit or awaiting returns.; Return reasons and size_fit describe associations, not proof of cause; retain missing values as an explicit group."
+   },
+   "t": 7.46
+  },
+  {
+   "type": "step",
+   "step": "write_sql",
+   "status": "started",
+   "detail": {},
+   "t": 7.47
+  },
+  {
+   "type": "step",
+   "step": "write_sql",
+   "status": "done",
+   "detail": {
+    "seconds": 14.55,
+    "attempt": 1,
+    "sql": "WITH cohort AS (\n  SELECT p.category, p.sub_category, p.article_type, s.size_fit, s.return_reason,\n         s.delivered_at, s.return_requested_at\n  FROM sales s\n  LEFT JOIN product_master p ON p.product_id = s.product_id\n  WHERE s.line_type = 'Sale'\n    AND s.placed_at >= TIMESTAMP '2026-01-01'\n    AND s.placed_at < TIMESTAMP '2026-10-25'\n)\nSELECT breakdown, category, sub_category, article_type, size_fit, return_reason,\n       return_rate, delivered_lines, return_requested_lines\nFROM (\n  (SELECT 'category' AS breakdown, COALESCE(s.category, '(missing)') AS category,\n          NULL AS sub_category, NULL AS article_type, NULL AS size_fit, NULL AS return_reason,\n          COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) / NULLIF(COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL), 0) AS return_rate,\n          COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS delivered_lines,\n          COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) AS return_requested_lines\n   FROM cohort s\n   GROUP BY COALESCE(s.category, '(missing)')\n   ORDER BY return_requested_lines DESC, category\n   LIMIT 50)\n  UNION ALL\n  (SELECT 'footwear_segment', 'Footwear', COALESCE(s.sub_category, '(missing)'),\n          COALESCE(s.article_type, '(missing)'), NULL, NULL,\n          COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) / NULLIF(COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL), 0),\n          COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL),\n          COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) AS return_requested_lines\n   FROM cohort s\n   WHERE s.category = 'Footwear'\n   GROUP BY COALESCE(s.sub_category, '(missing)'), COALESCE(s.article_type, '(missing)')\n   ORDER BY return_requested_lines DESC, 3, 4\n   LIMIT 50)\n  UNION ALL\n  (SELECT 'footwear_size_fit', 'Footwear', NULL, NULL, COALESCE(s.size_fit, '(missing)'), NULL,\n          COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) / NULLIF(COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL), 0),\n          COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL),\n          COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) AS return_requested_lines\n   FROM cohort s\n   WHERE s.category = 'Footwear'\n   GROUP BY COALESCE(s.size_fit, '(missing)')\n   ORDER BY return_requested_lines DESC, 5\n   LIMIT 50)\n  UNION ALL\n  (SELECT 'footwear_return_reason', 'Footwear', NULL, NULL, NULL, COALESCE(s.return_reason, '(missing)'),\n          NULL, NULL, COUNT(*) AS return_requested_lines\n   FROM cohort s\n   WHERE s.category = 'Footwear' AND s.return_requested_at IS NOT NULL\n   GROUP BY COALESCE(s.return_reason, '(missing)')\n   ORDER BY return_requested_lines DESC, 6\n   LIMIT 50)\n) results\nORDER BY CASE breakdown WHEN 'category' THEN 1 WHEN 'footwear_segment' THEN 2\n                        WHEN 'footwear_size_fit' THEN 3 ELSE 4 END,\n         return_requested_lines DESC, category, sub_category, article_type, size_fit, return_reason",
+    "explanation": "Returns four labeled breakdowns in one result, each limited to 50 groups by return-request volume. The order cohort excludes the last three weeks, but some returns may still be immature; fit and reason associations do not establish causation."
+   },
+   "t": 22.01
+  },
+  {
+   "type": "step",
+   "step": "check_sql",
+   "status": "started",
+   "detail": {},
+   "t": 22.01
+  },
+  {
+   "type": "step",
+   "step": "check_sql",
+   "status": "done",
+   "detail": {
+    "seconds": 0.06,
+    "tables": [
+     "product_master",
+     "sales"
+    ]
+   },
+   "t": 22.07
+  },
+  {
+   "type": "step",
+   "step": "run_query",
+   "status": "started",
+   "detail": {},
+   "t": 22.07
+  },
+  {
+   "type": "step",
+   "step": "run_query",
+   "status": "done",
+   "detail": {
+    "seconds": 0.04,
+    "rows": 22,
+    "columns": [
+     "breakdown",
+     "category",
+     "sub_category",
+     "article_type",
+     "size_fit",
+     "return_reason",
+     "return_rate",
+     "delivered_lines",
+     "return_requested_lines"
+    ],
+    "query_seconds": 0.04,
+    "truncated": false
+   },
+   "t": 22.12
+  },
+  {
+   "type": "step",
+   "step": "validate",
+   "status": "started",
+   "detail": {},
+   "t": 22.12
+  },
+  {
+   "type": "step",
+   "step": "validate",
+   "status": "done",
+   "detail": {
+    "seconds": 1.72,
+    "ok": true
+   },
+   "t": 23.83
+  },
+  {
+   "type": "step",
+   "step": "analyse",
+   "status": "started",
+   "detail": {},
+   "t": 23.84
+  },
+  {
+   "type": "step",
+   "step": "analyse",
+   "status": "done",
+   "detail": {
+    "seconds": 8.08,
+    "headline": "Footwear’s 25.3% return-request rate is above apparel’s, with sizing and fit the strongest reported associations.",
+    "number_check": "passed",
+    "rewritten": false,
+    "unverified": []
+   },
+   "t": 31.91
+  },
+  {
+   "type": "step",
+   "step": "chart",
+   "status": "started",
+   "detail": {},
+   "t": 31.91
+  },
+  {
+   "type": "step",
+   "step": "chart",
+   "status": "done",
+   "detail": {
+    "seconds": 0.21,
+    "kind": "grouped_bar"
+   },
+   "t": 32.12
+  },
+  {
+   "type": "step",
+   "step": "remember",
+   "status": "started",
+   "detail": {},
+   "t": 32.12
+  },
+  {
+   "type": "step",
+   "step": "remember",
+   "status": "done",
+   "detail": {
+    "seconds": 0.0,
+    "facts": 2,
+    "gaps_closed": 0
+   },
+   "t": 32.12
+  },
+  {
+   "type": "final",
+   "run_id": "497a5155f90f",
+   "status": "done",
+   "message": null,
+   "question": "Why are footwear returns so high?",
+   "plan": {
+    "decision": "proceed",
+    "decline_reason": null,
+    "clarifying_questions": [],
+    "restated_question": "Investigate whether footwear return rates are unusually high and which product segments, fit outcomes and reported reasons are associated with returns.",
+    "metrics": [
+     "return_rate",
+     "delivered_lines = count of sale lines with delivered_at not null",
+     "return_requested_lines = count of sale lines with return_requested_at not null"
+    ],
+    "breakdowns": [
+     "category; footwear sub_category and article_type",
+     "footwear return_reason; footwear size_fit"
+    ],
+    "filters": [
+     "sales.line_type = 'Sale'",
+     "product_master.category = 'Footwear' for footwear-specific analyses"
+    ],
+    "time_window": "2026-01-01 to 2026-10-24 inclusive, by sales.placed_at",
+    "comparison": "Footwear return_rate versus other categories in the same order cohort; compare rates across footwear segments and size_fit values.",
+    "output_shape": "Separate aggregated tables: one row per category; one row per footwear sub_category and article_type; one row per footwear size_fit; and one row per return_reason among footwear lines with a return request. Include return_rate, delivered_lines and return_requested_lines where applicable; reason table shows return_requested_lines. Limit each table to 50 rows, prioritizing the highest return-request volumes.",
+    "assumptions": [
+     "Use a year-to-date order cohort, excluding the last three weeks to reduce return-maturity bias; some orders may still be in transit or awaiting returns.",
+     "Return reasons and size_fit describe associations, not proof of cause; retain missing values as an explicit group."
+    ]
+   },
+   "sql": "WITH cohort AS (\n  SELECT\n    p.category,\n    p.sub_category,\n    p.article_type,\n    s.size_fit,\n    s.return_reason,\n    s.delivered_at,\n    s.return_requested_at\n  FROM sales AS s\n  LEFT JOIN product_master AS p\n    ON p.product_id = s.product_id\n  WHERE\n    s.line_type = 'Sale'\n    AND s.placed_at >= CAST('2026-01-01' AS TIMESTAMP)\n    AND s.placed_at < CAST('2026-10-25' AS TIMESTAMP)\n)\nSELECT\n  breakdown,\n  category,\n  sub_category,\n  article_type,\n  size_fit,\n  return_reason,\n  return_rate,\n  delivered_lines,\n  return_requested_lines\nFROM (\n  (\n    SELECT\n      'category' AS breakdown,\n      COALESCE(s.category, '(missing)') AS category,\n      NULL AS sub_category,\n      NULL AS article_type,\n      NULL AS size_fit,\n      NULL AS return_reason,\n      COUNT(*) FILTER(WHERE\n        NOT s.return_requested_at IS NULL) / NULLIF(COUNT(*) FILTER(WHERE\n        NOT s.delivered_at IS NULL), 0) AS return_rate,\n      COUNT(*) FILTER(WHERE\n        NOT s.delivered_at IS NULL) AS delivered_lines,\n      COUNT(*) FILTER(WHERE\n        NOT s.return_requested_at IS NULL) AS return_requested_lines\n    FROM cohort AS s\n    GROUP BY\n      COALESCE(s.category, '(missing)')\n    ORDER BY\n      return_requested_lines DESC,\n      category\n    LIMIT 50\n  )\n  UNION ALL\n  (\n    SELECT\n      'footwear_segment',\n      'Footwear',\n      COALESCE(s.sub_category, '(missing)'),\n      COALESCE(s.article_type, '(missing)'),\n      NULL,\n      NULL,\n      COUNT(*) FILTER(WHERE\n        NOT s.return_requested_at IS NULL) / NULLIF(COUNT(*) FILTER(WHERE\n        NOT s.delivered_at IS NULL), 0),\n      COUNT(*) FILTER(WHERE\n        NOT s.delivered_at IS NULL),\n      COUNT(*) FILTER(WHERE\n        NOT s.return_requested_at IS NULL) AS return_requested_lines\n    FROM cohort AS s\n    WHERE\n      s.category = 'Footwear'\n    GROUP BY\n      COALESCE(s.sub_category, '(missing)'),\n      COALESCE(s.article_type, '(missing)')\n    ORDER BY\n      return_requested_lines DESC,\n      3,\n      4\n    LIMIT 50\n  )\n  UNION ALL\n  (\n    SELECT\n      'footwear_size_fit',\n      'Footwear',\n      NULL,\n      NULL,\n      COALESCE(s.size_fit, '(missing)'),\n      NULL,\n      COUNT(*) FILTER(WHERE\n        NOT s.return_requested_at IS NULL) / NULLIF(COUNT(*) FILTER(WHERE\n        NOT s.delivered_at IS NULL), 0),\n      COUNT(*) FILTER(WHERE\n        NOT s.delivered_at IS NULL),\n      COUNT(*) FILTER(WHERE\n        NOT s.return_requested_at IS NULL) AS return_requested_lines\n    FROM cohort AS s\n    WHERE\n      s.category = 'Footwear'\n    GROUP BY\n      COALESCE(s.size_fit, '(missing)')\n    ORDER BY\n      return_requested_lines DESC,\n      5\n    LIMIT 50\n  )\n  UNION ALL\n  (\n    SELECT\n      'footwear_return_reason',\n      'Footwear',\n      NULL,\n      NULL,\n      NULL,\n      COALESCE(s.return_reason, '(missing)'),\n      NULL,\n      NULL,\n      COUNT(*) AS return_requested_lines\n    FROM cohort AS s\n    WHERE\n      s.category = 'Footwear' AND NOT s.return_requested_at IS NULL\n    GROUP BY\n      COALESCE(s.return_reason, '(missing)')\n    ORDER BY\n      return_requested_lines DESC,\n      6\n    LIMIT 50\n  )\n) AS results\nORDER BY\n  CASE breakdown\n    WHEN 'category'\n    THEN 1\n    WHEN 'footwear_segment'\n    THEN 2\n    WHEN 'footwear_size_fit'\n    THEN 3\n    ELSE 4\n  END,\n  return_requested_lines DESC,\n  category,\n  sub_category,\n  article_type,\n  size_fit,\n  return_reason",
+   "result": {
+    "columns": [
+     "breakdown",
+     "category",
+     "sub_category",
+     "article_type",
+     "size_fit",
+     "return_reason",
+     "return_rate",
+     "delivered_lines",
+     "return_requested_lines"
+    ],
+    "data": [
+     [
+      "category",
+      "Apparel",
+      null,
+      null,
+      null,
+      null,
+      0.2309765076,
+      26349.0,
+      6086
+     ],
+     [
+      "category",
+      "Footwear",
+      null,
+      null,
+      null,
+      null,
+      0.2530956593,
+      7349.0,
+      1860
+     ],
+     [
+      "category",
+      "Accessories",
+      null,
+      null,
+      null,
+      null,
+      0.0766944114,
+      8410.0,
+      645
+     ],
+     [
+      "footwear_segment",
+      "Footwear",
+      "Shoes",
+      "Casual Shoes",
+      null,
+      null,
+      0.2482269504,
+      2397.0,
+      595
+     ],
+     [
+      "footwear_segment",
+      "Footwear",
+      "Shoes",
+      "Heels",
+      null,
+      null,
+      0.2494654312,
+      1403.0,
+      350
+     ],
+     [
+      "footwear_segment",
+      "Footwear",
+      "Shoes",
+      "Sports Shoes",
+      null,
+      null,
+      0.2644341801,
+      866.0,
+      229
+     ],
+     [
+      "footwear_segment",
+      "Footwear",
+      "Flip Flops",
+      "Flip Flops",
+      null,
+      null,
+      0.2454545455,
+      880.0,
+      216
+     ],
+     [
+      "footwear_segment",
+      "Footwear",
+      "Sandal",
+      "Sandals",
+      null,
+      null,
+      0.2585301837,
+      762.0,
+      197
+     ],
+     [
+      "footwear_segment",
+      "Footwear",
+      "Shoes",
+      "Flats",
+      null,
+      null,
+      0.2574404762,
+      672.0,
+      173
+     ],
+     [
+      "footwear_segment",
+      "Footwear",
+      "Shoes",
+      "Formal Shoes",
+      null,
+      null,
+      0.2721712538,
+      327.0,
+      89
+     ],
+     [
+      "footwear_segment",
+      "Footwear",
+      "Sandal",
+      "Sports Sandals",
+      null,
+      null,
+      0.2619047619,
+      42.0,
+      11
+     ],
+     [
+      "footwear_size_fit",
+      "Footwear",
+      null,
+      null,
+      "Fits",
+      null,
+      0.1883327917,
+      6154.0,
+      1159
+     ],
+     [
+      "footwear_size_fit",
+      "Footwear",
+      null,
+      null,
+      "Too Large",
+      null,
+      0.5928917609,
+      619.0,
+      367
+     ],
+     [
+      "footwear_size_fit",
+      "Footwear",
+      null,
+      null,
+      "Too Small",
+      null,
+      0.5798611111,
+      576.0,
+      334
+     ],
+     [
+      "footwear_size_fit",
+      "Footwear",
+      null,
+      null,
+      "(missing)",
+      null,
+      null,
+      0.0,
+      0
+     ],
+     [
+      "footwear_return_reason",
+      "Footwear",
+      null,
+      null,
+      null,
+      "Size Issue",
+      null,
+      null,
+      435
+     ],
+     [
+      "footwear_return_reason",
+      "Footwear",
+      null,
+      null,
+      null,
+      "Quality Issue",
+      null,
+      null,
+      380
+     ],
+     [
+      "footwear_return_reason",
+      "Footwear",
+      null,
+      null,
+      null,
+      "Changed Mind",
+      null,
+      null,
+      340
+     ],
+     [
+      "footwear_return_reason",
+      "Footwear",
+      null,
+      null,
+      null,
+      "Fit Issue",
+      null,
+      null,
+      266
+     ],
+     [
+      "footwear_return_reason",
+      "Footwear",
+      null,
+      null,
+      null,
+      "Colour Mismatch",
+      null,
+      null,
+      202
+     ],
+     [
+      "footwear_return_reason",
+      "Footwear",
+      null,
+      null,
+      null,
+      "Damaged",
+      null,
+      null,
+      144
+     ],
+     [
+      "footwear_return_reason",
+      "Footwear",
+      null,
+      null,
+      null,
+      "Wrong Product",
+      null,
+      null,
+      93
+     ]
+    ],
+    "truncated": false
+   },
+   "analysis": {
+    "headline": "Footwear’s 25.3% return-request rate is above apparel’s, with sizing and fit the strongest reported associations.",
+    "findings": [
+     "Footwear had 1,860 return requests against 7,349 delivered lines: 25.3%, versus 23.1% for apparel and 7.7% for accessories. The footwear rate was 2.2 percentage points above apparel.",
+     "Lines marked Too Large and Too Small had return rates of 59.3% and 58.0%, versus 18.8% for Fits. This is a strong fit association, though not proof that fit caused the returns.",
+     "Size Issue accounted for 435 requests and Fit Issue for 266: together, 37.7% of footwear requests. Quality Issue was also prominent at 380 requests, or 20.4%.",
+     "Casual Shoes generated the most requests, at 595, despite a 24.8% rate. Formal Shoes had the highest segment rate at 27.2%, but on just 327 delivered lines."
+    ],
+    "recommendations": [
+     "Review footwear size guides and product measurements, prioritising Casual Shoes because of their high return volume.",
+     "Investigate the 380 quality-related requests to identify recurring product or supplier issues.",
+     "Examine sizing outcomes and return reasons within footwear articles before testing changes to product guidance."
+    ],
+    "caveats": [
+     "The cohort covers orders placed from 1 January to 24 October 2026; some may still be in transit or awaiting return requests.",
+     "The rate divides all return-requested sale lines by delivered sale lines; the SQL does not explicitly require requested lines to be delivered.",
+     "Fit and reported reasons are associations, not proof of cause. The data is simulated."
+    ],
+    "follow_up_questions": [
+     "Which footwear articles have the most size and fit complaints?",
+     "Do sizing outcomes vary by product or supplier?",
+     "What quality issues are driving footwear return requests?"
+    ],
+    "memory": [
+     {
+      "statement": "For orders placed 1 January–24 October 2026, footwear had 1,860 return requests against 7,349 delivered lines, a 25.3% rate versus 23.1% for apparel.",
+      "type": "fact"
+     },
+     {
+      "statement": "For the same 2026 cohort, Size Issue and Fit Issue together accounted for 701 footwear return requests, or 37.7% of the total.",
+      "type": "fact"
+     }
+    ],
+    "explains_gap_ids": [],
+    "chart_title": "Footwear return patterns",
+    "chart_subtitle": "Orders placed 1 January–24 October 2026",
+    "chart_metric": "return_rate"
+   },
+   "chart": {
+    "kind": "bar_h",
+    "title": "Footwear return patterns",
+    "metric": "return_rate",
+    "figure": {
+     "data": [
+      {
+       "marker": {
+        "color": "#4F46E5"
+       },
+       "name": "category",
+       "orientation": "h",
+       "x": {
+        "dtype": "f8",
+        "bdata": "VKUkYaOQzT/o/twiuDLQP3i8v7Q+orM/"
+       },
+       "y": [
+        "Apparel",
+        "Footwear",
+        "Accessories"
+       ],
+       "type": "bar"
+      },
+      {
+       "marker": {
+        "color": "#0EA5E9"
+       },
+       "name": "footwear_segment",
+       "orientation": "h",
+       "x": {
+        "dtype": "f8",
+        "bdata": "lRb6lObFzz/hRj62e+7PPztX3lZ97NA/lNzJ9g1rzz/ITQEvwovQP8yFfJ7nedA/Q95++kBr0T8avcEwDMPQPw=="
+       },
+       "y": [
+        "Footwear · Shoes · Casual Shoes",
+        "Footwear · Shoes · Heels",
+        "Footwear · Shoes · Sports Shoes",
+        "Footwear · Flip Flops · Flip Flops",
+        "Footwear · Sandal · Sandals",
+        "Footwear · Shoes · Flats",
+        "Footwear · Shoes · Formal Shoes",
+        "Footwear · Sandal · Sports Sandals"
+       ],
+       "type": "bar"
+      },
+      {
+       "marker": {
+        "color": "#F59E0B"
+       },
+       "name": "footwear_size_fit",
+       "orientation": "h",
+       "x": {
+        "dtype": "f8",
+        "bdata": "KtWO9kkbyD9qRGQk+PjiP/SxjOM4juI/AAAAAAAA+H8="
+       },
+       "y": [
+        "Footwear · Fits",
+        "Footwear · Too Large",
+        "Footwear · Too Small",
+        "Footwear · (missing)"
+       ],
+       "type": "bar"
+      },
+      {
+       "marker": {
+        "color": "#10B981"
+       },
+       "name": "footwear_return_reason",
+       "orientation": "h",
+       "x": {
+        "dtype": "f8",
+        "bdata": "AAAAAAAA+H8AAAAAAAD4fwAAAAAAAPh/AAAAAAAA+H8AAAAAAAD4fwAAAAAAAPh/AAAAAAAA+H8="
+       },
+       "y": [
+        "Footwear · Size Issue",
+        "Footwear · Quality Issue",
+        "Footwear · Changed Mind",
+        "Footwear · Fit Issue",
+        "Footwear · Colour Mismatch",
+        "Footwear · Damaged",
+        "Footwear · Wrong Product"
+       ],
+       "type": "bar"
+      }
+     ],
+     "layout": {
+      "template": {
+       "data": {
+        "barpolar": [
+         {
+          "marker": {
+           "line": {
+            "color": "white",
+            "width": 0.5
+           },
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "barpolar"
+         }
+        ],
+        "bar": [
+         {
+          "error_x": {
+           "color": "#2a3f5f"
+          },
+          "error_y": {
+           "color": "#2a3f5f"
+          },
+          "marker": {
+           "line": {
+            "color": "white",
+            "width": 0.5
+           },
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "bar"
+         }
+        ],
+        "carpet": [
+         {
+          "aaxis": {
+           "endlinecolor": "#2a3f5f",
+           "gridcolor": "#C8D4E3",
+           "linecolor": "#C8D4E3",
+           "minorgridcolor": "#C8D4E3",
+           "startlinecolor": "#2a3f5f"
+          },
+          "baxis": {
+           "endlinecolor": "#2a3f5f",
+           "gridcolor": "#C8D4E3",
+           "linecolor": "#C8D4E3",
+           "minorgridcolor": "#C8D4E3",
+           "startlinecolor": "#2a3f5f"
+          },
+          "type": "carpet"
+         }
+        ],
+        "choropleth": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "choropleth"
+         }
+        ],
+        "contourcarpet": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "contourcarpet"
+         }
+        ],
+        "contour": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "contour"
+         }
+        ],
+        "heatmap": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "heatmap"
+         }
+        ],
+        "histogram2dcontour": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "histogram2dcontour"
+         }
+        ],
+        "histogram2d": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "histogram2d"
+         }
+        ],
+        "histogram": [
+         {
+          "marker": {
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "histogram"
+         }
+        ],
+        "mesh3d": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "mesh3d"
+         }
+        ],
+        "parcoords": [
+         {
+          "line": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "parcoords"
+         }
+        ],
+        "pie": [
+         {
+          "automargin": true,
+          "type": "pie"
+         }
+        ],
+        "scatter3d": [
+         {
+          "line": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatter3d"
+         }
+        ],
+        "scattercarpet": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattercarpet"
+         }
+        ],
+        "scattergeo": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattergeo"
+         }
+        ],
+        "scattergl": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattergl"
+         }
+        ],
+        "scattermap": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattermap"
+         }
+        ],
+        "scatterpolargl": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterpolargl"
+         }
+        ],
+        "scatterpolar": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterpolar"
+         }
+        ],
+        "scatter": [
+         {
+          "fillpattern": {
+           "fillmode": "overlay",
+           "size": 10,
+           "solidity": 0.2
+          },
+          "type": "scatter"
+         }
+        ],
+        "scatterternary": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterternary"
+         }
+        ],
+        "surface": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "surface"
+         }
+        ],
+        "table": [
+         {
+          "cells": {
+           "fill": {
+            "color": "#EBF0F8"
+           },
+           "line": {
+            "color": "white"
+           }
+          },
+          "header": {
+           "fill": {
+            "color": "#C8D4E3"
+           },
+           "line": {
+            "color": "white"
+           }
+          },
+          "type": "table"
+         }
+        ]
+       },
+       "layout": {
+        "annotationdefaults": {
+         "arrowcolor": "#2a3f5f",
+         "arrowhead": 0,
+         "arrowwidth": 1
+        },
+        "autotypenumbers": "strict",
+        "coloraxis": {
+         "colorbar": {
+          "outlinewidth": 0,
+          "ticks": ""
+         }
+        },
+        "colorscale": {
+         "diverging": [
+          [
+           0,
+           "#8e0152"
+          ],
+          [
+           0.1,
+           "#c51b7d"
+          ],
+          [
+           0.2,
+           "#de77ae"
+          ],
+          [
+           0.3,
+           "#f1b6da"
+          ],
+          [
+           0.4,
+           "#fde0ef"
+          ],
+          [
+           0.5,
+           "#f7f7f7"
+          ],
+          [
+           0.6,
+           "#e6f5d0"
+          ],
+          [
+           0.7,
+           "#b8e186"
+          ],
+          [
+           0.8,
+           "#7fbc41"
+          ],
+          [
+           0.9,
+           "#4d9221"
+          ],
+          [
+           1,
+           "#276419"
+          ]
+         ],
+         "sequential": [
+          [
+           0.0,
+           "#0d0887"
+          ],
+          [
+           0.1111111111111111,
+           "#46039f"
+          ],
+          [
+           0.2222222222222222,
+           "#7201a8"
+          ],
+          [
+           0.3333333333333333,
+           "#9c179e"
+          ],
+          [
+           0.4444444444444444,
+           "#bd3786"
+          ],
+          [
+           0.5555555555555556,
+           "#d8576b"
+          ],
+          [
+           0.6666666666666666,
+           "#ed7953"
+          ],
+          [
+           0.7777777777777778,
+           "#fb9f3a"
+          ],
+          [
+           0.8888888888888888,
+           "#fdca26"
+          ],
+          [
+           1.0,
+           "#f0f921"
+          ]
+         ],
+         "sequentialminus": [
+          [
+           0.0,
+           "#0d0887"
+          ],
+          [
+           0.1111111111111111,
+           "#46039f"
+          ],
+          [
+           0.2222222222222222,
+           "#7201a8"
+          ],
+          [
+           0.3333333333333333,
+           "#9c179e"
+          ],
+          [
+           0.4444444444444444,
+           "#bd3786"
+          ],
+          [
+           0.5555555555555556,
+           "#d8576b"
+          ],
+          [
+           0.6666666666666666,
+           "#ed7953"
+          ],
+          [
+           0.7777777777777778,
+           "#fb9f3a"
+          ],
+          [
+           0.8888888888888888,
+           "#fdca26"
+          ],
+          [
+           1.0,
+           "#f0f921"
+          ]
+         ]
+        },
+        "colorway": [
+         "#636efa",
+         "#EF553B",
+         "#00cc96",
+         "#ab63fa",
+         "#FFA15A",
+         "#19d3f3",
+         "#FF6692",
+         "#B6E880",
+         "#FF97FF",
+         "#FECB52"
+        ],
+        "font": {
+         "color": "#2a3f5f"
+        },
+        "geo": {
+         "bgcolor": "white",
+         "lakecolor": "white",
+         "landcolor": "white",
+         "showlakes": true,
+         "showland": true,
+         "subunitcolor": "#C8D4E3"
+        },
+        "hoverlabel": {
+         "align": "left"
+        },
+        "hovermode": "closest",
+        "paper_bgcolor": "white",
+        "plot_bgcolor": "white",
+        "polar": {
+         "angularaxis": {
+          "gridcolor": "#EBF0F8",
+          "linecolor": "#EBF0F8",
+          "ticks": ""
+         },
+         "bgcolor": "white",
+         "radialaxis": {
+          "gridcolor": "#EBF0F8",
+          "linecolor": "#EBF0F8",
+          "ticks": ""
+         }
+        },
+        "scene": {
+         "xaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         },
+         "yaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         },
+         "zaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         }
+        },
+        "shapedefaults": {
+         "line": {
+          "color": "#2a3f5f"
+         }
+        },
+        "ternary": {
+         "aaxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         },
+         "baxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         },
+         "bgcolor": "white",
+         "caxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         }
+        },
+        "title": {
+         "x": 0.05
+        },
+        "xaxis": {
+         "automargin": true,
+         "gridcolor": "#EBF0F8",
+         "linecolor": "#EBF0F8",
+         "ticks": "",
+         "title": {
+          "standoff": 15
+         },
+         "zerolinecolor": "#EBF0F8",
+         "zerolinewidth": 2
+        },
+        "yaxis": {
+         "automargin": true,
+         "gridcolor": "#EBF0F8",
+         "linecolor": "#EBF0F8",
+         "ticks": "",
+         "title": {
+          "standoff": 15
+         },
+         "zerolinecolor": "#EBF0F8",
+         "zerolinewidth": 2
+        }
+       }
+      },
+      "yaxis": {
+       "autorange": "reversed",
+       "title": {},
+       "type": "category"
+      },
+      "height": 692,
+      "xaxis": {
+       "title": {
+        "text": "Return rate"
+       },
+       "tickformat": ".1%"
+      },
+      "title": {
+       "text": "Footwear return patterns<br><sup>Orders placed 1 January–24 October 2026</sup>",
+       "x": 0,
+       "xanchor": "left"
+      },
+      "margin": {
+       "l": 60,
+       "r": 20,
+       "t": 70,
+       "b": 50
+      },
+      "legend": {
+       "orientation": "h",
+       "y": -0.18
+      },
+      "font": {
+       "family": "Inter, system-ui, sans-serif"
+      },
+      "showlegend": true
+     }
+    }
+   },
+   "warnings": [],
+   "insight_id": "2026-11-14_122818_footwear-returns-so-high",
+   "attempts": 1,
+   "data_as_of": "2026-11-14",
+   "data_size": "full",
+   "cost": {
+    "usd": 0.02199,
+    "calls": 4,
+    "input": 11754,
+    "cached": 1089,
+    "output": 2255
+   },
+   "calls": [
+    {
+     "agent": "planner",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 3546,
+     "cached_tokens": 1089,
+     "output_tokens": 449,
+     "usd": 0.004756,
+     "seconds": 6.41
+    },
+    {
+     "agent": "sql_writer",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 3203,
+     "cached_tokens": 0,
+     "output_tokens": 1192,
+     "usd": 0.009163,
+     "seconds": 14.54
+    },
+    {
+     "agent": "validator",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 2509,
+     "cached_tokens": 0,
+     "output_tokens": 17,
+     "usd": 0.002594,
+     "seconds": 1.71
+    },
+    {
+     "agent": "analyst",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 2496,
+     "cached_tokens": 0,
+     "output_tokens": 597,
+     "usd": 0.005481,
+     "seconds": 8.07
+    }
+   ],
+   "t": 32.13
+  }
+ ]
+}

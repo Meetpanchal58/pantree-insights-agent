@@ -1,0 +1,1326 @@
+{
+ "question": "Which marketing channels give the best return on ad spend?",
+ "recorded_at": "2026-11-14T12:29:25",
+ "data_size": "full",
+ "data_as_of": "2026-11-14",
+ "seconds": 28.7,
+ "order": 4,
+ "events": [
+  {
+   "type": "step",
+   "step": "check_input",
+   "status": "started",
+   "detail": {},
+   "t": 0.01
+  },
+  {
+   "type": "step",
+   "step": "check_input",
+   "status": "done",
+   "detail": {
+    "seconds": 0.0
+   },
+   "t": 0.01
+  },
+  {
+   "type": "step",
+   "step": "retrieve",
+   "status": "started",
+   "detail": {},
+   "t": 0.01
+  },
+  {
+   "type": "step",
+   "step": "retrieve",
+   "status": "done",
+   "detail": {
+    "seconds": 0.11,
+    "tables": [
+     "campaigns",
+     "marketing_attribution",
+     "marketing_spend",
+     "sales",
+     "impressions",
+     "marketing_plan"
+    ],
+    "metrics": [
+     "marketing_spend",
+     "cpc",
+     "platform_roas",
+     "customer_acquisition_cost"
+    ],
+    "values": [
+     "Meta",
+     "Google Search",
+     "Affiliate Network",
+     "Google Shopping",
+     "Paid Search",
+     "Instagram"
+    ],
+    "examples": [
+     "Which channels bring the best return on ad spend, using our own attribution?",
+     "How much did we spend on each marketing channel?",
+     "How do ad platforms' reported orders compare with orders we recorded, by channel?"
+    ]
+   },
+   "t": 0.12
+  },
+  {
+   "type": "step",
+   "step": "plan",
+   "status": "started",
+   "detail": {},
+   "t": 0.12
+  },
+  {
+   "type": "step",
+   "step": "plan",
+   "status": "done",
+   "detail": {
+    "seconds": 6.85,
+    "decision": "proceed",
+    "plan": "Question: Which marketing channels had the highest shop-attributed return on marketing spend in 2026 to date?\nMetrics: marketing_spend, Last-click attributed revenue = SUM(marketing_attribution.credit_last_click * marketing_attribution.order_revenue), Last-click ROAS = last-click attributed revenue / marketing_spend; null when spend is zero, Last-click credited orders = SUM(marketing_attribution.credit_last_click)\nBreakdowns: campaigns.channel\nFilters: none\nTime window: 2026-01-01 to 2026-11-14 inclusive\nComparison: none\nExpected result: One row per channel with marketing spend, credited orders, attributed revenue and ROAS; sort by ROAS descending, with at most 50 rows.\nAssumptions: Use last-click attribution and shop-recorded revenue rather than platform-reported revenue.; The supplied definition does not establish whether attribution order_revenue is realized revenue; treat it as a proxy, not a verified realized-revenue measure.; Attribute orders by order_at and spend by date_hour within the window; spend and resulting orders need not occur in the same period.; Include campaign-linked channels with spend, including affiliate and CRM; exclude Direct/Organic because it has no campaign spend.; Recent orders may have incomplete returns and realized revenue."
+   },
+   "t": 6.97
+  },
+  {
+   "type": "step",
+   "step": "write_sql",
+   "status": "started",
+   "detail": {},
+   "t": 6.97
+  },
+  {
+   "type": "step",
+   "step": "write_sql",
+   "status": "done",
+   "detail": {
+    "seconds": 6.37,
+    "attempt": 1,
+    "sql": "WITH spend AS (\n  SELECT c.channel, SUM m.spend AS marketing_spend\n  FROM marketing_spend m\n  JOIN campaigns c ON c.campaign_id = m.campaign_id\n  WHERE m.date_hour >= TIMESTAMP '2026-01-01'\n    AND m.date_hour < TIMESTAMP '2026-11-15'\n  GROUP BY c.channel\n), attribution AS (\n  SELECT c.channel,\n         SUM(a.credit_last_click) AS credited_orders,\n         SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue\n  FROM marketing_attribution a\n  JOIN campaigns c ON c.campaign_id = a.campaign_id\n  WHERE a.order_at >= TIMESTAMP '2026-01-01'\n    AND a.order_at < TIMESTAMP '2026-11-15'\n  GROUP BY c.channel\n)\nSELECT s.channel,\n       s.marketing_spend,\n       COALESCE(a.credited_orders, 0) AS credited_orders,\n       COALESCE(a.attributed_revenue, 0) AS attributed_revenue,\n       COALESCE(a.attributed_revenue, 0) / NULLIF(s.marketing_spend, 0) AS last_click_roas\nFROM spend s\nLEFT JOIN attribution a ON s.channel IS NOT DISTINCT FROM a.channel\nORDER BY last_click_roas DESC NULLS LAST, s.channel\nLIMIT 50",
+    "explanation": "Ranks campaign-linked channels by last-click attributed revenue per rupee spent in the specified period. Attribution revenue is a proxy, not verified realized revenue; spend and attributed orders need not occur in the same period."
+   },
+   "t": 13.35
+  },
+  {
+   "type": "step",
+   "step": "check_sql",
+   "status": "started",
+   "detail": {},
+   "t": 13.35
+  },
+  {
+   "type": "step",
+   "step": "check_sql",
+   "status": "retry",
+   "detail": {
+    "seconds": 0.03,
+    "problems": [
+     "SQL could not be parsed: Expecting ). Line 2, Col: 26."
+    ]
+   },
+   "t": 13.38
+  },
+  {
+   "type": "step",
+   "step": "write_sql",
+   "status": "started",
+   "detail": {},
+   "t": 13.39
+  },
+  {
+   "type": "step",
+   "step": "write_sql",
+   "status": "done",
+   "detail": {
+    "seconds": 5.66,
+    "attempt": 2,
+    "sql": "WITH spend AS (\n  SELECT c.channel, SUM(m.spend) AS marketing_spend\n  FROM marketing_spend m\n  JOIN campaigns c ON c.campaign_id = m.campaign_id\n  WHERE m.date_hour >= TIMESTAMP '2026-01-01'\n    AND m.date_hour < TIMESTAMP '2026-11-15'\n  GROUP BY c.channel\n), attribution AS (\n  SELECT c.channel,\n         SUM(a.credit_last_click) AS credited_orders,\n         SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue\n  FROM marketing_attribution a\n  JOIN campaigns c ON c.campaign_id = a.campaign_id\n  WHERE a.order_at >= TIMESTAMP '2026-01-01'\n    AND a.order_at < TIMESTAMP '2026-11-15'\n  GROUP BY c.channel\n)\nSELECT s.channel,\n       s.marketing_spend,\n       COALESCE(a.credited_orders, 0) AS credited_orders,\n       COALESCE(a.attributed_revenue, 0) AS attributed_revenue,\n       COALESCE(a.attributed_revenue, 0) / NULLIF(s.marketing_spend, 0) AS last_click_roas\nFROM spend s\nLEFT JOIN attribution a ON s.channel IS NOT DISTINCT FROM a.channel\nORDER BY last_click_roas DESC NULLS LAST, s.channel\nLIMIT 50",
+    "explanation": "Ranks campaign-linked channels by last-click attributed shop revenue per rupee spent from January 1 through November 14, 2026. Attributed order revenue is a proxy and is not verified as realized revenue."
+   },
+   "t": 19.04
+  },
+  {
+   "type": "step",
+   "step": "check_sql",
+   "status": "started",
+   "detail": {},
+   "t": 19.05
+  },
+  {
+   "type": "step",
+   "step": "check_sql",
+   "status": "done",
+   "detail": {
+    "seconds": 0.01,
+    "tables": [
+     "campaigns",
+     "marketing_attribution",
+     "marketing_spend"
+    ]
+   },
+   "t": 19.05
+  },
+  {
+   "type": "step",
+   "step": "run_query",
+   "status": "started",
+   "detail": {},
+   "t": 19.06
+  },
+  {
+   "type": "step",
+   "step": "run_query",
+   "status": "done",
+   "detail": {
+    "seconds": 0.05,
+    "rows": 12,
+    "columns": [
+     "channel",
+     "marketing_spend",
+     "credited_orders",
+     "attributed_revenue",
+     "last_click_roas"
+    ],
+    "query_seconds": 0.04,
+    "truncated": false
+   },
+   "t": 19.1
+  },
+  {
+   "type": "step",
+   "step": "validate",
+   "status": "started",
+   "detail": {},
+   "t": 19.11
+  },
+  {
+   "type": "step",
+   "step": "validate",
+   "status": "done",
+   "detail": {
+    "seconds": 1.61,
+    "ok": true
+   },
+   "t": 20.71
+  },
+  {
+   "type": "step",
+   "step": "analyse",
+   "status": "started",
+   "detail": {},
+   "t": 20.72
+  },
+  {
+   "type": "step",
+   "step": "analyse",
+   "status": "done",
+   "detail": {
+    "seconds": 7.73,
+    "headline": "Email had the highest last-click return on marketing spend in 2026 to date, at 99.5 times spend.",
+    "number_check": "passed",
+    "rewritten": false,
+    "unverified": []
+   },
+   "t": 28.44
+  },
+  {
+   "type": "step",
+   "step": "chart",
+   "status": "started",
+   "detail": {},
+   "t": 28.45
+  },
+  {
+   "type": "step",
+   "step": "chart",
+   "status": "done",
+   "detail": {
+    "seconds": 0.21,
+    "kind": "bar_h"
+   },
+   "t": 28.65
+  },
+  {
+   "type": "step",
+   "step": "remember",
+   "status": "started",
+   "detail": {},
+   "t": 28.66
+  },
+  {
+   "type": "step",
+   "step": "remember",
+   "status": "done",
+   "detail": {
+    "seconds": 0.0,
+    "facts": 2,
+    "gaps_closed": 0
+   },
+   "t": 28.66
+  },
+  {
+   "type": "final",
+   "run_id": "39be575c5144",
+   "status": "done",
+   "message": null,
+   "question": "Which marketing channels give the best return on ad spend?",
+   "plan": {
+    "decision": "proceed",
+    "decline_reason": null,
+    "clarifying_questions": [],
+    "restated_question": "Which marketing channels had the highest shop-attributed return on marketing spend in 2026 to date?",
+    "metrics": [
+     "marketing_spend",
+     "Last-click attributed revenue = SUM(marketing_attribution.credit_last_click * marketing_attribution.order_revenue)",
+     "Last-click ROAS = last-click attributed revenue / marketing_spend; null when spend is zero",
+     "Last-click credited orders = SUM(marketing_attribution.credit_last_click)"
+    ],
+    "breakdowns": [
+     "campaigns.channel"
+    ],
+    "filters": [],
+    "time_window": "2026-01-01 to 2026-11-14 inclusive",
+    "comparison": null,
+    "output_shape": "One row per channel with marketing spend, credited orders, attributed revenue and ROAS; sort by ROAS descending, with at most 50 rows.",
+    "assumptions": [
+     "Use last-click attribution and shop-recorded revenue rather than platform-reported revenue.",
+     "The supplied definition does not establish whether attribution order_revenue is realized revenue; treat it as a proxy, not a verified realized-revenue measure.",
+     "Attribute orders by order_at and spend by date_hour within the window; spend and resulting orders need not occur in the same period.",
+     "Include campaign-linked channels with spend, including affiliate and CRM; exclude Direct/Organic because it has no campaign spend.",
+     "Recent orders may have incomplete returns and realized revenue."
+    ]
+   },
+   "sql": "WITH spend AS (\n  SELECT\n    c.channel,\n    SUM(m.spend) AS marketing_spend\n  FROM marketing_spend AS m\n  JOIN campaigns AS c\n    ON c.campaign_id = m.campaign_id\n  WHERE\n    m.date_hour >= CAST('2026-01-01' AS TIMESTAMP)\n    AND m.date_hour < CAST('2026-11-15' AS TIMESTAMP)\n  GROUP BY\n    c.channel\n), attribution AS (\n  SELECT\n    c.channel,\n    SUM(a.credit_last_click) AS credited_orders,\n    SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue\n  FROM marketing_attribution AS a\n  JOIN campaigns AS c\n    ON c.campaign_id = a.campaign_id\n  WHERE\n    a.order_at >= CAST('2026-01-01' AS TIMESTAMP)\n    AND a.order_at < CAST('2026-11-15' AS TIMESTAMP)\n  GROUP BY\n    c.channel\n)\nSELECT\n  s.channel,\n  s.marketing_spend,\n  COALESCE(a.credited_orders, 0) AS credited_orders,\n  COALESCE(a.attributed_revenue, 0) AS attributed_revenue,\n  COALESCE(a.attributed_revenue, 0) / NULLIF(s.marketing_spend, 0) AS last_click_roas\nFROM spend AS s\nLEFT JOIN attribution AS a\n  ON s.channel IS NOT DISTINCT FROM a.channel\nORDER BY\n  last_click_roas DESC,\n  s.channel\nLIMIT 50",
+   "result": {
+    "columns": [
+     "channel",
+     "marketing_spend",
+     "credited_orders",
+     "attributed_revenue",
+     "last_click_roas"
+    ],
+    "data": [
+     [
+      "Email",
+      68386.35,
+      3790.0,
+      6805961.270000002,
+      99.5222185422
+     ],
+     [
+      "SMS",
+      12335.16,
+      457.0,
+      849736.8,
+      68.8873755995
+     ],
+     [
+      "Affiliate Network",
+      165705.6600000001,
+      3348.0,
+      6012407.010000002,
+      36.2836550665
+     ],
+     [
+      "WhatsApp",
+      47601.05,
+      842.0,
+      1411267.7,
+      29.6478270963
+     ],
+     [
+      "Google Search",
+      1170181.5400000003,
+      7416.0,
+      13439042.120000016,
+      11.4845788116
+     ],
+     [
+      "Bing Search",
+      76657.89,
+      395.0,
+      676119.2,
+      8.8199557802
+     ],
+     [
+      "Instagram",
+      541699.4399999967,
+      2378.0,
+      4207503.3,
+      7.7672284468
+     ],
+     [
+      "YouTube",
+      406100.7300000005,
+      1759.0,
+      3154256.809999999,
+      7.7671783796
+     ],
+     [
+      "Google Shopping",
+      606811.2600000002,
+      2568.0,
+      4666442.700000001,
+      7.6901056516
+     ],
+     [
+      "Meta",
+      1003452.2200000026,
+      3812.0,
+      6926426.260000002,
+      6.9025969767
+     ],
+     [
+      "DSP Display",
+      374943.2400000005,
+      988.0,
+      1728147.99,
+      4.6090922722
+     ],
+     [
+      "Push",
+      0.0,
+      1488.0,
+      2727654.0099999993,
+      null
+     ]
+    ],
+    "truncated": false
+   },
+   "analysis": {
+    "headline": "Email had the highest last-click return on marketing spend in 2026 to date, at 99.5 times spend.",
+    "findings": [
+     "Email generated Rs 68.1 lakh in attributed revenue on Rs 68,386 in spend, ahead of SMS at 68.9 times spend.",
+     "Affiliate Network returned 36.3 times spend, while WhatsApp returned 29.6 times. Both outperformed Google Search at 11.5 times.",
+     "Google Search generated the most attributed revenue, Rs 1.34 crore, on Rs 11.7 lakh in spend; its return was about 1.7 times Meta’s 6.9 times.",
+     "DSP Display had the lowest measurable return at 4.6 times spend. Push had Rs 27.3 lakh in attributed revenue but zero recorded spend, so its return cannot be calculated."
+    ],
+    "recommendations": [
+     "Test incremental investment in Email and SMS, while checking whether their high last-click returns hold as reach expands.",
+     "Review DSP Display and Meta campaigns for opportunities to improve efficiency; compare them with Google Search before reallocating spend.",
+     "Investigate Push’s zero recorded spend and assess channel contribution beyond last-click attribution before making budget decisions."
+    ],
+    "caveats": [
+     "Results cover 1 January–14 November 2026 and use shop-recorded last-click attributed revenue, which is not verified as realized revenue.",
+     "Spend and attributed orders are dated separately, so they may not belong to the same campaign period. Last-click ROAS does not establish incremental impact.",
+     "Recent returns may be incomplete; the shop data is simulated."
+    ],
+    "follow_up_questions": [
+     "How do channel returns compare after accounting for returns and cancellations?",
+     "Which campaigns within Google Search and Meta drive the strongest returns?",
+     "Do Email and SMS generate incremental orders, or mainly capture the last click?"
+    ],
+    "memory": [
+     {
+      "statement": "From 1 January to 14 November 2026, Email had the highest measurable last-click ROAS at 99.5 times, with Rs 68.1 lakh attributed revenue.",
+      "type": "fact"
+     },
+     {
+      "statement": "From 1 January to 14 November 2026, Google Search generated Rs 1.34 crore in last-click attributed revenue at 11.5 times spend.",
+      "type": "fact"
+     }
+    ],
+    "explains_gap_ids": [],
+    "chart_title": "Last-click ROAS by marketing channel",
+    "chart_subtitle": "1 January–14 November 2026; attributed revenue divided by recorded spend",
+    "chart_metric": "last_click_roas"
+   },
+   "chart": {
+    "kind": "bar_h",
+    "title": "Last-click ROAS by marketing channel",
+    "metric": "last_click_roas",
+    "figure": {
+     "data": [
+      {
+       "customdata": {
+        "dtype": "f8",
+        "bdata": "mpmZmSWy8EAAAAAAAJytQK5H4XqUF8hAAAAAAACQfEB+FK5HTToEQQAAAAAAKKpAmpmZmSE+50AAAAAAAFCKQKVwPYoF2zFBAAAAAAD4vEDXo3A9HrfyQAAAAAAAsHhA+K1H4QaIIEEAAAAAAJSiQMEehetSyRhBAAAAAAB8m0BUuB6FtoQiQQAAAAAAEKRAIdejcHifLkEAAAAAAMitQGWPwvV84hZBAAAAAADgjkAAAAAAAAAAAAAAAAAAQJdA",
+        "shape": "12, 2"
+       },
+       "hovertemplate": "%{y}<br>Last click roas: %{x:,.4~g}<br>Marketing spend: %{customdata[0]:,.4~g}<br>Credited orders: %{customdata[1]:,.4~g}<extra></extra>",
+       "marker": {
+        "color": "#4F46E5"
+       },
+       "orientation": "h",
+       "x": {
+        "dtype": "f8",
+        "bdata": "SAdSB2zhWEC9xwbDyjhRQCr7KM9OJEJANhIg/9elPUAnUMi2GvgmQBZAeD7RoyFAe0R+VaQRH0AzUoo1lxEfQIigUQ6rwh5AdJTBYUKcG0CeYXXitW8SQAAAAAAAAPh/"
+       },
+       "y": [
+        "Email",
+        "SMS",
+        "Affiliate Network",
+        "WhatsApp",
+        "Google Search",
+        "Bing Search",
+        "Instagram",
+        "YouTube",
+        "Google Shopping",
+        "Meta",
+        "DSP Display",
+        "Push"
+       ],
+       "type": "bar"
+      }
+     ],
+     "layout": {
+      "template": {
+       "data": {
+        "barpolar": [
+         {
+          "marker": {
+           "line": {
+            "color": "white",
+            "width": 0.5
+           },
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "barpolar"
+         }
+        ],
+        "bar": [
+         {
+          "error_x": {
+           "color": "#2a3f5f"
+          },
+          "error_y": {
+           "color": "#2a3f5f"
+          },
+          "marker": {
+           "line": {
+            "color": "white",
+            "width": 0.5
+           },
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "bar"
+         }
+        ],
+        "carpet": [
+         {
+          "aaxis": {
+           "endlinecolor": "#2a3f5f",
+           "gridcolor": "#C8D4E3",
+           "linecolor": "#C8D4E3",
+           "minorgridcolor": "#C8D4E3",
+           "startlinecolor": "#2a3f5f"
+          },
+          "baxis": {
+           "endlinecolor": "#2a3f5f",
+           "gridcolor": "#C8D4E3",
+           "linecolor": "#C8D4E3",
+           "minorgridcolor": "#C8D4E3",
+           "startlinecolor": "#2a3f5f"
+          },
+          "type": "carpet"
+         }
+        ],
+        "choropleth": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "choropleth"
+         }
+        ],
+        "contourcarpet": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "contourcarpet"
+         }
+        ],
+        "contour": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "contour"
+         }
+        ],
+        "heatmap": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "heatmap"
+         }
+        ],
+        "histogram2dcontour": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "histogram2dcontour"
+         }
+        ],
+        "histogram2d": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "histogram2d"
+         }
+        ],
+        "histogram": [
+         {
+          "marker": {
+           "pattern": {
+            "fillmode": "overlay",
+            "size": 10,
+            "solidity": 0.2
+           }
+          },
+          "type": "histogram"
+         }
+        ],
+        "mesh3d": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "type": "mesh3d"
+         }
+        ],
+        "parcoords": [
+         {
+          "line": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "parcoords"
+         }
+        ],
+        "pie": [
+         {
+          "automargin": true,
+          "type": "pie"
+         }
+        ],
+        "scatter3d": [
+         {
+          "line": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatter3d"
+         }
+        ],
+        "scattercarpet": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattercarpet"
+         }
+        ],
+        "scattergeo": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattergeo"
+         }
+        ],
+        "scattergl": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattergl"
+         }
+        ],
+        "scattermap": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scattermap"
+         }
+        ],
+        "scatterpolargl": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterpolargl"
+         }
+        ],
+        "scatterpolar": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterpolar"
+         }
+        ],
+        "scatter": [
+         {
+          "fillpattern": {
+           "fillmode": "overlay",
+           "size": 10,
+           "solidity": 0.2
+          },
+          "type": "scatter"
+         }
+        ],
+        "scatterternary": [
+         {
+          "marker": {
+           "colorbar": {
+            "outlinewidth": 0,
+            "ticks": ""
+           }
+          },
+          "type": "scatterternary"
+         }
+        ],
+        "surface": [
+         {
+          "colorbar": {
+           "outlinewidth": 0,
+           "ticks": ""
+          },
+          "colorscale": [
+           [
+            0.0,
+            "#0d0887"
+           ],
+           [
+            0.1111111111111111,
+            "#46039f"
+           ],
+           [
+            0.2222222222222222,
+            "#7201a8"
+           ],
+           [
+            0.3333333333333333,
+            "#9c179e"
+           ],
+           [
+            0.4444444444444444,
+            "#bd3786"
+           ],
+           [
+            0.5555555555555556,
+            "#d8576b"
+           ],
+           [
+            0.6666666666666666,
+            "#ed7953"
+           ],
+           [
+            0.7777777777777778,
+            "#fb9f3a"
+           ],
+           [
+            0.8888888888888888,
+            "#fdca26"
+           ],
+           [
+            1.0,
+            "#f0f921"
+           ]
+          ],
+          "type": "surface"
+         }
+        ],
+        "table": [
+         {
+          "cells": {
+           "fill": {
+            "color": "#EBF0F8"
+           },
+           "line": {
+            "color": "white"
+           }
+          },
+          "header": {
+           "fill": {
+            "color": "#C8D4E3"
+           },
+           "line": {
+            "color": "white"
+           }
+          },
+          "type": "table"
+         }
+        ]
+       },
+       "layout": {
+        "annotationdefaults": {
+         "arrowcolor": "#2a3f5f",
+         "arrowhead": 0,
+         "arrowwidth": 1
+        },
+        "autotypenumbers": "strict",
+        "coloraxis": {
+         "colorbar": {
+          "outlinewidth": 0,
+          "ticks": ""
+         }
+        },
+        "colorscale": {
+         "diverging": [
+          [
+           0,
+           "#8e0152"
+          ],
+          [
+           0.1,
+           "#c51b7d"
+          ],
+          [
+           0.2,
+           "#de77ae"
+          ],
+          [
+           0.3,
+           "#f1b6da"
+          ],
+          [
+           0.4,
+           "#fde0ef"
+          ],
+          [
+           0.5,
+           "#f7f7f7"
+          ],
+          [
+           0.6,
+           "#e6f5d0"
+          ],
+          [
+           0.7,
+           "#b8e186"
+          ],
+          [
+           0.8,
+           "#7fbc41"
+          ],
+          [
+           0.9,
+           "#4d9221"
+          ],
+          [
+           1,
+           "#276419"
+          ]
+         ],
+         "sequential": [
+          [
+           0.0,
+           "#0d0887"
+          ],
+          [
+           0.1111111111111111,
+           "#46039f"
+          ],
+          [
+           0.2222222222222222,
+           "#7201a8"
+          ],
+          [
+           0.3333333333333333,
+           "#9c179e"
+          ],
+          [
+           0.4444444444444444,
+           "#bd3786"
+          ],
+          [
+           0.5555555555555556,
+           "#d8576b"
+          ],
+          [
+           0.6666666666666666,
+           "#ed7953"
+          ],
+          [
+           0.7777777777777778,
+           "#fb9f3a"
+          ],
+          [
+           0.8888888888888888,
+           "#fdca26"
+          ],
+          [
+           1.0,
+           "#f0f921"
+          ]
+         ],
+         "sequentialminus": [
+          [
+           0.0,
+           "#0d0887"
+          ],
+          [
+           0.1111111111111111,
+           "#46039f"
+          ],
+          [
+           0.2222222222222222,
+           "#7201a8"
+          ],
+          [
+           0.3333333333333333,
+           "#9c179e"
+          ],
+          [
+           0.4444444444444444,
+           "#bd3786"
+          ],
+          [
+           0.5555555555555556,
+           "#d8576b"
+          ],
+          [
+           0.6666666666666666,
+           "#ed7953"
+          ],
+          [
+           0.7777777777777778,
+           "#fb9f3a"
+          ],
+          [
+           0.8888888888888888,
+           "#fdca26"
+          ],
+          [
+           1.0,
+           "#f0f921"
+          ]
+         ]
+        },
+        "colorway": [
+         "#636efa",
+         "#EF553B",
+         "#00cc96",
+         "#ab63fa",
+         "#FFA15A",
+         "#19d3f3",
+         "#FF6692",
+         "#B6E880",
+         "#FF97FF",
+         "#FECB52"
+        ],
+        "font": {
+         "color": "#2a3f5f"
+        },
+        "geo": {
+         "bgcolor": "white",
+         "lakecolor": "white",
+         "landcolor": "white",
+         "showlakes": true,
+         "showland": true,
+         "subunitcolor": "#C8D4E3"
+        },
+        "hoverlabel": {
+         "align": "left"
+        },
+        "hovermode": "closest",
+        "paper_bgcolor": "white",
+        "plot_bgcolor": "white",
+        "polar": {
+         "angularaxis": {
+          "gridcolor": "#EBF0F8",
+          "linecolor": "#EBF0F8",
+          "ticks": ""
+         },
+         "bgcolor": "white",
+         "radialaxis": {
+          "gridcolor": "#EBF0F8",
+          "linecolor": "#EBF0F8",
+          "ticks": ""
+         }
+        },
+        "scene": {
+         "xaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         },
+         "yaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         },
+         "zaxis": {
+          "backgroundcolor": "white",
+          "gridcolor": "#DFE8F3",
+          "gridwidth": 2,
+          "linecolor": "#EBF0F8",
+          "showbackground": true,
+          "ticks": "",
+          "zerolinecolor": "#EBF0F8"
+         }
+        },
+        "shapedefaults": {
+         "line": {
+          "color": "#2a3f5f"
+         }
+        },
+        "ternary": {
+         "aaxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         },
+         "baxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         },
+         "bgcolor": "white",
+         "caxis": {
+          "gridcolor": "#DFE8F3",
+          "linecolor": "#A2B1C6",
+          "ticks": ""
+         }
+        },
+        "title": {
+         "x": 0.05
+        },
+        "xaxis": {
+         "automargin": true,
+         "gridcolor": "#EBF0F8",
+         "linecolor": "#EBF0F8",
+         "ticks": "",
+         "title": {
+          "standoff": 15
+         },
+         "zerolinecolor": "#EBF0F8",
+         "zerolinewidth": 2
+        },
+        "yaxis": {
+         "automargin": true,
+         "gridcolor": "#EBF0F8",
+         "linecolor": "#EBF0F8",
+         "ticks": "",
+         "title": {
+          "standoff": 15
+         },
+         "zerolinecolor": "#EBF0F8",
+         "zerolinewidth": 2
+        }
+       }
+      },
+      "yaxis": {
+       "autorange": "reversed",
+       "title": {},
+       "type": "category"
+      },
+      "xaxis": {
+       "title": {
+        "text": "Last click roas"
+       },
+       "tickformat": "~s"
+      },
+      "title": {
+       "text": "Last-click ROAS by marketing channel<br><sup>1 January–14 November 2026; attributed revenue divided by recorded spend</sup>",
+       "x": 0,
+       "xanchor": "left"
+      },
+      "margin": {
+       "l": 60,
+       "r": 20,
+       "t": 70,
+       "b": 50
+      },
+      "legend": {
+       "orientation": "h",
+       "y": -0.18
+      },
+      "font": {
+       "family": "Inter, system-ui, sans-serif"
+      },
+      "height": 420,
+      "showlegend": false
+     }
+    }
+   },
+   "warnings": [],
+   "insight_id": "2026-11-14_122925_marketing-channels-best-return-ad-spend",
+   "attempts": 2,
+   "data_as_of": "2026-11-14",
+   "data_size": "full",
+   "cost": {
+    "usd": 0.02332,
+    "calls": 5,
+    "input": 15209,
+    "cached": 1089,
+    "output": 1830
+   },
+   "calls": [
+    {
+     "agent": "planner",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 4082,
+     "cached_tokens": 1089,
+     "output_tokens": 421,
+     "usd": 0.005152,
+     "seconds": 6.13
+    },
+    {
+     "agent": "sql_writer",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 3567,
+     "cached_tokens": 0,
+     "output_tokens": 452,
+     "usd": 0.005827,
+     "seconds": 6.37
+    },
+    {
+     "agent": "sql_writer",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 3887,
+     "cached_tokens": 0,
+     "output_tokens": 359,
+     "usd": 0.005682,
+     "seconds": 5.66
+    },
+    {
+     "agent": "validator",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 1813,
+     "cached_tokens": 0,
+     "output_tokens": 17,
+     "usd": 0.001898,
+     "seconds": 1.6
+    },
+    {
+     "agent": "analyst",
+     "model": "openai:gpt-6.1-terra",
+     "input_tokens": 1860,
+     "cached_tokens": 0,
+     "output_tokens": 581,
+     "usd": 0.004765,
+     "seconds": 7.72
+    }
+   ],
+   "t": 28.66
+  }
+ ]
+}
