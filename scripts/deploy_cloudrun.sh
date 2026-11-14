@@ -48,8 +48,12 @@ done
 gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" --member "serviceAccount:$SA" \
   --role roles/storage.objectViewer >/dev/null
 
-echo "Building $IMAGE with Cloud Build ..."
-gcloud builds submit --tag "$IMAGE" --region "$REGION" .
+if gcloud artifacts docker images describe "$IMAGE" >/dev/null 2>&1; then
+  echo "Image $IMAGE already built; skipping the build."
+else
+  echo "Building $IMAGE with Cloud Build ..."
+  gcloud builds submit --tag "$IMAGE" --region "$REGION" .
+fi
 
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format 'value(status.url)' 2>/dev/null || true)"
 ENV_VARS="APP_ENV=production,DATA_DIR=/data,DATA_SIZE=full,ADMIN_EMAILS=[\"${ADMIN_EMAIL}\"],DAILY_QUESTION_LIMIT=10,DAILY_BUDGET_USD=0.50${EMAIL_ENV}"
@@ -63,7 +67,7 @@ gcloud run deploy "$SERVICE" --image "$IMAGE" --region "$REGION" \
   --execution-environment gen2 --cpu-boost \
   --add-volume "name=data,type=cloud-storage,bucket=${BUCKET},readonly=true" \
   --add-volume-mount "volume=data,mount-path=/data" \
-  --set-env-vars "^@^$(echo "$ENV_VARS" | tr ',' '@')" \
+  --set-env-vars "^|^$(echo "$ENV_VARS" | tr ',' '|')" \
   --set-secrets "$SECRETS"
 
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format 'value(status.url)')"
