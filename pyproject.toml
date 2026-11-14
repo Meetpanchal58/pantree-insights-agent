@@ -18,6 +18,10 @@ dependencies = [
     "llama-index-retrievers-bm25>=0.9.0",
     "llama-index-embeddings-fastembed>=0.8.0",
     "fastembed>=0.9.1",
+    "langchain>=1.5.0",
+    "langchain-openai>=1.8.0",
+    "langgraph>=1.2.22",
+    "plotly>=7.1.0",
 ]
 
 [dependency-groups]
@@ -30,6 +34,7 @@ dev = [
 pantree-data = "pantree_insights.db:main"
 pantree-pulse = "pantree_insights.pulse:main"
 pantree-context = "pantree_insights.retrieval:main"
+pantree-ask = "pantree_insights.graph:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -44,6 +49,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["SIM905"]   # "a b c".split() reads better for word lists
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -201,6 +201,13 @@ def _parse(token: str) -> tuple[float, bool] | None:
     return value, pct
 
 
+MONTHS = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
+DATES = re.compile(rf"\b\d{{4}}-\d{{2}}-\d{{2}}\b|\b{MONTHS}\s+\d{{4}}\b"
+                   rf"|\b{MONTHS}\s+\d{{1,2}}(?!\d)(?:\s*[-–]\s*\d{{1,2}}(?!\d))?(?:,?\s+\d{{4}})?"
+                   rf"|\b\d{{1,2}}(?:st|nd|rd|th)?(?:\s*[-–]\s*\d{{1,2}}(?:st|nd|rd|th)?)?\s+(?:of\s+)?{MONTHS}(?:\s+\d{{4}})?"
+                   rf"|\b\d{{1,2}}(?:st|nd|rd|th)\b|\bq[1-4]\b", re.I)
+
+
 def unsupported_numbers(text: str, frame: pd.DataFrame, rel_tol: float = 0.015) -> list[str]:
     """Numbers in an answer that cannot be traced to the result table (directly or as a simple derivation).
 
@@ -221,6 +228,7 @@ def unsupported_numbers(text: str, frame: pd.DataFrame, rel_tol: float = 0.015) 
         return any(abs(x - c) <= rel_tol * max(abs(c), 1e-9) or abs(x - c) < 0.051 for c in candidates)
 
     bad = []
+    text = DATES.sub(" ", text)                  # dates ("October 15-21", "2026-11-03") are not claims
     for token in NUMBER.findall(text):
         parsed = _parse(token)
         if parsed is None:
