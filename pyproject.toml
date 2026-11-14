@@ -14,6 +14,10 @@ dependencies = [
     "pyyaml>=6.0",
     "sqlglot>=25.0",
     "huggingface_hub>=0.24",
+    "llama-index-core>=0.14.26",
+    "llama-index-retrievers-bm25>=0.9.0",
+    "llama-index-embeddings-fastembed>=0.8.0",
+    "fastembed>=0.9.1",
 ]
 
 [dependency-groups]
@@ -25,6 +29,7 @@ dev = [
 [project.scripts]
 pantree-data = "pantree_insights.db:main"
 pantree-pulse = "pantree_insights.pulse:main"
+pantree-context = "pantree_insights.retrieval:main"
 
 [build-system]
 requires = ["hatchling"]
