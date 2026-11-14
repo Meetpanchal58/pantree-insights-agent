@@ -8,9 +8,8 @@ Data: 22 months of shop history (catalogue, customers, browsing, orders, returns
 support) from my [ecommerce-simulator](https://github.com/Meetpanchal58/ecommerce-simulator), refreshed
 nightly. Sister project: [pantree-recommendation-system](https://github.com/Meetpanchal58/pantree-recommendation-system).
 
-> **Status: step 4 of 5 done.** The full app runs locally: sign-in, chats and projects, live agent
-> activity, charts, exports and memory. Evals and deployment on Google Cloud Run come next
-> (see [Roadmap](#roadmap)).
+> **Status: complete.** The app runs locally and is ready for Google Cloud Run
+> ([deploy guide](#deploy-on-google-cloud-run)); it is scored on 44 evaluation questions ([results](#evaluation)).
 
 ## The app
 
@@ -110,13 +109,71 @@ uv run pytest -q                              # guardrail tests + checks on the 
 
 Settings come from environment variables or `.env` (see `.env.example`), e.g. `DATA_SIZE=small`.
 
+## Deploy on Google Cloud Run
+
+Everything below runs in **Google Cloud Shell** (the terminal button at the top right of the Google Cloud
+console): it is already signed in and has `gcloud`, `git` and bash. Settings keep it inside the free tier:
+**0 instances when idle, at most 1**, request-based billing, data mounted from Cloud Storage.
+
+**1. Database (Neon Postgres, free).** Create a project at neon.tech, copy the connection string
+(`postgresql://...?sslmode=require`) and store it as a secret (Cloud console → Secret Manager → Create secret,
+name `database-url`). Tables are created automatically on first start.
+
+**2. Google sign-in (optional but recommended).** Cloud console → APIs & Services → OAuth consent screen
+(External; app name "Pantree Insights"; scopes `openid`, `email`, `profile`; publish the app) → Credentials →
+Create credentials → OAuth client ID → Web application. Leave the redirect URI for now (step 5).
+Store the ID and secret as secrets `google-client-id` and `google-client-secret`.
+For email codes instead or as well: a Gmail app password, stored as `smtp-username` and `smtp-password`.
+
+**3. Get the code and upload the data** (once, and again whenever you want fresher data):
+
+```bash
+git clone https://github.com/Meetpanchal58/pantree-insights-agent && cd pantree-insights-agent
+```
+
+```bash
+bash scripts/upload_data.sh
+```
+
+**4. Deploy** (the OpenAI key is already in Secret Manager as `openai-api-key`):
+
+```bash
+ADMIN_EMAIL=you@gmail.com bash scripts/deploy_cloudrun.sh
+```
+
+The script creates a service account that can only read the secrets and the data bucket, builds the image
+with Cloud Build, deploys, and prints the live URL.
+
+**5. Finish Google sign-in:** add the printed redirect URI (`<URL>/auth/google/callback`) to the OAuth client's
+"Authorized redirect URIs". Redeploy any time with the same command.
+
+The first request after an idle period starts a new instance (about 20-40 seconds: indexes and the KPI pulse
+are rebuilt). Live questions are limited to 10 per user per day and the app stops calling the model after
+US$0.50 a day; the OpenAI project has its own monthly limit.
+
+## Evaluation
+
+`evals/questions.yaml` + the 28 verified examples = 44 questions: 38 with gold SQL (scored by execution
+accuracy: the agent's result must contain the gold result's numbers), 3 vague questions that should get
+clarifying questions, 3 that must be declined.
+
+```bash
+uv run python evals/run_eval.py --dry-run     # free: checks the gold SQL
+```
+
+```bash
+uv run python evals/run_eval.py --yes         # real run, about US$0.60-1.30
+```
+
+EVAL_RESULTS_PLACEHOLDER
+
 ## Roadmap
 
 1. ✅ Data layer, metric definitions, guardrails, KPI pulse
 2. ✅ Retrieval: hybrid search (BM25 + local embeddings) over tables, metrics, examples and column values
 3. ✅ Agents (planner, SQL writer, validator, analyst) as a LangGraph flow, with memory
 4. ✅ FastAPI app: sign-in, chats and projects, live agent activity, charts, exports (Copy, PNG, CSV, PPT), 4-level memory, pulse, demo replays
-5. Evals and deployment on Google Cloud Run
+5. ✅ Evals and deployment on Google Cloud Run (Dockerfile, `scripts/deploy_cloudrun.sh`, `evals/`)
 
 ## License
 
