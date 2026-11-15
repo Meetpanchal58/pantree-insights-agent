@@ -248,9 +248,10 @@ def summary(rows: list[dict]) -> str:
         layers = Counter(r["decline_layer"] for r in declines)
         out.append(f"| Declines caught by input guard / planner | {layers.get('input_guard', 0)} / "
                    f"{layers.get('planner', 0)} |")
-        out.append(f"| Median latency · mean cost per question | "
-                   f"{statistics.median(r['seconds'] for r in part):.0f} s · "
-                   f"${statistics.mean(r['cost'] for r in part):.3f} |")
+        if part:
+            out.append(f"| Median latency · mean cost per question | "
+                       f"{statistics.median(r['seconds'] for r in part):.0f} s · "
+                       f"${statistics.mean(r['cost'] for r in part):.3f} |")
         authors = sorted({r["author"] for r in answer})
         if len(authors) > 1:
             out += ["", "| Author | Correct result tables |", "|---|---|"]
@@ -298,7 +299,7 @@ def rescore(report: Path) -> None:
             final = {"status": "done", "type": "final", "sql": row["sql"], "grounded": row.get("grounded"),
                      "analysis": {"claims": row.get("claims") or []}}
             row.update(judge(con, item, final, []))
-        elif item["set"] == "answer":                        # no result: wrong (older reports stored None)
+        elif item["set"] == "answer" and row["status"] != "api_error":   # no result: wrong; provider errors unscored
             row.update(result_correct=False, answer_correct=False)
     report.write_text(json.dumps(rows, indent=1, default=str))
     text = summary(rows)

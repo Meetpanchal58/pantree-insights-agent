@@ -127,3 +127,17 @@ def test_claims_in_percent_points_hold_on_a_ratio_gold_column():
     assert ok
     bad = [{"id": "c1", "value": 12.0, "unit": "number", "column": "prime_share_pct", "row": []}]
     assert not run_eval.claims_hold_on_gold(bad, gold, {"prime_share_pct": "prime_share"})[0]
+
+
+def test_rescore_keeps_provider_errors_unscored(tmp_path, monkeypatch):
+    row = {"suite": "holdout", "variant": "full", "repeat": 0, "model": "m", "temperature": None, "id": "x02",
+           "author": "self", "set": "answer", "tuned": False, "question": "q", "seconds": 1.0, "cost": 0.0,
+           "attempts": 0, "status": "api_error", "sql": None, "grounded": None, "claims": None,
+           "result_correct": None, "answer_correct": None, "passed": None, "decline_layer": None,
+           "failure_type": "api_error", "reason": "provider error after retry (not scored)"}
+    path = tmp_path / "run.json"
+    path.write_text(json.dumps([row]))
+    monkeypatch.setattr(run_eval, "connect", lambda: None)
+    run_eval.rescore(path)
+    saved = json.loads(path.read_text())[0]
+    assert saved["result_correct"] is None and saved["failure_type"] == "api_error"
