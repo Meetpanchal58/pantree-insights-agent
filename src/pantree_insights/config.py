@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "low"
     sql_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "medium"
     max_output_tokens: int = 4000
+    # Sampling temperature. None = provider default: OpenAI reasoning models (gpt-6.x) do not accept a
+    # temperature, so it is only sent when set. Reports record the value used.
+    temperature: float | None = None
     max_sql_attempts: int = 3                    # SQL writer tries (guardrail / database / validator feedback)
     daily_budget_usd: float = 1.00               # live LLM calls stop for the day after this
 
@@ -40,6 +43,7 @@ class Settings(BaseSettings):
     session_secret: str = "dev-only-change-me"                       # signs the session cookie
     admin_emails: list[str] = []                                     # may update shared business memory
     daily_question_limit: int = 10                                   # live questions per user per day
+    memory_max_age_days: int = 30          # insights older than this (vs the data's last day) are left out
     demo_dir: Path = ROOT / "demo_runs"
 
     # Sign-in: Google (OAuth client in Google Cloud) and/or email codes (SMTP, e.g. Gmail app password)

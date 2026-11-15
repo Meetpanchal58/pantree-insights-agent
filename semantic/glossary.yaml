@@ -55,3 +55,25 @@ terms:
   festive season: The Navratri, Diwali and Grand Festive Sale events (September to November; see sale_events).
   sale event: A festival or sale in sale_events, live between start_date and end_date.
   revenue: Unless the user says otherwise, realized revenue (delivered minus refunds).
+  delivery region: Region of the delivery address = customer_addresses.region, joined via sales.address_id
+    (customers.region is where the customer signed up, not where orders go).
+  delivery address: Delivery geography (city, state, region, city_tier, pincode) is in customer_addresses,
+    joined via sales.address_id. Aggregates by these are fine; only the street line is hidden.
+  city tier: For orders, deliveries, returns and RTO use the delivery address tier (customer_addresses.city_tier
+    via sales.address_id); customers.city_tier is the sign-up tier, for customer counts.
+  normal day: A sale line with sales.event_id IS NULL (sold at normal price); sales.event_id IS NOT NULL
+    marks a line sold at a sale-event price.
+  last-click revenue: SUM(marketing_attribution.credit_last_click * order_revenue) - booked order revenue
+    credited to a campaign or channel (metric last_click_revenue).
+
+# Phrases that need a table retrieval might not rank highly; these tables are added to the context first.
+term_tables:
+  delivery region: [sales, customer_addresses]
+  delivery address: [sales, customer_addresses]
+  delivered to: [sales, customer_addresses]
+  shipped to: [sales, customer_addresses]
+  delivery state: [sales, customer_addresses]
+  delivery city: [sales, customer_addresses]
+  city tier: [sales, customer_addresses]
+  last-click: [marketing_attribution, campaigns]
+  credited revenue: [marketing_attribution, campaigns]

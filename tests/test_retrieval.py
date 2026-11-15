@@ -84,3 +84,23 @@ def test_held_out_example_is_never_retrieved(retriever):
     for e in load_examples().examples:
         context = retriever.retrieve(e.question, exclude_examples={e.id})
         assert e.id not in {x.id for x in context.examples}
+
+
+@pytest.mark.parametrize("question", [
+    "Which delivery regions have the most cancellations?",
+    "How does the return rate differ by the state orders are shipped to?",
+    "Compare AOV across city tiers of the delivery address",
+])
+def test_glossary_terms_bring_their_tables(retriever, question):
+    """Delivery geography lives in customer_addresses (via sales.address_id); retrieval used to miss it."""
+    context = retriever.retrieve(question)
+    assert "customer_addresses" in context.tables, context.tables
+    assert any("customer_addresses" in j for j in context.joins)
+
+
+def test_glossary_tables_exist_in_schema():
+    from pantree_insights.semantic import load_glossary
+
+    schema = load_schema()
+    bad = {t: ts for t, ts in load_glossary().term_tables.items() if set(ts) - set(schema.tables)}
+    assert not bad, bad

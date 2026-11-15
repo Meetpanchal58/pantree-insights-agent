@@ -372,7 +372,8 @@ tables:
       gst_rate: number
       unit_cost: number
       payment_method: text
-      event_id: text - sale event whose price applied (NULL = normal day)
+      event_id: text - sale event whose price applied (NULL = normal day). Events overlap, so to measure one
+        event use its date window (placed_at between start_date and end_date), not this column
       campaign_id: text - links to campaigns
       traffic_source: text
       device: text
@@ -486,6 +487,11 @@ joins:
 - support_contacts.agent_id = agents.agent_id
 - customers.customer_id = customer_addresses.customer_id
 - auth_events.customer_id = customers.customer_id
+# Row-level identifiers: grouping a final result by one of these returns one row per person/order/visit,
+# so it is allowed only as a ranked top-N (ORDER BY ... LIMIT <= max_rows). Grouping by them inside a
+# CTE/subquery that is aggregated again (e.g. orders per customer -> average) is fine.
+identifier_columns: [customer_id, anonymous_id, order_id, transaction_id, shipment_id, session_id, ticket_id,
+  contact_id, review_id, address_id, page_event_id, replacement_transaction_id]
 blocked:
   tables:
     crm_sends: control-group rows have no send time, so CRM uplift cannot be measured

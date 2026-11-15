@@ -32,7 +32,15 @@ class Blocked(BaseModel):
 class Schema(BaseModel):
     tables: dict[str, Table]
     joins: list[str]
+    identifier_columns: list[str] = []
     blocked: Blocked
+
+    def column_types(self) -> dict[str, dict[str, str]]:
+        """{table: {column: duckdb type}} for sqlglot's qualify (resolves unqualified columns)."""
+        kinds = {"text": "VARCHAR", "number": "DOUBLE", "integer": "BIGINT", "timestamp": "TIMESTAMP",
+                 "boolean": "BOOLEAN"}
+        return {t: {c: kinds.get(d.split(" - ")[0].strip(), "VARCHAR") for c, d in info.columns.items()}
+                for t, info in self.tables.items()}
 
     @model_validator(mode="after")
     def _check(self) -> Schema:
@@ -163,11 +171,21 @@ class Examples(BaseModel):
 class Glossary(BaseModel):
     value_aliases: dict[str, list[str]] = {}     # stored value -> other names people use
     terms: dict[str, str] = {}                   # business word -> meaning
+    term_tables: dict[str, list[str]] = {}       # business phrase -> tables it needs (added by retrieval)
 
     def terms_in(self, text: str) -> dict[str, str]:
         """Glossary terms mentioned in a question (whole words, any case)."""
-        return {term: meaning for term, meaning in self.terms.items()
-                if re.search(rf"(?<![\w-]){re.escape(term)}(?![\w-])", text, re.I)}
+        return {term: meaning for term, meaning in self.terms.items() if _mentions(term, text)}
+
+    def tables_in(self, text: str) -> list[str]:
+        """Tables named by the glossary phrases a question uses, in glossary order."""
+        return list(dict.fromkeys(t for phrase, tables in self.term_tables.items() if _mentions(phrase, text)
+                                  for t in tables))
+
+
+def _mentions(phrase: str, text: str) -> bool:
+    """Whole-word match, any case; a trailing s is optional ("city tiers" mentions "city tier")."""
+    return re.search(rf"(?<![\w-]){re.escape(phrase)}s?(?![\w-])", text, re.I) is not None
 
 
 # ----------------------------------------------------------------------------- loading

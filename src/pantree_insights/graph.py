@@ -15,6 +15,7 @@ import contextlib
 import time
 import uuid
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any, TypedDict
 
@@ -28,11 +29,34 @@ from . import agents
 from .charts import build_chart
 from .config import get_settings
 from .db import QueryTimeout, connect, manifest, run_query
-from .guardrails import check_question, check_sql, unsupported_numbers
+from .grounding import verify
+from .guardrails import check_question, check_sql
 from .llm import LLM, BudgetExceeded, ChatLLM
 from .memory import Memory
 from .retrieval import Retriever, get_retriever
 from .semantic import load_metrics, tables_in
+
+
+@dataclass(frozen=True)
+class Features:
+    """Switches for ablations (evals/run_eval.py --variant). The default is the full system."""
+    retrieval: bool = True        # hybrid retrieval context (off: the whole schema.yaml)
+    semantic: bool = True         # metric definitions and glossary in the context
+    planner: bool = True          # planner step (off: the question goes straight to the SQL writer)
+    validator: bool = True        # validator retry loop
+    narrow: bool = True           # SQL writer's first attempt sees only the plan's tables
+    memory: bool = True           # memory in prompts and saving insights
+
+
+VARIANTS = {
+    "baseline": Features(retrieval=False, semantic=False, planner=False, validator=False, narrow=False, memory=False),
+    "semantic": Features(retrieval=False, semantic=True, planner=False, validator=False, narrow=False, memory=False),
+    "retrieval": Features(retrieval=True, semantic=True, planner=False, validator=False, narrow=False, memory=False),
+    "planner": Features(retrieval=True, semantic=True, planner=True, validator=False, narrow=False, memory=False),
+    "validator": Features(retrieval=True, semantic=True, planner=True, validator=True, narrow=False, memory=False),
+    "full": Features(),
+    "full_no_memory": Features(memory=False),
+}
 
 
 class State(TypedDict, total=False):
@@ -55,6 +79,7 @@ class State(TypedDict, total=False):
     result: dict                 # {"columns": [...], "data": [[...]], "truncated": bool}
     warnings: list[str]
     analysis: dict
+    grounded: bool
     chart: dict | None
     insight_id: str | None
     status: str                  # running | clarify | declined | failed | done
@@ -102,8 +127,10 @@ def step(name: str):
 
 class Agent:
     def __init__(self, llm_factory: Callable[[], LLM] | None = None, retriever: Retriever | None = None,
-                 memory: Memory | None = None, con=None, data: dict | None = None):
+                 memory: Memory | None = None, con=None, data: dict | None = None,
+                 features: Features | None = None):
         settings = get_settings()
+        self.features = features or Features()
         self.llm_factory = llm_factory or ChatLLM
         self.con = con or connect(settings.shop_dir)
         self.retriever = retriever or get_retriever()
@@ -134,19 +161,35 @@ class Agent:
 
     @step("retrieve")
     def retrieve(self, state: State) -> dict:
+        f = self.features
         context = self.retriever.retrieve(state["question"], set(state.get("exclude_examples") or []))
+        if not f.retrieval:
+            prompt = "## Tables\n" + self.retriever.schema.describe() + "\n\n## How tables join\n" + "\n".join(
+                f"- {j}" for j in self.retriever.schema.joins)
+            if f.semantic:
+                prompt += "\n\n## Metric definitions (use these exactly)\n" + self.metrics.describe()
+                prompt += "\n\n## Business terms\n" + "\n".join(
+                    f"- {t}: {m}" for t, m in self.retriever.glossary.terms.items())
+            return {"context": prompt, "retrieved": {}, "metric_names": [],
+                    "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"])
+                    if f.memory else "(memory disabled)",
+                    "_detail": {"tables": list(self.retriever.schema.tables), "mode": "full schema"}}
         retrieved = {"tables": context.tables, "metrics": context.metrics, "joins": context.joins,
                      "values": [[v.value, v.columns, v.score] for v in context.values],
                      "examples": [e.id for e in context.examples], "terms": context.terms}
         return {"context": context.to_prompt(self.retriever.schema, self.metrics), "retrieved": retrieved,
                 "metric_names": context.metrics,
-                "memory": self.mem(state).context(state["question"]),
+                "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"])
+                if f.memory else "(memory disabled)",
                 "_detail": {"tables": context.tables, "metrics": context.metrics,
                             "values": [v.value for v in context.values[:6]],
                             "examples": [e.question for e in context.examples[:3]]}}
 
     @step("plan")
     def plan(self, state: State) -> dict:
+        if not self.features.planner:                      # ablation: no planning, question goes to the writer
+            plan = agents.AnalysisPlan(decision="proceed", restated_question=state["question"])
+            return {"plan": plan.model_dump(), "route": "write_sql", "_detail": {"decision": "skipped"}}
         result = agents.plan(self.llm(state), state["question"], state["context"], state["memory"], self.data,
                              state.get("history", ""), state.get("answers"), state.get("use_defaults", False))
         detail = {"decision": result.decision, "plan": agents.plan_text(result)}
@@ -186,7 +229,7 @@ class Agent:
     @step("write_sql")
     def write_sql(self, state: State) -> dict:
         plan = agents.AnalysisPlan.model_validate(state["plan"])
-        first = state.get("attempts", 0) == 0
+        first = state.get("attempts", 0) == 0 and self.features.narrow
         # first attempt: only the plan's tables; retries get the full context so recovery stays possible
         context, tables = self.narrowed_context(state, plan) if first else (
             state["context"], list((state.get("retrieved") or {}).get("tables", [])))
@@ -206,6 +249,12 @@ class Agent:
 
     @step("check_sql")
     def check_sql(self, state: State) -> dict:
+        if not (state.get("sql") or "").strip():          # the writer declined or ran out of room: say so
+            reason = (state.get("explanation") or "").strip()[:300] or "no reason given"
+            return self._retry_or_fail(state, [
+                f"No SQL was returned (writer's note: {reason}). Return exactly one SELECT statement in the "
+                "sql field. Aggregates by region, city or tier, and questions about email or SMS campaigns, "
+                "are allowed; only the hidden personal columns are unavailable."], "safety checks")
         verdict = check_sql(state["sql"])
         if not verdict.ok:
             return self._retry_or_fail(state, verdict.errors, "safety checks")
@@ -219,10 +268,9 @@ class Agent:
             return self._retry_or_fail(state, [f"{error}. Simplify the query or aggregate earlier."], "database")
         except Exception as error:                                          # DuckDB error: let the writer fix it
             return self._retry_or_fail(state, [f"Database error: {str(error).splitlines()[0][:300]}"], "database")
-        if result.frame.empty:
-            return self._retry_or_fail(state, ["The query returned no rows. Check filter values, date range "
-                                               "and join conditions against the context."], "empty result")
-        return {"result": _result(result.frame, result.truncated), "route": "validate",
+        # 0 rows is not automatically wrong (e.g. no orders before launch): the validator decides
+        return {"result": _result(result.frame, result.truncated),
+                "route": "validate" if self.features.validator else "analyse",
                 "_detail": {"rows": len(result.frame), "columns": list(result.frame.columns),
                             "query_seconds": round(result.seconds, 2), "truncated": result.truncated}}
 
@@ -248,18 +296,19 @@ class Agent:
                           if n in self.metrics.metrics and self.metrics.metrics[n].notes)
         args = (self.llm(state), state["question"], plan, state["sql"], frame, state["memory"], notes, self.data)
         analysis = agents.analyse(*args)
-        bad = unsupported_numbers(" ".join([analysis.headline, *analysis.findings]), frame)
+        check = verify(frame, analysis.claims, analysis.texts())
         rewrote = False
-        if bad:
-            analysis = agents.analyse(*args, fix_numbers=bad)
+        if not check.ok:                                   # one rewrite with the exact problems
+            analysis = agents.analyse(*args, fix_numbers=check.problems)
             rewrote = True
-            bad = unsupported_numbers(" ".join([analysis.headline, *analysis.findings]), frame)
+            check = verify(frame, analysis.claims, analysis.texts())
         warnings = list(state.get("warnings", []))
-        if bad:
-            warnings.append("Could not verify these numbers against the result: " + ", ".join(bad))
-        return {"analysis": analysis.model_dump(), "warnings": warnings,
-                "_detail": {"headline": analysis.headline, "number_check": "passed" if not bad else "unverified",
-                            "rewritten": rewrote, "unverified": bad}}
+        if not check.ok:
+            warnings.append("Unverified claims: " + "; ".join(check.problems[:6]))
+        shown = analysis.rendered()
+        return {"analysis": shown.model_dump(), "grounded": check.ok, "warnings": warnings,
+                "_detail": {"headline": shown.headline, "number_check": "passed" if check.ok else "unverified",
+                            "claims": check.checked, "rewritten": rewrote, "unverified": check.problems[:6]}}
 
     @step("chart")
     def chart(self, state: State) -> dict:
@@ -272,6 +321,14 @@ class Agent:
     def remember(self, state: State) -> dict:
         a = state["analysis"]
         memory = self.mem(state)
+        if not self.features.memory:
+            return {"insight_id": None, "status": "done", "_status": "skipped",
+                    "_detail": {"saved": False, "reason": "memory disabled"}}
+        concerns = [w for w in state.get("warnings", []) if w.startswith("Reviewer concern")]
+        if concerns or state.get("grounded") is not True:
+            reason = "validator raised concerns" if concerns else "claims did not verify"
+            return {"insight_id": None, "status": "done", "_status": "skipped",
+                    "_detail": {"saved": False, "reason": f"not saved to memory: {reason}"}}
         item = memory.save_insight(question=state["question"], plan=state["plan"], sql=state["sql"],
                                    analysis=a, data_as_of=self.data["last_day"], chat_id=state.get("chat_id"))
         closed = memory.close_gaps(a.get("explains_gap_ids", []), item["id"], self.data["last_day"])
@@ -295,7 +352,7 @@ class Agent:
         g.add_edge("clarify", "plan")
         g.add_edge("write_sql", "check_sql")
         for name in ["check_sql", "run_query"]:
-            g.add_conditional_edges(name, route, ["write_sql", "run_query", "validate", "finish"])
+            g.add_conditional_edges(name, route, ["write_sql", "run_query", "validate", "analyse", "finish"])
         g.add_conditional_edges("validate", route, ["write_sql", "analyse"])
         g.add_edge("analyse", "chart")
         g.add_edge("chart", "remember")
@@ -340,6 +397,7 @@ class Agent:
                 "question": state.get("question"), "plan": state.get("plan"), "sql": state.get("sql"),
                 "result": state.get("result"), "analysis": state.get("analysis"), "chart": state.get("chart"),
                 "warnings": state.get("warnings", []), "insight_id": state.get("insight_id"),
+                "grounded": state.get("grounded"),
                 "attempts": state.get("attempts"), "data_as_of": self.data["last_day"],
                 "data_size": self.data["size"], "cost": llm.tracker.summary() if llm else None,
                 "calls": [c.__dict__ for c in llm.tracker.calls] if llm else []}

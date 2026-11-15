@@ -359,6 +359,19 @@ metrics:
 
 # Metrics that need more than one source or a per-customer step: full reference SQL.
 custom_metrics:
+  last_click_revenue:
+    label: Last-click credited revenue
+    description: >-
+      Booked order revenue the shop credits to a campaign, channel or channel group under last-click
+      attribution: SUM(credit_last_click * order_revenue) from marketing_attribution. Use this for "credited",
+      "attributed" or "last-click" revenue; do not recompute revenue from sales. Direct/Organic orders have no
+      campaign and are not credited (an inner join to campaigns drops them).
+    unit: inr
+    sql: |
+      SELECT a.campaign_id, c.campaign_name, SUM(a.credit_last_click * a.order_revenue) AS last_click_revenue
+      FROM marketing_attribution a JOIN campaigns c ON c.campaign_id = a.campaign_id
+      GROUP BY 1, 2 ORDER BY last_click_revenue DESC LIMIT 10
+
   roas_last_click:
     label: ROAS (last-click, shop-measured)
     description: >-

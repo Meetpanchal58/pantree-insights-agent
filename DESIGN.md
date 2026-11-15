@@ -1,0 +1,115 @@
+# Design decisions
+
+Each entry: the decision, the alternatives considered, why this one, and its known weakness. Numbers quoted
+here come from reports in `evals/reports/`.
+
+## 1. Safety is enforced in code, not by the model
+
+**Decision.** Every query passes `guardrails.check_sql` (sqlglot) before it reaches DuckDB: one read-only
+SELECT, approved tables and columns (resolved with `qualify()` against `semantic/schema.yaml`), approved join
+paths only (ON, WHERE and USING), no table functions, no `SELECT *` or whole-row arguments, results summarised
+or limited. The DuckDB connection itself is locked (`enable_external_access=false`, allowed directories,
+`lock_configuration`), and blocked tables and columns do not exist in its views.
+
+**Alternatives.** Ask the planner or validator to refuse unsafe SQL; a database role with grants only.
+
+**Why.** A model can be talked out of a rule; a parser cannot. Two independent layers (parser + locked
+connection) mean a bug in one is not a leak.
+
+**Known weakness.** The checks are syntactic. A query that is allowed but answers the wrong question is only
+caught by the validator, which is the same model family as the writer. The regex question check in front is a
+cheap filter only: on `evals/behaviour.yaml` it blocks none of the 11 adversarial questions (the planner and
+the SQL guardrails must catch them), in exchange for 0 of 16 false declines.
+
+## 2. The SQL writer first sees only the tables the plan selected
+
+**Decision.** Retrieval returns up to 6 tables (`MAX_TABLES`) so a needed table is rarely missing; the plan
+picks its `source_tables` and `join_path`, and the writer's first attempt is narrowed to those. Retries get
+the full retrieved context.
+
+**Alternatives.** Give the writer everything retrieved; retrieve fewer tables.
+
+**Why.** Retrieval recall matters more than precision (holdout: 29/31 questions get all required context;
+table precision is 27% by design), but extra tables distract the writer into wrong joins. Narrowing keeps
+recall at retrieval time and precision at writing time.
+
+**Known weakness.** If the planner forgets a table, the first attempt fails and costs a retry. The ablation
+variant `planner` measures this (see the README for whether it was run).
+
+## 3. Numbers in answers are structured claims, checked against the result
+
+**Decision.** The analyst returns each number as a claim (`grounding.Claim`: value, unit, column, row keys,
+operation such as diff, ratio, share, pct_change). `grounding.verify` recomputes each claim from the result
+table (0.5% relative tolerance, or equal after display rounding) and the text uses placeholders that are
+rendered from the claims. Any other number in the prose fails, except dates, years and small integers.
+One rewrite is allowed; claims that still fail are shown as a warning and the answer is not saved to memory.
+
+**Alternatives.** The previous regex check (does this number appear in the result, or a simple derivation
+of it?); an LLM judge.
+
+**Why.** The regex check accepted 100% of random percentages, 83% of random ratios and 32% of random counts
+on an 8-row table, so its "grounded" rate measured little. Structured claims accept 0.10-0.45%
+(`evals/reports/grounding_2026-11-15_1318.md`). An LLM judge would add cost and share the analyst's blind spots.
+
+**Known weakness.** Claims prove a number is in the result, not that the result answers the question;
+that is the SQL path's job. Some legitimate derived numbers (e.g. multi-step calculations) cannot be
+expressed as one claim and must be left out of the text.
+
+## 4. Results grouped by an identifier must be a ranked top-N
+
+**Decision.** `identifier_grain_errors`: if the outer SELECT groups by an identifier column (customer_id,
+order_id, session_id, ... listed in `schema.yaml`), it must have ORDER BY and a LIMIT of at most 500.
+
+**Alternatives.** Block identifier grouping entirely; allow it with only the global row limit.
+
+**Why.** "Top 20 customers by spend" is a fair business question; "spend per customer" for 100,000
+customers is a row-level dump by another name. The rule allows the first and turns the second into an
+error message that tells the writer how to fix it.
+
+**Known weakness.** The list of identifier columns is maintained by hand; a new key column not added to it
+is not covered.
+
+## 5. One Cloud Run instance with an in-memory checkpointer
+
+**Decision.** LangGraph runs use `InMemorySaver`; live events and paused clarifying questions live in the
+process. The service runs with `min-instances 0`, `max-instances 1`.
+
+**Alternatives.** A Postgres checkpointer and a shared event store, allowing several instances.
+
+**Why.** For a personal demo the traffic fits one instance, and the simplest correct design has no
+cross-instance state to get wrong. The daily LLM budget is in Postgres, so a restart does not reset it.
+
+**Known weakness.** A restart or scale-to-zero drops runs in progress and unanswered clarifications.
+Scaling out needs the Postgres checkpointer first.
+
+## 6. Memory is written only for verified answers, and old insights age out
+
+**Decision.** An answer is saved as an insight only if its claims verified, no reviewer concern was raised,
+and memory is enabled for the run. When reading, insights older than `memory_max_age_days` (30) relative to
+the data's last day are left out.
+
+**Alternatives.** Save every answer; let the model decide what to keep.
+
+**Why.** Memory feeds the planner. A wrong answer saved once would be repeated as "known" in later
+questions, so the bar for writing is the same check the answer itself must pass. Ageing out stops last
+quarter's numbers being quoted as current.
+
+**Known weakness.** An answer can be grounded and still wrong (correct numbers from a wrong query), and
+such an answer is remembered. The ablation `full_no_memory` measures memory's effect (see the README for
+whether it was run).
+
+## 7. Pulse uses robust z-scores with a false-discovery-rate control
+
+**Decision.** Each KPI series compares the latest week with the 8 before it using a robust z-score
+(median and MAD) and selects alerts with Benjamini-Hochberg at q = 0.10 across all series. Changes explained
+by sale events are labelled, not raised. The old mean/SD rule (z >= 2.5) remains as `method: legacy`.
+
+**Alternatives.** Mean/SD z-scores with a fixed threshold; a forecasting model per series.
+
+**Why.** With 143 series, a fixed threshold yields false alerts in proportion to the number of series; BH
+controls the share of false alerts among those raised, and median/MAD is not dragged by the previous sale
+week.
+
+**Known weakness.** On a backtest with 150 injected shocks (`evals/reports/pulse_backtest_2026-11-15_1303.md`),
+robust_bh found more shocks (43/150 vs 35/150) but raised more other alerts (2.77 vs 1.17 a week). Neither
+method is good at small changes (+25%: 5/26 vs 3/26). Which default to keep is an open decision.

@@ -14,7 +14,7 @@ import json
 import math
 import re
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,14 @@ STOP = set(
     " to vs was we what when which who why with than then over about into last year month week day days months"
     " weeks years me tell give".split()
 )
+
+
+def fresh(rows: list[dict], as_of: str | None) -> list[dict]:
+    """Leave out insights whose data is more than memory_max_age_days older than the current data."""
+    if not as_of:
+        return rows
+    cutoff = str(date.fromisoformat(as_of) - timedelta(days=get_settings().memory_max_age_days))
+    return [r for r in rows if (r.get("data_as_of") or "") >= cutoff]
 
 
 def _tokens(text: str) -> list[str]:
@@ -141,13 +149,13 @@ class Memory:
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         return "" if "Empty until" in text else text.strip()
 
-    def context(self, question: str, today: date | None = None) -> str:
+    def context(self, question: str, as_of: str | None = None) -> str:
         """Memory as prompt text: profile, related insights (with their age) and relevant open gaps."""
         parts = []
         profile = self.profile()
         if profile:
             parts.append("### Business profile\n" + profile)
-        related = self.related(question)
+        related = fresh(self.related(question, k=10), as_of)[:5]
         if related:
             lines = []
             for item in related:

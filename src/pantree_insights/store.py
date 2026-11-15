@@ -39,7 +39,7 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine
 
 from .config import get_settings
-from .memory import Memory, _score, _tokens
+from .memory import Memory, _score, _tokens, fresh
 
 metadata = MetaData()
 
@@ -383,7 +383,7 @@ class MemoryScope:
         return [g for g in self.business.open_gaps(question, k=20)
                 if (g["id"], g.get("window_end")) not in resolved][:k]
 
-    def context(self, question: str) -> str:
+    def context(self, question: str, as_of: str | None = None) -> str:
         parts = []
         if self.user.get("preferences"):
             parts.append("### About the user and their preferences\n" + self.user["preferences"].strip())
@@ -391,17 +391,18 @@ class MemoryScope:
             if self.project.get("instructions"):
                 parts.append(f"### Project '{self.project['name']}' instructions\n"
                              + self.project["instructions"].strip())
-            rows = self.store.memories(project_id=self.project["id"], scope="project", data_size=self.data_size)
+            rows = fresh(self.store.memories(project_id=self.project["id"], scope="project",
+                                             data_size=self.data_size), as_of)
             if related := self._related(rows, question, 4, recent=2):
                 parts.append("### Earlier insights in this project\n" + self._lines(related))
         else:
-            rows = self.store.memories(user_id=self.user["id"], scope="user", data_size=self.data_size)
+            rows = fresh(self.store.memories(user_id=self.user["id"], scope="user", data_size=self.data_size), as_of)
             if related := self._related(rows, question, 3):
                 parts.append("### The user's earlier insights\n" + self._lines(related))
         profile = self.business.profile()
         if profile:
             parts.append("### Business profile\n" + profile)
-        business = self.store.memories(scope="business", data_size=self.data_size)
+        business = fresh(self.store.memories(scope="business", data_size=self.data_size), as_of)
         if related := self._related(business, question, 3):
             parts.append("### Shared business knowledge\n" + self._lines(related))
         if gaps := self.open_gaps(question):

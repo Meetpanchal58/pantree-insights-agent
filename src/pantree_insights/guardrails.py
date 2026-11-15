@@ -108,7 +108,14 @@ def check_sql(sql: str, schema: Schema | None = None, max_rows: int | None = Non
         errors.append(f"Return summarised results: aggregate (GROUP BY / SUM / COUNT ...) "
                       f"or add LIMIT (at most {max_rows}) for a list of top rows.")
 
-    errors += join_errors(tree, schema, cte_names)
+    errors += whole_row_errors(tree, schema, cte_names)
+    if not errors:
+        qualified, problem = _qualify(tree, schema)
+        if problem:
+            errors.append(problem)
+        else:
+            errors += join_errors(qualified, schema, cte_names)
+            errors += identifier_grain_errors(qualified, schema, max_rows)
 
     if errors:
         return SQLCheck(False, sql, list(dict.fromkeys(errors)), used)
@@ -123,9 +130,22 @@ def _approved_joins(schema: Schema) -> set[frozenset]:
     return pairs
 
 
+def _qualify(tree: exp.Expression, schema: Schema) -> tuple[exp.Expression | None, str | None]:
+    """Resolve every column to its table (so unqualified columns cannot hide an unapproved join)."""
+    from sqlglot.optimizer.qualify import qualify
+
+    try:
+        return qualify(tree.copy(), schema=schema.column_types(), dialect="duckdb", validate_qualify_columns=True,
+                       quote_identifiers=False, expand_stars=False), None
+    except Exception as error:                     # unknown or ambiguous column
+        return None, (f"Could not resolve the columns ({str(error).splitlines()[0][:160]}). Qualify columns "
+                      "with their table alias and use only columns listed in the context.")
+
+
 def join_errors(tree: exp.Expression, schema: Schema, cte_names: set[str]) -> list[str]:
-    """Equality joins between two base tables must be approved joins from schema.yaml (prevents fan-out
-    from joining on look-alike keys). Joins involving CTEs/subqueries and range joins are allowed."""
+    """Equality predicates between two different base tables (in JOIN ... ON, USING or WHERE, including
+    comma joins) must be approved joins from schema.yaml. Joins with CTEs/subqueries and range joins are
+    allowed. Expects a qualified tree (every column has its table alias)."""
     approved = _approved_joins(schema)
     alias: dict[str, str] = {}
     for table in tree.find_all(exp.Table):
@@ -133,27 +153,66 @@ def join_errors(tree: exp.Expression, schema: Schema, cte_names: set[str]) -> li
         if name in schema.tables and name not in cte_names:
             alias[table.alias_or_name.lower()] = name
     errors = []
+    for eq in tree.find_all(exp.EQ):
+        a, b = eq.left, eq.right
+        if not (isinstance(a, exp.Column) and isinstance(b, exp.Column) and a.table and b.table):
+            continue
+        ta, tb = alias.get(a.table.lower()), alias.get(b.table.lower())
+        if not ta or not tb or ta == tb:
+            continue
+        if frozenset({(ta, a.name.lower()), (tb, b.name.lower())}) not in approved:
+            errors.append(f"Join {ta}.{a.name} = {tb}.{b.name} is not an approved join path "
+                          "(see 'How these tables join'); it can duplicate or mismatch rows.")
     for join in tree.find_all(exp.Join):
         right = join.this
         right_table = alias.get(right.alias_or_name.lower()) if isinstance(right, exp.Table) else None
-        on = join.args.get("on")
-        if on is not None:
-            for eq in on.find_all(exp.EQ):
-                a, b = eq.left, eq.right
-                if not (isinstance(a, exp.Column) and isinstance(b, exp.Column) and a.table and b.table):
-                    continue
-                ta, tb = alias.get(a.table.lower()), alias.get(b.table.lower())
-                if not ta or not tb or ta == tb:
-                    continue
-                if frozenset({(ta, a.name.lower()), (tb, b.name.lower())}) not in approved:
-                    errors.append(f"Join {ta}.{a.name} = {tb}.{b.name} is not an approved join path "
-                                  "(see 'How these tables join'); it can duplicate or mismatch rows.")
         for ident in join.args.get("using") or []:
             column = ident.name.lower()
             if right_table and not any(frozenset({(other, column), (right_table, column)}) in approved
                                        for other in set(alias.values()) if other != right_table):
                 errors.append(f"JOIN {right_table} USING ({column}) is not an approved join path.")
     return errors
+
+
+def whole_row_errors(tree: exp.Expression, schema: Schema, cte_names: set[str]) -> list[str]:
+    """Whole rows passed to functions (to_json(a), struct_pack(a.*), row(a.*)) would leak every column."""
+    aliases = {t.alias_or_name.lower() for t in tree.find_all(exp.Table)} | cte_names
+    columns = {c for info in schema.tables.values() for c in info.columns}
+    errors = []
+    for func in tree.find_all(exp.Func):
+        if isinstance(func, exp.Count):
+            continue
+        for arg in func.iter_expressions():
+            star = isinstance(arg, exp.Star) or (isinstance(arg, exp.Column) and isinstance(arg.this, exp.Star))
+            whole = isinstance(arg, exp.Column) and not arg.table and arg.name.lower() in aliases \
+                and arg.name not in columns
+            if star or whole:
+                errors.append("Whole-row expressions (a table or alias.* inside a function) are not allowed; "
+                              "select the specific columns you need.")
+    return errors
+
+
+def identifier_grain_errors(tree: exp.Expression, schema: Schema, max_rows: int) -> list[str]:
+    """A final result grouped by a row-level identifier (customer_id, order_id, ...) must be a ranked
+    top-N; grouping by identifiers inside CTEs/subqueries that are aggregated again is fine."""
+    identifiers = {c.lower() for c in schema.identifier_columns}
+    outer = tree if isinstance(tree, exp.Select) else None
+    if outer is None or not outer.args.get("group"):
+        return []
+    grouped = {c.name.lower() for e in outer.args["group"].expressions for c in e.find_all(exp.Column)}
+    # GROUP BY 1, 2: resolve positions to the projected columns
+    for e in outer.args["group"].expressions:
+        if isinstance(e, exp.Literal) and e.is_int and 0 < int(e.name) <= len(outer.expressions):
+            grouped |= {c.name.lower() for c in outer.expressions[int(e.name) - 1].find_all(exp.Column)}
+    hit = sorted(grouped & identifiers)
+    if not hit:
+        return []
+    limit = outer.args.get("limit")
+    limit_value = _int(limit.expression) if limit is not None else None
+    if outer.args.get("order") and limit_value is not None and limit_value <= max_rows:
+        return []
+    return [f"Grouping the result by {', '.join(hit)} returns one row per {hit[0].replace('_id', '')}; "
+            f"make it a ranked top-N (ORDER BY the metric DESC LIMIT <= {max_rows}) or aggregate across them."]
 
 
 def _aggregated(query: exp.Expression, ctes: dict[str, exp.Expression], depth: int = 0) -> bool:
@@ -197,11 +256,20 @@ def _int(node: exp.Expression | None) -> int | None:
 
 # ----------------------------------------------------------------------------- questions
 MAX_QUESTION_CHARS = 500
+_PEOPLE = r"(customers?|users?|buyers?|shoppers?|clients?|persons?|people|members?)"
+_CONTACT = r"(e-?mails?|e-?mail address(es)?|phone( numbers?)?|mobile( numbers?)?|contact( details| info(rmation)?)?|" \
+           r"(home |street |postal |full |exact )?address(es)?|names?)"
 PERSONAL_DATA = re.compile(
-    r"\b(e-?mail(s| address(es)?)?|phone( numbers?)?|mobile( numbers?)?|(home|street|postal|full|exact) address(es)?|"
-    r"address(es)? (line|of (a |the |each |every |our )?(customer|user|buyer|shopper|person|people))|"
-    r"first names?|last names?|full names?|customer names?|pii|password|otp codes?)\b", re.I)
-# A bare "address" is allowed: "revenue by region of the delivery address" is an aggregate question.
+    # "email/phone/address/name of/for (the/each/top ...) customer(s)"
+    rf"\b{_CONTACT} (of|for) (\w+ ){{0,3}}?{_PEOPLE}\b|"
+    # "customer emails", "customers' phone numbers", "buyer contact details"
+    rf"\b{_PEOPLE}'?s?'? (e-?mails?|e-?mail address(es)?|phone numbers?|mobile numbers?|"
+    r"contact (details|info(rmation)?)|home address(es)?|addresses|full names?|first names?|last names?)\b|"
+    # explicit personal-data phrases on their own
+    r"\b(contact details|home address(es)?|street address(es)?|full address(es)?|address line|"
+    r"first names?|last names?|full names?|pii|personal data|personal details)\b", re.I)
+# Aggregate questions that merely mention mobile, phone orders, email campaigns, delivery address region or
+# password-reset tickets are allowed; the SQL guardrails and the locked database are the real enforcement.
 INJECTION = re.compile(
     r"((ignore|disregard|forget|override|bypass) (all |any |the |your )?(previous|prior|above|earlier|"
     r"preceding) (instructions|rules|prompts?)|system prompt|you are now|"
@@ -255,6 +323,12 @@ DATES = re.compile(rf"\b\d{{4}}-\d{{2}}-\d{{2}}\b|\b{MONTHS}\s+\d{{4}}\b"
 
 
 def unsupported_numbers(text: str, frame: pd.DataFrame, rel_tol: float = 0.015) -> list[str]:
+    """DEPRECATED (kept to document the old behaviour in tests/test_grounding.py): this regex check accepted
+    most random numbers. Answers are now verified as structured claims by grounding.verify."""
+    return _old_unsupported_numbers(text, frame, rel_tol)
+
+
+def _old_unsupported_numbers(text: str, frame: pd.DataFrame, rel_tol: float = 0.015) -> list[str]:
     """Numbers in an answer that cannot be traced to the result table (directly or as a simple derivation).
 
     Allowed: values in the table (any rounding / % form), differences and ratios of two values

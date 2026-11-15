@@ -1,0 +1,3380 @@
+[
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x01",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "easy",
+  "tuned": true,
+  "question": "What was realized revenue in each region of the delivery address in 2025?",
+  "seconds": 16.9,
+  "status": "failed",
+  "cost": 0.01435,
+  "attempts": 3,
+  "sql": "",
+  "warnings": [],
+  "grounded": null,
+  "claims": null,
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "customer_addresses"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "no answer (failed: Could not produce a valid query after 3 attempts (safety checks): Exactly one statement is allowed, found 0.)",
+  "failure_type": "sql_error"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x02",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the return rate for each apparel sub-category?",
+  "seconds": 17.0,
+  "status": "failed",
+  "cost": 0.01455,
+  "attempts": 3,
+  "sql": "",
+  "warnings": [],
+  "grounded": null,
+  "claims": null,
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "product_master"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "no answer (failed: Could not produce a valid query after 3 attempts (safety checks): Exactly one statement is allowed, found 0.)",
+  "failure_type": "sql_error"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x03",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "How many orders did Prime and non-Prime customers place in 2026?",
+  "seconds": 20.1,
+  "status": "done",
+  "cost": 0.01562,
+  "attempts": 2,
+  "sql": "SELECT\n  is_prime AS current_is_prime,\n  CAST(NULL AS BIGINT) AS orders\nFROM customers\nGROUP BY\n  is_prime\nORDER BY\n  current_is_prime DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [],
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "customers"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong metric value: 'orders' does not match (value, denominator or category)",
+  "failure_type": "wrong_metric_value"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x04",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the average order value by device in 2026?",
+  "seconds": 18.2,
+  "status": "done",
+  "cost": 0.01207,
+  "attempts": 1,
+  "sql": "SELECT\n  device,\n  COUNT(DISTINCT order_id) AS orders,\n  SUM(\n    CASE\n      WHEN NOT delivered_at IS NULL\n      THEN net_amount - COALESCE(refund_amount, 0)\n      ELSE 0\n    END\n  ) / NULLIF(COUNT(DISTINCT order_id), 0) AS average_order_value\nFROM sales\nWHERE\n  line_type = 'Sale'\n  AND placed_at >= CAST('2026-01-01' AS TIMESTAMP)\n  AND placed_at < CAST('2027-01-01' AS TIMESTAMP)\nGROUP BY\n  device\nORDER BY\n  average_order_value DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 1353.09,
+    "unit": "inr",
+    "column": "average_order_value",
+    "row": [
+     {
+      "column": "device",
+      "value": "Android App"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 1347.82,
+    "unit": "inr",
+    "column": "average_order_value",
+    "row": [
+     {
+      "column": "device",
+      "value": "Mobile Web"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 1334.57,
+    "unit": "inr",
+    "column": "average_order_value",
+    "row": [
+     {
+      "column": "device",
+      "value": "iOS App"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 1312.01,
+    "unit": "inr",
+    "column": "average_order_value",
+    "row": [
+     {
+      "column": "device",
+      "value": "Desktop Web"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 5.27,
+    "unit": "inr",
+    "column": "average_order_value",
+    "row": [
+     {
+      "column": "device",
+      "value": "Android App"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "device",
+      "value": "Mobile Web"
+     }
+    ],
+    "decimals": 2
+   },
+   {
+    "id": "c6",
+    "value": 41.08,
+    "unit": "inr",
+    "column": "average_order_value",
+    "row": [
+     {
+      "column": "device",
+      "value": "Android App"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "device",
+      "value": "Desktop Web"
+     }
+    ],
+    "decimals": 2
+   },
+   {
+    "id": "c7",
+    "value": 18685.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "device",
+      "value": "Android App"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong metric value: 'aov' does not match (value, denominator or category)",
+  "failure_type": "wrong_metric_value"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x05",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the late delivery rate by warehouse?",
+  "seconds": 16.8,
+  "status": "done",
+  "cost": 0.01148,
+  "attempts": 1,
+  "sql": "SELECT\n  warehouse_id,\n  COUNT(DISTINCT transaction_id) AS delivered_lines,\n  1.0 * COUNT(\n    DISTINCT CASE\n      WHEN CAST(delivered_at AS DATE) > CAST(promised_delivery_date AS DATE)\n      THEN transaction_id\n    END\n  ) / NULLIF(COUNT(DISTINCT transaction_id), 0) AS late_delivery_rate\nFROM sales\nWHERE\n  line_type = 'Sale'\n  AND NOT delivered_at IS NULL\n  AND NOT promised_delivery_date IS NULL\nGROUP BY\n  warehouse_id\nORDER BY\n  late_delivery_rate DESC,\n  warehouse_id",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.302806,
+    "unit": "ratio",
+    "column": "late_delivery_rate",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_DEL"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c2",
+    "value": 0.300095,
+    "unit": "ratio",
+    "column": "late_delivery_rate",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_MUM"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c3",
+    "value": 0.298399,
+    "unit": "ratio",
+    "column": "late_delivery_rate",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_BLR"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c4",
+    "value": 0.298082,
+    "unit": "ratio",
+    "column": "late_delivery_rate",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_KOL"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c5",
+    "value": 0.004724,
+    "unit": "pct_points",
+    "column": "late_delivery_rate",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_DEL"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_KOL"
+     }
+    ],
+    "decimals": 2
+   },
+   {
+    "id": "c6",
+    "value": 27428.0,
+    "unit": "count",
+    "column": "delivered_lines",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_MUM"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x06",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What did one ad click cost on each paid channel in 2025?",
+  "seconds": 19.9,
+  "status": "failed",
+  "cost": 0.01529,
+  "attempts": 3,
+  "sql": "",
+  "warnings": [],
+  "grounded": null,
+  "claims": null,
+  "context_tables": [],
+  "required_tables": [
+   "marketing_spend",
+   "campaigns"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "no answer (failed: Could not produce a valid query after 3 attempts (safety checks): Exactly one statement is allowed, found 0.)",
+  "failure_type": "sql_error"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x07",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the average customer satisfaction score by support channel?",
+  "seconds": 16.0,
+  "status": "done",
+  "cost": 0.01128,
+  "attempts": 1,
+  "sql": "SELECT\n  channel AS support_channel,\n  AVG(csat) AS average_csat,\n  COUNT(DISTINCT contact_id) FILTER(WHERE\n    NOT csat IS NULL) AS scored_contacts\nFROM support_contacts\nGROUP BY\n  channel\nORDER BY\n  average_csat DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 4.16692,
+    "unit": "rating",
+    "column": "average_csat",
+    "row": [
+     {
+      "column": "support_channel",
+      "value": "phone"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 3
+   },
+   {
+    "id": "c2",
+    "value": 4.13491,
+    "unit": "rating",
+    "column": "average_csat",
+    "row": [
+     {
+      "column": "support_channel",
+      "value": "email"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 3
+   },
+   {
+    "id": "c3",
+    "value": 4.13311,
+    "unit": "rating",
+    "column": "average_csat",
+    "row": [
+     {
+      "column": "support_channel",
+      "value": "chat"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 3
+   },
+   {
+    "id": "c4",
+    "value": 0.03381,
+    "unit": "rating",
+    "column": "average_csat",
+    "row": [
+     {
+      "column": "support_channel",
+      "value": "phone"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "support_channel",
+      "value": "chat"
+     }
+    ],
+    "decimals": 3
+   },
+   {
+    "id": "c5",
+    "value": 0.0018,
+    "unit": "rating",
+    "column": "average_csat",
+    "row": [
+     {
+      "column": "support_channel",
+      "value": "email"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "support_channel",
+      "value": "chat"
+     }
+    ],
+    "decimals": 3
+   },
+   {
+    "id": "c6",
+    "value": 3005.0,
+    "unit": "count",
+    "column": "scored_contacts",
+    "row": [
+     {
+      "column": "support_channel",
+      "value": "chat"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 1330.0,
+    "unit": "count",
+    "column": "scored_contacts",
+    "row": [
+     {
+      "column": "support_channel",
+      "value": "phone"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c8",
+    "value": 1097.0,
+    "unit": "count",
+    "column": "scored_contacts",
+    "row": [
+     {
+      "column": "support_channel",
+      "value": "email"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "support_contacts"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x08",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What share of Footwear reviews are negative, by review aspect?",
+  "seconds": 18.1,
+  "status": "failed",
+  "cost": 0.01475,
+  "attempts": 3,
+  "sql": "",
+  "warnings": [],
+  "grounded": null,
+  "claims": null,
+  "context_tables": [],
+  "required_tables": [
+   "product_reviews",
+   "product_master"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "no answer (failed: Could not produce a valid query after 3 attempts (safety checks): Exactly one statement is allowed, found 0.)",
+  "failure_type": "sql_error"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x09",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "What was the monthly conversion rate in 2026?",
+  "seconds": 17.1,
+  "status": "done",
+  "cost": 0.01214,
+  "attempts": 1,
+  "sql": "SELECT\n  DATE_TRUNC('MONTH', event_at) AS month,\n  COUNT(DISTINCT session_id) AS sessions,\n  COUNT(DISTINCT session_id) FILTER(WHERE\n    event_type = 'purchase') AS converting_sessions,\n  1.0 * COUNT(DISTINCT session_id) FILTER(WHERE\n    event_type = 'purchase') / NULLIF(COUNT(DISTINCT session_id), 0) AS conversion_rate\nFROM clickstream\nWHERE\n  event_at >= CAST('2026-01-01' AS TIMESTAMP)\n  AND event_at < CAST('2027-01-01' AS TIMESTAMP)\nGROUP BY\n  DATE_TRUNC('MONTH', event_at)\nORDER BY\n  month",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.0504795,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-01-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 0.0419714,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-02-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 0.0438531,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-03-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 0.038202,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-04-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 0.042736,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-05-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c6",
+    "value": 0.0514072,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-06-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c7",
+    "value": 0.043106,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-07-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c8",
+    "value": 0.0510908,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-08-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c9",
+    "value": 0.0405317,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-09-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c10",
+    "value": 0.0567302,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-10-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c11",
+    "value": 0.0595496,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-11-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c12",
+    "value": 0.0213476,
+    "unit": "pct_points",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-11-01T00:00:00.000"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "month",
+      "value": "2026-04-01T00:00:00.000"
+     }
+    ],
+    "decimals": 2
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "clickstream"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x10",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "Which 5 brands brought the most realized revenue in 2026?",
+  "seconds": 25.6,
+  "status": "done",
+  "cost": 0.01774,
+  "attempts": 3,
+  "sql": "SELECT\n  MAX('Cannot calculate brand revenue under the single-table plan.') AS limitation",
+  "warnings": [],
+  "grounded": true,
+  "claims": [],
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "product_master"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong dimension: no column matches 'brand_name'",
+  "failure_type": "wrong_dimension"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x11",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "What is the cancellation rate for COD versus prepaid orders?",
+  "seconds": 20.9,
+  "status": "done",
+  "cost": 0.0131,
+  "attempts": 1,
+  "sql": "SELECT\n  CASE\n    WHEN payment_method = 'COD'\n    THEN 'COD'\n    WHEN payment_method IS NULL\n    THEN 'Unknown'\n    ELSE 'Prepaid'\n  END AS payment_group,\n  COUNT(DISTINCT order_id) AS orders,\n  COUNT(DISTINCT order_id) FILTER(WHERE\n    NOT cancelled_at IS NULL) AS orders_with_cancellation,\n  COUNT(DISTINCT order_id) FILTER(WHERE\n    NOT cancelled_at IS NULL) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS cancellation_rate\nFROM sales\nWHERE\n  line_type = 'Sale'\nGROUP BY\n  payment_group\nORDER BY\n  cancellation_rate DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.0971472,
+    "unit": "ratio",
+    "column": "cancellation_rate",
+    "row": [
+     {
+      "column": "payment_group",
+      "value": "COD"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c2",
+    "value": 0.0668491,
+    "unit": "ratio",
+    "column": "cancellation_rate",
+    "row": [
+     {
+      "column": "payment_group",
+      "value": "Prepaid"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c3",
+    "value": 0.0302981,
+    "unit": "pct_points",
+    "column": "cancellation_rate",
+    "row": [
+     {
+      "column": "payment_group",
+      "value": "COD"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "payment_group",
+      "value": "Prepaid"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c4",
+    "value": 2033.0,
+    "unit": "count",
+    "column": "orders_with_cancellation",
+    "row": [
+     {
+      "column": "payment_group",
+      "value": "COD"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 20927.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "payment_group",
+      "value": "COD"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 3224.0,
+    "unit": "count",
+    "column": "orders_with_cancellation",
+    "row": [
+     {
+      "column": "payment_group",
+      "value": "Prepaid"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 48228.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "payment_group",
+      "value": "Prepaid"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong metric value: 'cancellation_rate' does not match (value, denominator or category)",
+  "failure_type": "wrong_metric_value"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x12",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "How many units were lost to stock-outs in each warehouse?",
+  "seconds": 13.8,
+  "status": "done",
+  "cost": 0.01003,
+  "attempts": 1,
+  "sql": "SELECT\n  warehouse_id,\n  SUM(lost_sales_units) AS lost_sales_units\nFROM inventory_history\nGROUP BY\n  warehouse_id\nORDER BY\n  lost_sales_units DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 404.0,
+    "unit": "count",
+    "column": "lost_sales_units",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_MUM"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 326.0,
+    "unit": "count",
+    "column": "lost_sales_units",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_BLR"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 215.0,
+    "unit": "count",
+    "column": "lost_sales_units",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_DEL"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 153.0,
+    "unit": "count",
+    "column": "lost_sales_units",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_KOL"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 251.0,
+    "unit": "count",
+    "column": "lost_sales_units",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_MUM"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_KOL"
+     }
+    ],
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 1098.0,
+    "unit": "count",
+    "column": "lost_sales_units",
+    "row": [],
+    "op": "sum",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "inventory_history"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x13",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "What share of orders came from new customers in each month of 2026?",
+  "seconds": 19.9,
+  "status": "done",
+  "cost": 0.01312,
+  "attempts": 1,
+  "sql": "SELECT\n  DATE_TRUNC('MONTH', placed_at) AS month,\n  COUNT(DISTINCT order_id) AS orders,\n  COUNT(DISTINCT order_id) FILTER(WHERE\n    is_first_order = TRUE) AS new_customer_orders,\n  100.0 * COUNT(DISTINCT order_id) FILTER(WHERE\n    is_first_order = TRUE) / NULLIF(COUNT(DISTINCT order_id), 0) AS new_customer_order_share_pct\nFROM sales\nWHERE\n  line_type = 'Sale'\n  AND placed_at >= CAST('2026-01-01' AS TIMESTAMP)\n  AND placed_at < CAST('2027-01-01' AS TIMESTAMP)\nGROUP BY\n  DATE_TRUNC('MONTH', placed_at)\nORDER BY\n  month ASC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 31.7179,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-01-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c2",
+    "value": 31.4664,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-02-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c3",
+    "value": 30.2224,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-03-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c4",
+    "value": 30.3894,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-04-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c5",
+    "value": 30.9013,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-05-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c6",
+    "value": 29.5465,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-06-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c7",
+    "value": 28.6298,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-07-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c8",
+    "value": 27.5184,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-08-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c9",
+    "value": 24.8692,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-09-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c10",
+    "value": 24.4605,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-10-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c11",
+    "value": 22.3795,
+    "unit": "number",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-11-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c12",
+    "value": 7.2574,
+    "unit": "pct_points",
+    "column": "new_customer_order_share_pct",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-01-01T00:00:00.000"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "month",
+      "value": "2026-10-01T00:00:00.000"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c13",
+    "value": 1791.0,
+    "unit": "count",
+    "column": "new_customer_orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-10-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c14",
+    "value": 1466.0,
+    "unit": "count",
+    "column": "new_customer_orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-01-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "x14",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the click-through rate of home page recommendations by position, for the top 5 positions?",
+  "seconds": 31.0,
+  "status": "done",
+  "cost": 0.0208,
+  "attempts": 3,
+  "sql": "SELECT\n  position,\n  COUNT(*) AS impressions,\n  COUNT(*) FILTER(WHERE\n    clicked = TRUE) AS clicks,\n  COUNT(*) FILTER(WHERE\n    clicked = TRUE) * 1.0 / NULLIF(COUNT(*), 0) AS click_through_rate\nFROM impressions\nWHERE\n  LOWER(surface) LIKE '%home%' AND position BETWEEN 1 AND 5\nGROUP BY\n  position\nORDER BY\n  position",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.236473,
+    "unit": "ratio",
+    "column": "click_through_rate",
+    "row": [
+     {
+      "column": "position",
+      "value": "1"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c2",
+    "value": 0.167865,
+    "unit": "ratio",
+    "column": "click_through_rate",
+    "row": [
+     {
+      "column": "position",
+      "value": "2"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c3",
+    "value": 0.129748,
+    "unit": "ratio",
+    "column": "click_through_rate",
+    "row": [
+     {
+      "column": "position",
+      "value": "3"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c4",
+    "value": 0.105933,
+    "unit": "ratio",
+    "column": "click_through_rate",
+    "row": [
+     {
+      "column": "position",
+      "value": "4"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c5",
+    "value": 0.0886559,
+    "unit": "ratio",
+    "column": "click_through_rate",
+    "row": [
+     {
+      "column": "position",
+      "value": "5"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c6",
+    "value": 0.1478171,
+    "unit": "pct_points",
+    "column": "click_through_rate",
+    "row": [
+     {
+      "column": "position",
+      "value": "1"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "position",
+      "value": "5"
+     }
+    ],
+    "decimals": 1
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "impressions"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y01",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "easy",
+  "tuned": false,
+  "question": "How many units did we sell in each product category in 2025?",
+  "seconds": 27.7,
+  "status": "done",
+  "cost": 0.01859,
+  "attempts": 3,
+  "sql": "SELECT\n  SUM(quantity) AS units_ordered\nFROM sales\nWHERE\n  line_type = 'Sale'\n  AND placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND placed_at < CAST('2026-01-01' AS TIMESTAMP)",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 36904.0,
+    "unit": "count",
+    "column": "units_ordered",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "product_master"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong dimension: no column matches 'category'",
+  "failure_type": "wrong_dimension"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y02",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the average delivery time in days for each courier?",
+  "seconds": 16.6,
+  "status": "done",
+  "cost": 0.01134,
+  "attempts": 1,
+  "sql": "SELECT\n  courier,\n  AVG(EPOCH(delivered_at - placed_at) / 86400.0) AS average_delivery_days,\n  COUNT(DISTINCT transaction_id) AS delivered_lines\nFROM sales\nWHERE\n  line_type = 'Sale' AND NOT placed_at IS NULL AND NOT delivered_at IS NULL\nGROUP BY\n  courier\nORDER BY\n  average_delivery_days ASC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 5.51203,
+    "unit": "days",
+    "column": "average_delivery_days",
+    "row": [
+     {
+      "column": "courier",
+      "value": "BlueDart"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 6.0911,
+    "unit": "days",
+    "column": "average_delivery_days",
+    "row": [
+     {
+      "column": "courier",
+      "value": "Delhivery"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 6.27797,
+    "unit": "days",
+    "column": "average_delivery_days",
+    "row": [
+     {
+      "column": "courier",
+      "value": "Ekart"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 6.35216,
+    "unit": "days",
+    "column": "average_delivery_days",
+    "row": [
+     {
+      "column": "courier",
+      "value": "XpressBees"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 6.46182,
+    "unit": "days",
+    "column": "average_delivery_days",
+    "row": [
+     {
+      "column": "courier",
+      "value": "Shadowfax"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c6",
+    "value": 0.94979,
+    "unit": "days",
+    "column": "average_delivery_days",
+    "row": [
+     {
+      "column": "courier",
+      "value": "Shadowfax"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "courier",
+      "value": "BlueDart"
+     }
+    ],
+    "decimals": 2
+   },
+   {
+    "id": "c7",
+    "value": 13749.0,
+    "unit": "count",
+    "column": "delivered_lines",
+    "row": [
+     {
+      "column": "courier",
+      "value": "BlueDart"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y03",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What was gross sales (GMV) in each quarter of 2025?",
+  "seconds": 14.1,
+  "status": "done",
+  "cost": 0.01051,
+  "attempts": 1,
+  "sql": "SELECT\n  DATE_TRUNC('QUARTER', placed_at) AS quarter,\n  SUM(gross_amount) AS gross_sales_gmv\nFROM sales\nWHERE\n  line_type = 'Sale'\n  AND placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND placed_at < CAST('2026-01-01' AS TIMESTAMP)\nGROUP BY\n  DATE_TRUNC('QUARTER', placed_at)\nORDER BY\n  quarter",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 7766769.0,
+    "unit": "inr",
+    "column": "gross_sales_gmv",
+    "row": [
+     {
+      "column": "quarter",
+      "value": "2025-01-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 8809517.0,
+    "unit": "inr",
+    "column": "gross_sales_gmv",
+    "row": [
+     {
+      "column": "quarter",
+      "value": "2025-04-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 15491809.0,
+    "unit": "inr",
+    "column": "gross_sales_gmv",
+    "row": [
+     {
+      "column": "quarter",
+      "value": "2025-07-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 18986641.0,
+    "unit": "inr",
+    "column": "gross_sales_gmv",
+    "row": [
+     {
+      "column": "quarter",
+      "value": "2025-10-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 11219872.0,
+    "unit": "inr",
+    "column": "gross_sales_gmv",
+    "row": [
+     {
+      "column": "quarter",
+      "value": "2025-10-01T00:00:00.000"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "quarter",
+      "value": "2025-01-01T00:00:00.000"
+     }
+    ],
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y04",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the return rate for women's products versus men's products?",
+  "seconds": 10.3,
+  "status": "done",
+  "cost": 0.00841,
+  "attempts": 1,
+  "sql": "SELECT\n  CAST(NULL AS DOUBLE) AS return_rate,\n  NULLIF(COUNT(*), 0) AS delivered_lines\nWHERE\n  FALSE",
+  "warnings": [],
+  "grounded": true,
+  "claims": [],
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "product_master"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong dimension: no column matches 'gender'",
+  "failure_type": "wrong_dimension"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y05",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "easy",
+  "tuned": false,
+  "question": "How many sessions came from each traffic source in October 2026?",
+  "seconds": 16.0,
+  "status": "done",
+  "cost": 0.01139,
+  "attempts": 1,
+  "sql": "SELECT\n  traffic_source,\n  COUNT(DISTINCT session_id) AS sessions\nFROM clickstream\nWHERE\n  event_type = 'session_start'\n  AND event_at >= CAST('2026-10-01' AS TIMESTAMP)\n  AND event_at < CAST('2026-11-01' AS TIMESTAMP)\nGROUP BY\n  traffic_source\nORDER BY\n  sessions DESC,\n  traffic_source",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 32490.0,
+    "unit": "count",
+    "column": "sessions",
+    "row": [
+     {
+      "column": "traffic_source",
+      "value": "direct"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 29529.0,
+    "unit": "count",
+    "column": "sessions",
+    "row": [
+     {
+      "column": "traffic_source",
+      "value": "organic_search"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 20905.0,
+    "unit": "count",
+    "column": "sessions",
+    "row": [
+     {
+      "column": "traffic_source",
+      "value": "paid_search"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 18549.0,
+    "unit": "count",
+    "column": "sessions",
+    "row": [
+     {
+      "column": "traffic_source",
+      "value": "paid_social"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 9240.0,
+    "unit": "count",
+    "column": "sessions",
+    "row": [
+     {
+      "column": "traffic_source",
+      "value": "crm"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 8437.0,
+    "unit": "count",
+    "column": "sessions",
+    "row": [
+     {
+      "column": "traffic_source",
+      "value": "affiliate"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 6847.0,
+    "unit": "count",
+    "column": "sessions",
+    "row": [
+     {
+      "column": "traffic_source",
+      "value": "referral"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c8",
+    "value": 3070.0,
+    "unit": "count",
+    "column": "sessions",
+    "row": [
+     {
+      "column": "traffic_source",
+      "value": "display"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c9",
+    "value": 2961.0,
+    "unit": "count",
+    "column": "sessions",
+    "row": [
+     {
+      "column": "traffic_source",
+      "value": "direct"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "traffic_source",
+      "value": "organic_search"
+     }
+    ],
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "clickstream"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y06",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "What is the platform-reported return on ad spend for each channel group, excluding CRM?",
+  "seconds": 26.2,
+  "status": "done",
+  "cost": 0.01903,
+  "attempts": 2,
+  "sql": "SELECT\n  c.channel_group,\n  SUM(ms.platform_revenue) / NULLIF(SUM(ms.spend), 0) AS platform_reported_roas,\n  SUM(ms.spend) AS ad_spend,\n  SUM(ms.platform_conversions) AS platform_conversions\nFROM marketing_spend AS ms\nJOIN campaigns AS c\n  ON ms.campaign_id = c.campaign_id\nWHERE\n  c.channel_group <> 'CRM'\nGROUP BY\n  c.channel_group\nORDER BY\n  platform_reported_roas DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 13.8754,
+    "unit": "number",
+    "column": "platform_reported_roas",
+    "row": [
+     {
+      "column": "channel_group",
+      "value": "Affiliate"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 4.03735,
+    "unit": "number",
+    "column": "platform_reported_roas",
+    "row": [
+     {
+      "column": "channel_group",
+      "value": "Paid Search"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 3.87143,
+    "unit": "number",
+    "column": "platform_reported_roas",
+    "row": [
+     {
+      "column": "channel_group",
+      "value": "Paid Social"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 3.42964,
+    "unit": "number",
+    "column": "platform_reported_roas",
+    "row": [
+     {
+      "column": "channel_group",
+      "value": "Display"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 9.83805,
+    "unit": "number",
+    "column": "platform_reported_roas",
+    "row": [
+     {
+      "column": "channel_group",
+      "value": "Affiliate"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "channel_group",
+      "value": "Paid Search"
+     }
+    ],
+    "decimals": 2
+   },
+   {
+    "id": "c6",
+    "value": 346639.01,
+    "unit": "inr",
+    "column": "ad_spend",
+    "row": [
+     {
+      "column": "channel_group",
+      "value": "Affiliate"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 3917751.55,
+    "unit": "inr",
+    "column": "ad_spend",
+    "row": [
+     {
+      "column": "channel_group",
+      "value": "Paid Social"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c8",
+    "value": 1650.0,
+    "unit": "count",
+    "column": "platform_conversions",
+    "row": [
+     {
+      "column": "channel_group",
+      "value": "Display"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "marketing_spend",
+   "campaigns"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y07",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "How many support tickets were opened each month in 2026?",
+  "seconds": 29.3,
+  "status": "done",
+  "cost": 0.02241,
+  "attempts": 2,
+  "sql": "WITH ticket_openings AS (\n  SELECT\n    ticket_id,\n    MIN(contact_at) AS opened_at\n  FROM support_contacts\n  GROUP BY\n    ticket_id\n  HAVING\n    MIN(contact_at) >= CAST('2026-01-01' AS TIMESTAMP)\n    AND MIN(contact_at) < CAST('2027-01-01' AS TIMESTAMP)\n)\nSELECT\n  months.month_start,\n  COUNT(DISTINCT ticket_openings.ticket_id) AS tickets_opened\nFROM (VALUES\n  (CAST('2026-01-01' AS TIMESTAMP)),\n  (CAST('2026-02-01' AS TIMESTAMP)),\n  (CAST('2026-03-01' AS TIMESTAMP)),\n  (CAST('2026-04-01' AS TIMESTAMP)),\n  (CAST('2026-05-01' AS TIMESTAMP)),\n  (CAST('2026-06-01' AS TIMESTAMP)),\n  (CAST('2026-07-01' AS TIMESTAMP)),\n  (CAST('2026-08-01' AS TIMESTAMP)),\n  (CAST('2026-09-01' AS TIMESTAMP)),\n  (CAST('2026-10-01' AS TIMESTAMP)),\n  (CAST('2026-11-01' AS TIMESTAMP)),\n  (CAST('2026-12-01' AS TIMESTAMP))) AS months(month_start)\nLEFT JOIN ticket_openings\n  ON ticket_openings.opened_at >= months.month_start\n  AND ticket_openings.opened_at < months.month_start + INTERVAL '1' MONTH\nGROUP BY\n  months.month_start\nORDER BY\n  months.month_start",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 3895.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [],
+    "op": "sum",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 767.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-10-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 417.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-01-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 302.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-02-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 313.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-03-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 184.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-04-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 230.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-05-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c8",
+    "value": 329.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-06-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c9",
+    "value": 345.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-07-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c10",
+    "value": 469.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-08-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c11",
+    "value": 265.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-09-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c12",
+    "value": 274.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-11-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c13",
+    "value": 0.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-12-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c14",
+    "value": 298.0,
+    "unit": "count",
+    "column": "tickets_opened",
+    "row": [
+     {
+      "column": "month_start",
+      "value": "2026-10-01T00:00:00.000"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "month_start",
+      "value": "2026-08-01T00:00:00.000"
+     }
+    ],
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "support_contacts"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "extra rows for 'month'",
+  "failure_type": "extra_rows"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y08",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the average first response time in minutes for each support channel?",
+  "seconds": 14.2,
+  "status": "done",
+  "cost": 0.01017,
+  "attempts": 1,
+  "sql": "SELECT\n  channel,\n  AVG(first_response_minutes) AS average_first_response_minutes,\n  COUNT(DISTINCT contact_id) FILTER(WHERE\n    NOT first_response_minutes IS NULL) AS contacts_with_response_time\nFROM support_contacts\nGROUP BY\n  channel\nORDER BY\n  average_first_response_minutes DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 79.9798,
+    "unit": "minutes",
+    "column": "average_first_response_minutes",
+    "row": [
+     {
+      "column": "channel",
+      "value": "email"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c2",
+    "value": 79.4361,
+    "unit": "minutes",
+    "column": "average_first_response_minutes",
+    "row": [
+     {
+      "column": "channel",
+      "value": "phone"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c3",
+    "value": 12.5464,
+    "unit": "minutes",
+    "column": "average_first_response_minutes",
+    "row": [
+     {
+      "column": "channel",
+      "value": "chat"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c4",
+    "value": 67.4334,
+    "unit": "minutes",
+    "column": "average_first_response_minutes",
+    "row": [
+     {
+      "column": "channel",
+      "value": "email"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "channel",
+      "value": "chat"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c5",
+    "value": 66.8897,
+    "unit": "minutes",
+    "column": "average_first_response_minutes",
+    "row": [
+     {
+      "column": "channel",
+      "value": "phone"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "channel",
+      "value": "chat"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c6",
+    "value": 1977.0,
+    "unit": "count",
+    "column": "contacts_with_response_time",
+    "row": [
+     {
+      "column": "channel",
+      "value": "email"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 2291.0,
+    "unit": "count",
+    "column": "contacts_with_response_time",
+    "row": [
+     {
+      "column": "channel",
+      "value": "phone"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c8",
+    "value": 5198.0,
+    "unit": "count",
+    "column": "contacts_with_response_time",
+    "row": [
+     {
+      "column": "channel",
+      "value": "chat"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "support_contacts"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y09",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "What is the gross margin for each product usage type such as casual, formal and sports?",
+  "seconds": 16.4,
+  "status": "done",
+  "cost": 0.01156,
+  "attempts": 1,
+  "sql": "SELECT\n  usage,\n  COUNT(DISTINCT product_id) FILTER(WHERE\n    NOT mrp IS NULL AND NOT unit_cost IS NULL) AS priced_products,\n  100.0 * SUM(CASE WHEN NOT mrp IS NULL AND NOT unit_cost IS NULL THEN mrp - unit_cost END) / NULLIF(SUM(CASE WHEN NOT mrp IS NULL AND NOT unit_cost IS NULL THEN mrp END), 0) AS list_price_margin_proxy_pct\nFROM product_master\nGROUP BY\n  usage\nORDER BY\n  list_price_margin_proxy_pct DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 50.101,
+    "unit": "number",
+    "column": "list_price_margin_proxy_pct",
+    "row": [
+     {
+      "column": "usage",
+      "value": "Formal"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 50.0478,
+    "unit": "number",
+    "column": "list_price_margin_proxy_pct",
+    "row": [
+     {
+      "column": "usage",
+      "value": "Casual"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 50.0088,
+    "unit": "number",
+    "column": "list_price_margin_proxy_pct",
+    "row": [
+     {
+      "column": "usage",
+      "value": "Ethnic"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 49.7682,
+    "unit": "number",
+    "column": "list_price_margin_proxy_pct",
+    "row": [
+     {
+      "column": "usage",
+      "value": "Sports"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 49.6487,
+    "unit": "number",
+    "column": "list_price_margin_proxy_pct",
+    "row": [
+     {
+      "column": "usage",
+      "value": "Smart Casual"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c6",
+    "value": 49.0604,
+    "unit": "number",
+    "column": "list_price_margin_proxy_pct",
+    "row": [
+     {
+      "column": "usage",
+      "value": "Party"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c7",
+    "value": 47.7192,
+    "unit": "number",
+    "column": "list_price_margin_proxy_pct",
+    "row": [
+     {
+      "column": "usage",
+      "value": "Travel"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c8",
+    "value": 2.3818,
+    "unit": "pct_points",
+    "column": "list_price_margin_proxy_pct",
+    "row": [
+     {
+      "column": "usage",
+      "value": "Formal"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "usage",
+      "value": "Travel"
+     }
+    ],
+    "decimals": 2
+   },
+   {
+    "id": "c9",
+    "value": 6.0,
+    "unit": "count",
+    "column": "priced_products",
+    "row": [
+     {
+      "column": "usage",
+      "value": "Travel"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c10",
+    "value": 6673.0,
+    "unit": "count",
+    "column": "priced_products",
+    "row": [
+     {
+      "column": "usage",
+      "value": "Casual"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "product_master"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong metric value: 'gross_margin_pct' does not match (value, denominator or category)",
+  "failure_type": "wrong_metric_value"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y10",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": true,
+  "question": "What is the RTO rate in each city tier?",
+  "seconds": 12.1,
+  "status": "done",
+  "cost": 0.00873,
+  "attempts": 1,
+  "sql": "SELECT\n  'Cannot calculate RTO rate from the single-table plan' AS issue,\n  COUNT(*) AS rows_examined\nWHERE\n  FALSE",
+  "warnings": [],
+  "grounded": true,
+  "claims": [],
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "customer_addresses"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong dimension: no column matches 'city_tier'",
+  "failure_type": "wrong_dimension"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y11",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "How many customers signed up through each acquisition channel in 2026?",
+  "seconds": 15.5,
+  "status": "done",
+  "cost": 0.01094,
+  "attempts": 1,
+  "sql": "SELECT\n  signup_channel,\n  COUNT(DISTINCT customer_id) AS customers\nFROM customers\nWHERE\n  signup_at >= CAST('2026-01-01' AS TIMESTAMP)\n  AND signup_at < CAST('2027-01-01' AS TIMESTAMP)\nGROUP BY\n  signup_channel\nORDER BY\n  customers DESC,\n  signup_channel",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 6187.0,
+    "unit": "count",
+    "column": "customers",
+    "row": [
+     {
+      "column": "signup_channel",
+      "value": "paid_search"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 5136.0,
+    "unit": "count",
+    "column": "customers",
+    "row": [
+     {
+      "column": "signup_channel",
+      "value": "direct"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 4618.0,
+    "unit": "count",
+    "column": "customers",
+    "row": [
+     {
+      "column": "signup_channel",
+      "value": "organic_search"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 3945.0,
+    "unit": "count",
+    "column": "customers",
+    "row": [
+     {
+      "column": "signup_channel",
+      "value": "paid_social"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 1771.0,
+    "unit": "count",
+    "column": "customers",
+    "row": [
+     {
+      "column": "signup_channel",
+      "value": "affiliate"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 1064.0,
+    "unit": "count",
+    "column": "customers",
+    "row": [
+     {
+      "column": "signup_channel",
+      "value": "referral"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 207.0,
+    "unit": "count",
+    "column": "customers",
+    "row": [
+     {
+      "column": "signup_channel",
+      "value": "display"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c8",
+    "value": 5980.0,
+    "unit": "count",
+    "column": "customers",
+    "row": [
+     {
+      "column": "signup_channel",
+      "value": "paid_search"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "signup_channel",
+      "value": "display"
+     }
+    ],
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "customers"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y12",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "What is the average discount off MRP for each brand of footwear, for the 5 brands with the most units sold?",
+  "seconds": 23.7,
+  "status": "done",
+  "cost": 0.01777,
+  "attempts": 2,
+  "sql": "SELECT\n  100.0 * SUM((\n    mrp - unit_price\n  ) * quantity) / NULLIF(SUM(mrp * quantity), 0) AS markdown_pct_off_mrp,\n  SUM(quantity) AS units_sold\nFROM sales\nWHERE\n  line_type = 'Sale'",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 22.83,
+    "unit": "number",
+    "column": "markdown_pct_off_mrp",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 91908.0,
+    "unit": "count",
+    "column": "units_sold",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "product_master"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong dimension: no column matches 'brand_name'",
+  "failure_type": "wrong_dimension"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y13",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "Which surface shows products most often, and how many impressions did each surface get?",
+  "seconds": 9.4,
+  "status": "done",
+  "cost": 0.00815,
+  "attempts": 1,
+  "sql": "SELECT\n  surface,\n  COUNT(*) AS impressions\nFROM impressions\nGROUP BY\n  surface\nORDER BY\n  impressions DESC,\n  surface",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 11892419.0,
+    "unit": "count",
+    "column": "impressions",
+    "row": [
+     {
+      "column": "surface",
+      "value": "pdp_similar"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 11466558.0,
+    "unit": "count",
+    "column": "impressions",
+    "row": [
+     {
+      "column": "surface",
+      "value": "plp"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 10408795.0,
+    "unit": "count",
+    "column": "impressions",
+    "row": [
+     {
+      "column": "surface",
+      "value": "search_results"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 5169141.0,
+    "unit": "count",
+    "column": "impressions",
+    "row": [
+     {
+      "column": "surface",
+      "value": "home_recs"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 425861.0,
+    "unit": "count",
+    "column": "impressions",
+    "row": [
+     {
+      "column": "surface",
+      "value": "pdp_similar"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "surface",
+      "value": "plp"
+     }
+    ],
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "impressions"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y14",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": true,
+  "question": "What is the average order value for Prime versus non-Prime customers?",
+  "seconds": 11.8,
+  "status": "done",
+  "cost": 0.00882,
+  "attempts": 1,
+  "sql": "SELECT\n  CAST(NULL AS BOOLEAN) AS is_prime,\n  CAST(NULL AS DOUBLE) AS average_order_value,\n  CAST(NULL AS BIGINT) AS orders\nWHERE\n  FALSE\nLIMIT 1",
+  "warnings": [],
+  "grounded": true,
+  "claims": [],
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "customers"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "missing rows (empty result)",
+  "failure_type": "missing_rows"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y15",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "How much stock is on hand right now in each warehouse?",
+  "seconds": 12.9,
+  "status": "done",
+  "cost": 0.00966,
+  "attempts": 1,
+  "sql": "SELECT\n  warehouse_id,\n  SUM(on_hand_qty) AS on_hand_units\nFROM inventory_live\nGROUP BY\n  warehouse_id\nORDER BY\n  on_hand_units DESC,\n  warehouse_id",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 71451.0,
+    "unit": "count",
+    "column": "on_hand_units",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_MUM"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 50602.0,
+    "unit": "count",
+    "column": "on_hand_units",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_BLR"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 39157.0,
+    "unit": "count",
+    "column": "on_hand_units",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_DEL"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 33800.0,
+    "unit": "count",
+    "column": "on_hand_units",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_KOL"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 37651.0,
+    "unit": "count",
+    "column": "on_hand_units",
+    "row": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_MUM"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "warehouse_id",
+      "value": "WH_KOL"
+     }
+    ],
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 195010.0,
+    "unit": "count",
+    "column": "on_hand_units",
+    "row": [],
+    "op": "sum",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "inventory_live"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "y16",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": true,
+  "question": "What share of delivered orders in each region arrived late?",
+  "seconds": 27.0,
+  "status": "done",
+  "cost": 0.01847,
+  "attempts": 3,
+  "sql": "SELECT\n  COUNT(DISTINCT order_id) AS delivered_orders,\n  COUNT(DISTINCT order_id) FILTER(WHERE\n    delivered_at > promised_delivery_date) AS late_orders,\n  COUNT(DISTINCT order_id) FILTER(WHERE\n    delivered_at > promised_delivery_date) * 1.0 / NULLIF(COUNT(DISTINCT order_id), 0) AS late_order_share\nFROM sales\nWHERE\n  line_type = 'Sale' AND NOT delivered_at IS NULL",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.526799,
+    "unit": "ratio",
+    "column": "late_order_share",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c2",
+    "value": 33083.0,
+    "unit": "count",
+    "column": "late_orders",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 62800.0,
+    "unit": "count",
+    "column": "delivered_orders",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales",
+   "customer_addresses"
+  ],
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong dimension: no column matches 'region'",
+  "failure_type": "wrong_dimension"
+ },
+ {
+  "suite": "holdout",
+  "variant": "baseline",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "z01",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": true,
+  "question": "How many orders were placed in December 2024?",
+  "seconds": 6.9,
+  "status": "done",
+  "cost": 0.00728,
+  "attempts": 1,
+  "sql": "SELECT\n  COUNT(DISTINCT order_id) AS orders\nFROM sales\nWHERE\n  line_type = 'Sale'\n  AND placed_at >= CAST('2024-12-01' AS TIMESTAMP)\n  AND placed_at < CAST('2025-01-01' AS TIMESTAMP)",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [],
+  "required_tables": [
+   "sales"
+  ],
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ }
+]

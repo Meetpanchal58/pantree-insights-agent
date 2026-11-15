@@ -21,10 +21,13 @@ PROMPTS = []
 
 
 def analysis(user):
-    row = user.split("## Result table\n", 1)[1].splitlines()[1].split(",")
-    return {"headline": f"{row[0]} leads with Rs {row[1]}.", "findings": [f"{row[0]}: Rs {row[1]}"],
+    lines = user.split("## Result table\n", 1)[1].splitlines()
+    header, row = lines[0].split(","), lines[1].split(",")
+    claim = {"id": "c1", "value": float(row[1]), "unit": "inr", "column": header[1],
+             "row": [{"column": header[0], "value": row[0]}], "op": "value"}
+    return {"headline": f"{row[0]} leads with Rs {{c1}}.", "findings": [f"{row[0]}: Rs {{c1}}"],
             "memory": [{"statement": f"{row[0]} is the top category", "type": "fact"}],
-            "chart_metric": "realized_revenue"}
+            "chart_metric": "realized_revenue", "claims": [claim]}
 
 
 def responder(agent, schema, system, user):
