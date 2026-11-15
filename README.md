@@ -39,15 +39,37 @@ Visitors can replay recorded demo runs without signing in; sign in with Google f
   profile, the pulse's open gaps, and insights an admin chose to share).
 - **Pulse:** this week's unusual KPI changes, each with an "Investigate" button that starts a chat.
 
-## How it will work
+## How it works
 
+```mermaid
+flowchart LR
+    Q[Business question] --> IC[Input check]
+    IC --> R[Hybrid retrieval<br/>tables, metrics, joins,<br/>values, examples]
+    R --> P[Planner<br/>intent, tables, join path,<br/>grain - or asks / declines]
+    P -->|unclear| C[Clarifying questions] --> P
+    P --> W[SQL writer]
+    W --> G[SQL guardrails<br/>read-only, approved<br/>tables and joins]
+    G --> DB[(DuckDB<br/>read-only views)]
+    DB --> V[Validator]
+    G -.->|error| W
+    DB -.->|error / empty| W
+    V -.->|wrong query| W
+    V --> A[Analyst<br/>findings, actions,<br/>caveats]
+    A --> N[Number check] --> CH[Chart] --> OUT[Answer + chart + SQL<br/>+ exports]
+    S[(semantic/<br/>metrics, schema,<br/>examples)] -.-> R
+    M[(Memory<br/>chat, project, user,<br/>business)] -.-> P
+    A -.-> M
 ```
-question
-  → input check → planner (asks clarifying questions) → SQL writer → guardrails (code) → validator
-  → DuckDB (read-only) → analyst → chart → number check → answer + chart + SQL + exports
-                ▲                                  ▲
-       semantic/ (tables, metrics, examples)   memory/ (insights, KPI history, open gaps)
-```
+
+### Safety layers
+
+| Layer | Role |
+|---|---|
+| Question check (regex) | A cheap first filter for obvious personal-data requests and prompt-injection phrasing. It can be fooled by paraphrases, so it is not relied on alone. |
+| Planner | Declines personal-data requests, raw dumps and off-topic questions it recognises (judged by the model). |
+| **SQL guardrails** (code) | **The real enforcement:** one read-only SELECT, approved tables and columns only, approved join paths, no table functions, results summarised or limited. |
+| **Locked database** | Blocked tables and columns do not exist in the views; the connection cannot read other files, write, install extensions or change settings. |
+| Number check | Every number in the answer must come from the result (or a simple derivation of it). |
 
 ## What is built
 
@@ -68,7 +90,7 @@ question
 | `src/pantree_insights/web.py`, `static/` | FastAPI app and the HTML/CSS/JS front end (no build step): runs in background threads streamed over Server-Sent Events, clarifying-question pause and resume, daily limits, memory, pulse, demo replays. Exports are made in the browser (Plotly for PNG, PptxGenJS for PowerPoint). |
 | `src/pantree_insights/store.py`, `auth.py` | Database (SQLite locally, Neon Postgres in production): users, projects, chats, messages, memory, sign-in codes, usage. Google OAuth and email codes with signed session cookies. |
 | `src/pantree_insights/demos.py` | Records real runs and replays them with their original timing. |
-| `src/pantree_insights/llm.py` | One interface to the model (LangChain `init_chat_model`, so OpenAI or Anthropic is a setting), cost per call and per question, and a daily budget. Tests use a scripted fake model. |
+| `src/pantree_insights/llm.py` | One interface to the model (LangChain `init_chat_model`, so OpenAI or Anthropic is a setting), cost per call and per question, and a daily budget stored in the database (survives restarts). Tests use a scripted fake model. |
 | `src/pantree_insights/pulse.py` | Builds the daily history of 18 KPIs (143 series), compares the latest week with the 8 before it, explains changes caused by sale events and records the rest as open gaps in `memory/gaps/`. |
 
 ### Data the agent cannot see
@@ -187,7 +209,6 @@ Retrieval, `uv run python evals/retrieval_eval.py` (full shop, report: `evals/re
 | Suite | Tables recall / precision | Metrics recall / precision | Joins recall / precision | Filter values recall | All required context retrieved | Median latency |
 |---|---|---|---|---|---|---|
 | Holdout (30 answer questions) | 97% / 27% | 100% / 25% | 86% / 18% | 100% | **28/30 (93%)** | ~70 ms |
-| Holdout, clean (27, excluding 3 used for tuning) | | | | | **27/27 (100%)** | |
 | Regression (28, leave-one-out) | 100% / 28% | - | 100% / 23% | - | **28/28 (100%)** | ~65 ms |
 
 Before the documentation fix the expanded holdout scored 27/30: all three misses were delivery-geography
@@ -223,8 +244,8 @@ Failures, question by question:
   of the delivery region. Open.
 - **xc1** ("How did we do last quarter?"): answered with defaults instead of asking. Open.
 
-Both answer failures are among the 3 questions marked `tuned_on`, so the clean score is 27/27; the headline
-figure is the full 28/30. With 30 answer questions, one question moves accuracy by about 3 points.
+The headline figure is the full 28/30; both answer failures happen to be among the 3 questions marked
+`tuned_on`, so a "clean" score excluding them is not used as a headline. With 30 answer questions, one question moves accuracy by about 3 points.
 
 Rerun:
 
@@ -243,7 +264,12 @@ Reports are written to `evals/reports/e2e_<suite>_<date>.md` with failures liste
 - The data is simulated (realistic, validated), not a real shop.
 - The holdout is still small (30 answer questions): one question moves a percentage by about 3 points.
 - Questions are answered against one data snapshot; the simulator adds a day every night.
-- One Cloud Run instance; clarifying questions in progress are lost if it restarts.
+- **Deliberate trade-off: one instance.** Runs in progress, their live events and paused clarifying questions
+  are kept in memory (LangGraph `InMemorySaver`), so the service runs with `max-instances 1` and a restart drops
+  an unanswered clarification. For this demo's traffic that is the simplest correct design. Scaling out would
+  need a Postgres checkpointer for LangGraph plus a shared event store for the live steps.
+- The daily LLM budget is stored in the app database (Postgres in production), so restarts do not reset it;
+  the OpenAI project's own monthly limit is the second line of defence.
 
 ## Roadmap
 

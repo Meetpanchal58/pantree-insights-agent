@@ -60,7 +60,17 @@ def price(model: str, input_tokens: int, cached: int, output: int) -> float:
     return ((input_tokens - cached) * rate_in + cached * rate_cached + output * rate_out) / 1e6
 
 
+BUDGET_KEY = "__daily_llm_budget__"     # one row per day in the usage table, for all users together
+
+
 def spent_today() -> float:
+    """Today's LLM spend. Kept in the app database (Postgres in production) so restarts and cold starts
+    do not reset it; falls back to a local file when no database is reachable (e.g. CLI without setup)."""
+    try:
+        from .store import get_store
+        return get_store().usd_today(BUDGET_KEY)
+    except Exception:
+        pass
     try:
         return json.loads(SPEND_FILE.read_text()).get(str(date.today()), 0.0)
     except (OSError, ValueError):
@@ -68,6 +78,12 @@ def spent_today() -> float:
 
 
 def _record_spend(usd: float) -> None:
+    try:
+        from .store import get_store
+        get_store().add_usd_today(BUDGET_KEY, usd)
+        return
+    except Exception:
+        pass
     try:
         data = json.loads(SPEND_FILE.read_text())
     except (OSError, ValueError):

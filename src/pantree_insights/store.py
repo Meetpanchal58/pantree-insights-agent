@@ -204,6 +204,19 @@ class Store:
         else:
             self._exec(insert(usage).values(user_id=user_id, day=day, questions=1, usd=usd))
 
+    def usd_today(self, key: str) -> float:
+        row = self._one(select(usage).where(usage.c.user_id == key, usage.c.day == str(date.today())))
+        return float(row["usd"]) if row else 0.0
+
+    def add_usd_today(self, key: str, usd: float) -> None:
+        """Add spend for today under a key (atomic update; the row is created on first use)."""
+        day = str(date.today())
+        with self.engine.begin() as c:
+            done = c.execute(update(usage).where(usage.c.user_id == key, usage.c.day == day)
+                             .values(usd=usage.c.usd + usd)).rowcount
+            if not done:
+                c.execute(insert(usage).values(user_id=key, day=day, questions=0, usd=usd))
+
     def add_cost(self, user_id: str, usd: float) -> None:
         day = str(date.today())
         self._exec(update(usage).where(usage.c.user_id == user_id, usage.c.day == day).values(usd=usage.c.usd + usd))

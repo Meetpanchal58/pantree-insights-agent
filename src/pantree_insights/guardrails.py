@@ -203,7 +203,8 @@ PERSONAL_DATA = re.compile(
     r"first names?|last names?|full names?|customer names?|pii|password|otp codes?)\b", re.I)
 # A bare "address" is allowed: "revenue by region of the delivery address" is an aggregate question.
 INJECTION = re.compile(
-    r"(ignore (all |any |the )?(previous|prior|above) (instructions|rules)|system prompt|you are now|"
+    r"((ignore|disregard|forget|override|bypass) (all |any |the |your )?(previous|prior|above|earlier|"
+    r"preceding) (instructions|rules|prompts?)|system prompt|you are now|"
     r"developer mode|jailbreak|drop\s+table|delete\s+from|;\s*--)", re.I)
 
 
