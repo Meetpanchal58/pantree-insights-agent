@@ -184,6 +184,22 @@ with Cloud Build, deploys, and prints the live URL.
 **5. Finish Google sign-in:** add the printed redirect URI (`<URL>/auth/google/callback`) to the OAuth client's
 "Authorized redirect URIs". Redeploy any time with the same command.
 
+**6. Automatic deploys (optional, once).** A Cloud Build trigger can deploy every push to `main` with
+`cloudbuild.yaml` (build → push → `gcloud run deploy --image`; secrets, data bucket and settings stay as the
+script set them). In the Cloud console of this project:
+
+- **Cloud Build → Permissions:** choose the Compute Engine default service account, turn on
+  "Set as pre-selected for new triggers", and enable **Cloud Run Admin**, **Artifact Registry Writer**,
+  **Logs Writer** and **Cloud Build Service Account**. When asked for the Cloud Run service account to
+  impersonate, pick `pantree-run@<project>.iam.gserviceaccount.com`.
+- **Cloud Build → Repositories → 1st gen → Connect repository:** GitHub (Cloud Build GitHub App), give the app
+  access to this repository, connect it.
+- **Cloud Build → Triggers → Create trigger:** name `deploy-main`, region `global`, event push to branch
+  `^main$`, configuration "Cloud Build configuration file", location Repository, `/cloudbuild.yaml`.
+
+Click **Run** on the trigger once to test it; builds show under Cloud Build → History. Use the deploy script
+again when secrets, the data or service settings change.
+
 The first request after an idle period starts a new instance (about 20-40 seconds: indexes and the KPI pulse
 are rebuilt). Live questions are limited to 10 per user per day and the app stops calling the model after
 US$0.50 a day; the OpenAI project has its own monthly limit.
