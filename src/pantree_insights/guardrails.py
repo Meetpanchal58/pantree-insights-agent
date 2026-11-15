@@ -323,6 +323,12 @@ DATES = re.compile(rf"\b\d{{4}}-\d{{2}}-\d{{2}}\b|\b{MONTHS}\s+\d{{4}}\b"
 
 
 def unsupported_numbers(text: str, frame: pd.DataFrame, rel_tol: float = 0.015) -> list[str]:
+    """DEPRECATED (kept to document the old behaviour in tests/test_grounding.py): this regex check accepted
+    most random numbers. Answers are now verified as structured claims by grounding.verify."""
+    return _old_unsupported_numbers(text, frame, rel_tol)
+
+
+def _old_unsupported_numbers(text: str, frame: pd.DataFrame, rel_tol: float = 0.015) -> list[str]:
     """Numbers in an answer that cannot be traced to the result table (directly or as a simple derivation).
 
     Allowed: values in the table (any rounding / % form), differences and ratios of two values

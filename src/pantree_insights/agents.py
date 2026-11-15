@@ -14,6 +14,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from .config import get_settings
+from .grounding import Claim, render
 from .llm import LLM
 
 
@@ -61,7 +62,7 @@ class MemoryNote(BaseModel):
 
 
 class Analysis(BaseModel):
-    headline: str
+    headline: str = Field(description="Prose with {c1}-style placeholders for every number")
     findings: list[str]
     recommendations: list[str] = Field(default_factory=list)
     caveats: list[str] = Field(default_factory=list)
@@ -71,6 +72,20 @@ class Analysis(BaseModel):
     chart_title: str = ""
     chart_subtitle: str = ""
     chart_metric: str | None = Field(None, description="Result column to plot (the main metric)")
+    claims: list[Claim] = Field(default_factory=list, description="Every number used in the text, as a claim")
+
+    def texts(self) -> dict[str, str | list[str]]:
+        return {"headline": self.headline, "findings": self.findings, "recommendations": self.recommendations,
+                "caveats": self.caveats, "memory": [m.statement for m in self.memory]}
+
+    def rendered(self) -> Analysis:
+        """The same analysis with placeholders replaced by the claims' formatted values."""
+        r = lambda t: render(t, self.claims)                                       # noqa: E731
+        return self.model_copy(update={
+            "headline": r(self.headline), "findings": [r(t) for t in self.findings],
+            "recommendations": [r(t) for t in self.recommendations], "caveats": [r(t) for t in self.caveats],
+            "memory": [m.model_copy(update={"statement": r(m.statement)}) for m in self.memory],
+            "chart_title": r(self.chart_title), "chart_subtitle": r(self.chart_subtitle)})
 
 
 # ----------------------------------------------------------------------------- prompts
@@ -175,8 +190,9 @@ def analyse(llm: LLM, question: str, the_plan: AnalysisPlan, sql: str, frame: pd
             metric_notes: str, data: dict, fix_numbers: list[str] | None = None) -> Analysis:
     retry = ""
     if fix_numbers:
-        retry = ("Your previous answer used numbers that are not in the result table: "
-                 + ", ".join(fix_numbers) + ". Rewrite using only numbers from the table (or simple derivations).")
+        retry = ("Your previous answer failed the claim check:\n" + "\n".join(f"- {p}" for p in fix_numbers)
+                 + "\nRewrite it: every number must be a claim whose column, row keys and op reproduce it from the "
+                 "result table, and the text may contain no other numbers.")
     user = _join(
         _section("Question", question),
         _section("Analysis plan", plan_text(the_plan)),

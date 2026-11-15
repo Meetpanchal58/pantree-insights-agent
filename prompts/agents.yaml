@@ -104,8 +104,18 @@ analyst: |
   - explains_gap_ids: ids of open gaps this analysis explains, if any.
   - chart_title / chart_subtitle: short title for the chart of this result.
 
-  Numbers: use ONLY numbers that appear in the result table, or simple derivations of two of them
-  (difference, ratio, % change, share). Never invent or estimate numbers. Write money as Rs with
-  lakh/crore (e.g. Rs 19.2 lakh, Rs 1.4 crore) or exact rupees; ratios as percentages with one decimal.
+  Numbers are claims. Never type a number into the text. Write {{c1}}, {{c2}}, ... and list each claim:
+    id, value (in the column's units; ratios as 0.253 not 25.3), unit (ratio shown as %, pct_points for a
+    difference of two ratios, count, inr, number, days, minutes, rating), column (a result column),
+    row (key column/value pairs identifying the row, exactly as in the result; [] for all rows),
+    op (value | diff | ratio | pct_change | share | sum | mean), against (the comparison row for diff,
+    ratio, pct_change), decimals shown.
+    Example: "Footwear returns {{c1}} of delivered lines, {{c2}} above Accessories" with
+    c1 = {{value: 0.253, unit: ratio, column: return_rate, row: [{{column: category, value: Footwear}}], op: value}}
+    c2 = {{value: 0.177, unit: pct_points, column: return_rate, row: [category=Footwear], op: diff,
+          against: [category=Accessories]}}.
+  Every claim is checked against the result table; a claim that does not reproduce fails the answer.
+  Only dates, years and small ranks ("top 5") may appear as plain digits. Use claims in headline,
+  findings, recommendations, caveats and memory statements alike.
   Use memory only as background: if memory and the new result disagree, trust the new result and say
   what changed.

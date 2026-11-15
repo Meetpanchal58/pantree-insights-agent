@@ -22,14 +22,16 @@ PLAN = {"decision": "proceed", "restated_question": "Realized revenue by categor
 
 
 def analysis_from(user_prompt: str, wrong: bool = False) -> dict:
-    """An analyst answer that quotes the first number of the result table (or a made-up one)."""
+    """An analyst answer with one claim about the first result row (or a made-up value)."""
     table = user_prompt.split("## Result table\n", 1)[1].split("\n\n", 1)[0].splitlines()
-    first_row = table[1].split(",")
-    value = "123456789" if wrong else first_row[1]
-    return {"headline": f"{first_row[0]} leads with Rs {value} realized revenue.",
-            "findings": [f"{first_row[0]} brings Rs {value}."], "recommendations": ["Keep investing."],
+    header, first_row = table[0].split(","), table[1].split(",")
+    value = 123456789.0 if wrong else float(first_row[1])
+    claim = {"id": "c1", "value": value, "unit": "inr", "column": header[1],
+             "row": [{"column": header[0], "value": first_row[0]}], "op": "value"}
+    return {"headline": f"{first_row[0]} leads with Rs {{c1}} realized revenue.",
+            "findings": [f"{first_row[0]} brings Rs {{c1}}."], "recommendations": ["Keep investing."],
             "memory": [{"statement": f"{first_row[0]} is the top category by realized revenue", "type": "fact"}],
-            "chart_title": "Realized revenue by category", "chart_metric": "realized_revenue"}
+            "chart_title": "Realized revenue by category", "chart_metric": "realized_revenue", "claims": [claim]}
 
 
 class Script:
@@ -108,7 +110,8 @@ def test_guardrail_and_database_errors_are_fed_back(con, retriever, tmp_path):
     agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
         planner=[PLAN],
         sql_writer=[{"sql": "SELECT * FROM sales", "explanation": "x"},
-                    {"sql": "SELECT CAST(payment_method AS INTEGER) AS n, COUNT(*) FROM sales GROUP BY 1", "explanation": "x"},
+                    {"sql": "SELECT CAST(payment_method AS INTEGER) AS n, COUNT(*) FROM sales GROUP BY 1",
+                     "explanation": "x"},
                     {"sql": GOOD_SQL, "explanation": "ok"}],
         validator=[{"ok": True}], analyst=[analysis_from]))
     _, events = run(agent, "What is revenue by category?")
@@ -209,3 +212,14 @@ def test_sql_writer_gets_only_plan_tables_then_full_context_on_retry(con, retrie
     assert len(set(re.findall(r"TABLE (\w+)", retry))) > 2           # retry widens to the full retrieved context
     detail = [e for e in events if e.get("step") == "write_sql" and e["status"] == "done"][0]["detail"]
     assert detail["context_tables"] == ["sales", "product_master"]
+
+
+def test_ungrounded_answer_is_flagged_after_one_rewrite(con, retriever, tmp_path):
+    agent, _, _ = make_agent(con, retriever, tmp_path, Script(
+        planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}], validator=[{"ok": True}],
+        analyst=[lambda u: analysis_from(u, wrong=True)]))
+    _, events = run(agent, "What is revenue by category?")
+    final = events[-1]
+    assert final["status"] == "done" and final["grounded"] is False
+    assert any(w.startswith("Unverified claims") for w in final["warnings"])
+    assert "{c1}" not in final["analysis"]["headline"]                 # placeholders are rendered

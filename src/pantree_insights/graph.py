@@ -28,7 +28,8 @@ from . import agents
 from .charts import build_chart
 from .config import get_settings
 from .db import QueryTimeout, connect, manifest, run_query
-from .guardrails import check_question, check_sql, unsupported_numbers
+from .grounding import verify
+from .guardrails import check_question, check_sql
 from .llm import LLM, BudgetExceeded, ChatLLM
 from .memory import Memory
 from .retrieval import Retriever, get_retriever
@@ -55,6 +56,7 @@ class State(TypedDict, total=False):
     result: dict                 # {"columns": [...], "data": [[...]], "truncated": bool}
     warnings: list[str]
     analysis: dict
+    grounded: bool
     chart: dict | None
     insight_id: str | None
     status: str                  # running | clarify | declined | failed | done
@@ -248,18 +250,19 @@ class Agent:
                           if n in self.metrics.metrics and self.metrics.metrics[n].notes)
         args = (self.llm(state), state["question"], plan, state["sql"], frame, state["memory"], notes, self.data)
         analysis = agents.analyse(*args)
-        bad = unsupported_numbers(" ".join([analysis.headline, *analysis.findings]), frame)
+        check = verify(frame, analysis.claims, analysis.texts())
         rewrote = False
-        if bad:
-            analysis = agents.analyse(*args, fix_numbers=bad)
+        if not check.ok:                                   # one rewrite with the exact problems
+            analysis = agents.analyse(*args, fix_numbers=check.problems)
             rewrote = True
-            bad = unsupported_numbers(" ".join([analysis.headline, *analysis.findings]), frame)
+            check = verify(frame, analysis.claims, analysis.texts())
         warnings = list(state.get("warnings", []))
-        if bad:
-            warnings.append("Could not verify these numbers against the result: " + ", ".join(bad))
-        return {"analysis": analysis.model_dump(), "warnings": warnings,
-                "_detail": {"headline": analysis.headline, "number_check": "passed" if not bad else "unverified",
-                            "rewritten": rewrote, "unverified": bad}}
+        if not check.ok:
+            warnings.append("Unverified claims: " + "; ".join(check.problems[:6]))
+        shown = analysis.rendered()
+        return {"analysis": shown.model_dump(), "grounded": check.ok, "warnings": warnings,
+                "_detail": {"headline": shown.headline, "number_check": "passed" if check.ok else "unverified",
+                            "claims": check.checked, "rewritten": rewrote, "unverified": check.problems[:6]}}
 
     @step("chart")
     def chart(self, state: State) -> dict:
@@ -340,6 +343,7 @@ class Agent:
                 "question": state.get("question"), "plan": state.get("plan"), "sql": state.get("sql"),
                 "result": state.get("result"), "analysis": state.get("analysis"), "chart": state.get("chart"),
                 "warnings": state.get("warnings", []), "insight_id": state.get("insight_id"),
+                "grounded": state.get("grounded"),
                 "attempts": state.get("attempts"), "data_as_of": self.data["last_day"],
                 "data_size": self.data["size"], "cost": llm.tracker.summary() if llm else None,
                 "calls": [c.__dict__ for c in llm.tracker.calls] if llm else []}

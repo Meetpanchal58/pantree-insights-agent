@@ -97,7 +97,7 @@ def run(items: list[dict]) -> list[dict]:
                "difficulty": item.get("difficulty"), "seconds": round(time.time() - started, 1),
                "status": final.get("status") or final["type"], "cost": (final.get("cost") or {}).get("usd", 0.0),
                "attempts": final.get("attempts") or 0, "sql": final.get("sql"), "warnings": warnings,
-               "grounded": final.get("status") == "done" and not any("verify" in w for w in warnings),
+               "grounded": final.get("status") == "done" and final.get("grounded") is True,
                "tuned": bool(item.get("tuned_on")), "context_tables": context_tables,
                "required_tables": item.get("required_tables")}
         row["passed"], row["reason"] = judge(con, item, final)
