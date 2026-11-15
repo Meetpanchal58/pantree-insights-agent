@@ -63,7 +63,9 @@ tables:
   warehouses:
     group: Catalogue
     grain: one row per warehouse
-    description: Fulfilment centres.
+    description: >-
+      Fulfilment centres (warehouses) with their city and region; sales.warehouse_id says which warehouse
+      shipped an order line.
     columns:
       warehouse_id: text - primary key
       city: text
@@ -265,7 +267,9 @@ tables:
   customer_addresses:
     group: Customers
     grain: one row per address
-    description: Delivery addresses.
+    description: >-
+      Delivery addresses and their geography (city, state, region, city tier, pincode). Join sales.address_id
+      to analyse orders, revenue, returns, RTO or delivery by delivery region, state or city tier.
     time_column: created_at
     columns:
       address_id: text - primary key
@@ -349,7 +353,7 @@ tables:
         metrics
       customer_id: text - links to customers
       session_id: text - links to clickstream
-      address_id: text - links to customer_addresses
+      address_id: text - links to customer_addresses (delivery region, state, city tier)
       ship_city: text
       ship_pincode: text
       product_id: text
