@@ -39,7 +39,7 @@ from pantree_insights.db import connect, run_query  # noqa: E402
 from pantree_insights.guardrails import check_sql  # noqa: E402
 from pantree_insights.semantic import load_examples  # noqa: E402
 
-COST_PER_QUESTION = 0.025      # measured average on the full shop with gpt-6.1-terra (Nov 2026)
+COST_PER_QUESTION = 0.013      # measured mean on the full-shop holdout with gpt-6.1-terra (Nov 15 2026)
 
 
 def load_suite(suite: str) -> list[dict]:

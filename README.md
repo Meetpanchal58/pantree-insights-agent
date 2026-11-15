@@ -9,7 +9,7 @@ support) from my [ecommerce-simulator](https://github.com/Meetpanchal58/ecommerc
 nightly. Sister project: [pantree-recommendation-system](https://github.com/Meetpanchal58/pantree-recommendation-system).
 
 > **Status: complete.** The app runs locally and is ready for Google Cloud Run
-> ([deploy guide](#deploy-on-google-cloud-run)); evaluation methodology and verified results are in [Evaluation](#evaluation).
+> ([deploy guide](#deploy-on-google-cloud-run)); 28 of 30 unseen business questions answered correctly on the holdout ([Evaluation](#evaluation)).
 
 ## The app
 
@@ -184,19 +184,41 @@ the full context); the paid run reports that narrowed context's precision and re
 Gold SQL: `uv run python evals/run_eval.py --dry-run` checks that all 68 gold queries run, pass the guardrails
 and produce the annotated columns without duplicate keys (68/68).
 
-### Pending: paid end-to-end evaluation
+### End-to-end results (paid run, Nov 15 2026)
 
-Not yet run with the current code. Earlier end-to-end scores (Nov 14) were withdrawn: they let retrieval show
-the agent the evaluated question's own gold SQL and used a lenient comparison. To produce current numbers
-(SQL execution success, dimension-aware accuracy (all and clean), clarification and decline accuracy,
-grounded-number rate, retry/validator recovery, SQL-writer context precision, median latency, cost per question):
+Holdout run on the full shop with `gpt-6.1-terra`, code at commit `406bb11` (report:
+`evals/reports/e2e_holdout_2026-11-15_0842.md`; the per-question JSON stayed in the run environment):
+
+| Measure (39 unseen questions) | Result |
+|---|---|
+| **Correct answers** (dimension-aware, 1% tolerance) | **28/30 (93%)** |
+| SQL execution success | 29/30 (97%) |
+| Decline accuracy (personal data, off-topic, prompt injection) | 5/5 (100%) |
+| Clarification accuracy | 3/4 (75%) |
+| Grounded-number rate | 28/29 (97%) |
+| Retry / validator recovery | 1/1 |
+| SQL-writer context precision / recall (first attempt) | 97% / 98% |
+| Median latency / mean cost per question | 19 s / US$0.013 |
+
+Failures, question by question:
+- **x01** (revenue by delivery-address region): blocked by the input guard because of the word "address" (a
+  false positive). Fixed after this run (commit "Input guard: allow aggregate questions that mention a
+  delivery address"); not yet re-measured.
+- **y16** (late deliveries by region): wrong rate, most likely the customer's sign-up region was used instead
+  of the delivery region. Open.
+- **xc1** ("How did we do last quarter?"): answered with defaults instead of asking. Open.
+
+Both answer failures are among the 3 questions marked `tuned_on`, so the clean score is 27/27; the headline
+figure is the full 28/30. With 30 answer questions, one question moves accuracy by about 3 points.
+
+Rerun:
 
 ```bash
-uv run python evals/run_eval.py --suite holdout --yes        # 39 questions, about US$1.00
+uv run python evals/run_eval.py --suite holdout --yes        # 39 questions, about US$0.50
 ```
 
 ```bash
-uv run python evals/run_eval.py --suite regression --yes     # 44 questions, about US$1.10
+uv run python evals/run_eval.py --suite regression --yes     # 44 questions, about US$0.60 (not yet run on this code)
 ```
 
 Reports are written to `evals/reports/e2e_<suite>_<date>.md` with failures listed question by question.
