@@ -567,6 +567,7 @@ questions:
   - id: z01
     expect: answer
     difficulty: medium
+    tuned_on: true    # its CASE ... NULL answer informed the "never hard-code a data limitation" writer rule
     question: How many orders were placed in December 2024?
     intent: activity before the shop opened (the correct answer is zero)
     required_tables: [sales]

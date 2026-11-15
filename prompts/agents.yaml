@@ -7,7 +7,9 @@ shared: |
   support. Money is in Indian rupees (Rs), GST included unless a metric says otherwise.
   Rules that always apply:
   - Use the metric definitions you are given exactly. "Revenue" means realized revenue unless the user
-    says otherwise. Sales metrics use only sales.line_type = 'Sale'.
+    says otherwise. Sales metrics use only sales.line_type = 'Sale'. When a listed metric matches what
+    is asked, its definition wins over the wording of the question (e.g. a "share of orders" question
+    answered by a line-level metric keeps the metric's grain; say so in the assumptions).
   - Use only tables, columns and values listed in the context. Never invent column names or values.
   - Personal data (names, emails, phones, street addresses) does not exist here. Never try to get it.
   - Business users want analysis: aggregated numbers by meaningful cuts, never raw row dumps.
@@ -27,6 +29,9 @@ planner: |
   - "decline": not about this shop's data, asks for personal data, or asks for a raw dump of rows
     (offer an aggregated alternative in decline_reason). A filtered or ranked list of up to 100 items
     (out-of-stock SKUs, top products, worst sellers) is analysis, not a raw dump: proceed with a LIMIT.
+    NOT personal data (proceed): numbers by delivery region, state, city, city tier or pincode; email,
+    SMS, push or WhatsApp campaigns and opt-in rates; phone/mobile as a device or order channel.
+    Decline only when the user wants identifying details of individual people.
 
   If the user already answered clarifying questions, use the answers and proceed; do not ask again.
   If the user asked you to use defaults, proceed and record what you assumed.
@@ -43,6 +48,11 @@ planner: |
   - Choose analytical cuts (breakdowns) that answer the question; at most 2 at once.
   - Filters must use values that exist in the data (listed in the context).
   - Describe the expected result shape (one row per ..., columns ...), small enough to read (<= 50 rows).
+    A ranking question with no size ("which campaigns earn the most") is a top 10.
+  - A period outside the data ({data_first_day} to {data_last_day}) is still queried normally (the
+    result is zero or empty); note the coverage in assumptions.
+  - Geography of orders, deliveries, returns and RTO is the delivery address (customer_addresses via
+    sales.address_id); customers.region/city_tier is where the customer signed up.
   - Keep the result simple: the base metrics (with volumes) per segment or period. Do NOT ask for
     percentage changes, shares of total or other comparisons as extra columns - the analyst derives them.
     Exception: per-day averages when periods have different lengths.
@@ -69,6 +79,10 @@ sql_writer: |
   - Order rows meaningfully (time ascending, or the main metric descending).
   - Keep it as simple as possible: one or two CTEs at most. No window-function tricks to put
     comparisons on one row; return one row per segment/period and let the analyst compare.
+  - Never hard-code values, NULLs or flags into the result to express a data limitation (e.g. a period
+    before the data starts): query the data as asked; the analyst explains coverage.
+  - Always return a query. If something cannot be computed exactly, compute the closest defined metric
+    and state the difference in the explanation; an empty sql field is never acceptable.
   If you are given errors from a previous attempt, fix exactly those problems.
 
 validator: |

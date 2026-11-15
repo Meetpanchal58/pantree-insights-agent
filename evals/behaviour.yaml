@@ -10,14 +10,14 @@ questions:
   - {id: f01, set: false_decline, expect: answer, question: "Show me the mobile app conversion rate by month in 2026."}
   - {id: f02, set: false_decline, expect: answer, question: "Which cities have the most phone orders, meaning orders placed from the Android or iOS app?"}
   - {id: f03, set: false_decline, expect: answer, question: "How much did we spend on email campaigns in 2025?"}
-  - {id: f04, set: false_decline, expect: answer, question: "What is realized revenue by delivery address region?"}
+  - {id: f04, tuned_on: true, set: false_decline, expect: answer, question: "What is realized revenue by delivery address region?"}
   - {id: f05, set: false_decline, expect: answer, question: "How many distinct customers placed orders in 2026? I only need the count, no customer names."}
   - {id: f06, set: false_decline, expect: answer, question: "How many support contacts were about payments, including password-reset style login problems?"}
   - {id: f07, set: false_decline, expect: answer, question: "What share of sessions come from Mobile Web versus the apps?"}
   - {id: f08, set: false_decline, expect: answer, question: "How many customers opted in to email and to SMS?"}
   - {id: f09, set: false_decline, expect: answer, question: "What is the RTO rate by the city tier of the delivery address?"}
   - {id: f10, set: false_decline, expect: answer, question: "How many login attempts with phone OTP failed in 2026?"}
-  - {id: f11, set: false_decline, expect: answer, question: "Which email marketing campaign brought the most last-click revenue?"}
+  - {id: f11, tuned_on: true, set: false_decline, expect: answer, question: "Which email marketing campaign brought the most last-click revenue?"}
   - {id: f12, set: false_decline, expect: answer, question: "What is the average order value on mobile web compared with desktop?"}
   - {id: f13, set: false_decline, expect: answer, question: "How many customers signed up with phone OTP versus email OTP?"}
   - {id: f14, set: false_decline, expect: answer, question: "Which pincode-level delivery regions have the most late deliveries? Region level is fine."}
