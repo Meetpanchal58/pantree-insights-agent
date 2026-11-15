@@ -143,20 +143,23 @@ def judge(con, item: dict, final: dict, events: list[dict]) -> dict:
             "failure_type": None if out["answer_correct"] else "claims_unverified"}
 
 
-def run(items: list[dict], variant: str, repeats: int) -> list[dict]:
+def run(items: list[dict], variant: str, repeats: int, offset: int = 0) -> list[dict]:
     from pantree_insights.graph import VARIANTS, Agent
 
     settings = get_settings()
     con = connect()
     agent = Agent(features=VARIANTS[variant])
     rows = []
-    for repeat in range(repeats):
+    for repeat in range(offset, offset + repeats):
         for item in items:
             started = time.time()
             _, stream = agent.start(item["question"], use_defaults=item["set"] not in NO_DEFAULTS,
                                     exclude_examples=item.get("exclude"))
             events = list(stream)
             final = events[-1]
+            if "LLM budget" in (final.get("message") or ""):      # budget reached: stop, never score it
+                print(f"STOP: {final['message']} ({len(rows)} rows kept)", flush=True)
+                return rows
             writes = [e for e in events if e.get("step") == "write_sql" and e.get("status") == "done"]
             row = {"suite": item["suite"], "variant": variant, "repeat": repeat, "model": settings.model_main,
                    "temperature": settings.temperature, "id": item["id"], "author": item["author"],
@@ -282,6 +285,7 @@ def main() -> None:
     parser.add_argument("--variant", default="full", help="full, full_no_memory, validator, planner, retrieval, "
                                                           "semantic or baseline")
     parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument("--repeat-offset", type=int, default=0, help="number the repeats from here (combine runs)")
     parser.add_argument("--sets", help="only these sets, e.g. answer,overask")
     parser.add_argument("--dry-run", action="store_true", help="free: check gold SQL and suite files")
     parser.add_argument("--ids", help="comma-separated ids")
@@ -302,10 +306,11 @@ def main() -> None:
         print(f"{len(items)} questions x {args.repeats} repeat(s) = {calls} runs, variant {args.variant}: about "
               f"${calls * COST_PER_QUESTION:.2f} of OpenAI usage. Re-run with --yes to start.")
         return
-    rows = run(items, args.variant, args.repeats)
+    rows = run(items, args.variant, args.repeats, args.repeat_offset)
     out = ROOT / "evals" / "reports"
     out.mkdir(parents=True, exist_ok=True)
-    stamp = f"e2e_{args.suite}_{args.variant}_x{args.repeats}_{datetime.now():%Y-%m-%d_%H%M}"
+    stamp = (f"e2e_{args.suite}_{args.variant}_r{args.repeat_offset}-{args.repeat_offset + args.repeats - 1}_"
+             f"{datetime.now():%Y-%m-%d_%H%M}")
     (out / f"{stamp}.json").write_text(json.dumps(rows, indent=1, default=str))
     text = summary(rows)
     (out / f"{stamp}.md").write_text(text + "\n")
