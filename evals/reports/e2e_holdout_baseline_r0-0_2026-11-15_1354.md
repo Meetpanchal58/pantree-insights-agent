@@ -1,4 +1,4 @@
-# End-to-end evaluation 2026-11-15 14:44
+# End-to-end evaluation 2026-11-15 15:27
 
 Data: full shop · model: openai:gpt-6.1-terra · temperature: provider default (not settable for this model) · variant(s): baseline · repeats: 1
 
@@ -10,7 +10,7 @@ Format: mean [95% bootstrap CI over questions] (n questions, k repeats, pass^k =
 |---|---|
 | Correct result tables (dimension-aware, 1%) | 48% [32%-68%] (n=31) |
 | Correct answers (result + claims verified against gold) | 48% [32%-68%] (n=31) |
-| Correct result tables, excluding questions used for tuning | 52% [33%-70%] (n=27) |
+| Correct result tables, excluding questions used for tuning | 54% [35%-73%] (n=26) |
 | SQL execution success | 87% [74%-97%] (n=31) |
 | Grounded answers (all claims verified in the app) | 100% [100%-100%] (n=27) |
 | Clarification accuracy (vague questions) | - |

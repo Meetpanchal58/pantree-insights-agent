@@ -1,4 +1,4 @@
-# End-to-end evaluation 2026-11-15 14:45
+# End-to-end evaluation 2026-11-15 15:27
 
 Data: full shop · model: openai:gpt-6.1-terra · temperature: provider default (not settable for this model) · variant(s): full · repeats: 1
 

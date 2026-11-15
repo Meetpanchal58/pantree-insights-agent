@@ -3125,7 +3125,7 @@
   "set": "answer",
   "expect": "answer",
   "difficulty": "hard",
-  "tuned": false,
+  "tuned": true,
   "question": "What is the average order value for Prime versus non-Prime customers?",
   "seconds": 11.8,
   "status": "done",
