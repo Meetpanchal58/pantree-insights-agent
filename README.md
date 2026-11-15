@@ -80,7 +80,28 @@ ratios and 32% of random counts on an 8-row table; the claim check accepts 0.10-
 **Retrieval** (no LLM; `evals/reports/retrieval_2026-11-15_1444.md`): all required tables, metrics, joins
 and values retrieved for 31/31 holdout and 28/28 regression questions, median 53 ms.
 
-<!-- AFTER_FIX -->
+**After the failure-analysis fixes** (one more run each, k=1; `e2e_holdout_full_r3-3_*`,
+`e2e_regression_full_r1-1_*`). The fixes came from the failures above: glossary phrases that bring their
+tables, a `last_click_revenue` metric, "a metric definition wins over the question's wording", aggregate
+geography and campaigns are not personal data, top 10 by default, never return empty SQL.
+
+| Measure | Before (k=3) | After (k=1) |
+|---|---|---|
+| Holdout correct result tables | 90% [77-100%] | **100%** (31/31) |
+| Holdout correct answers | 90% | 97% (30/31; y14 reported a gap from a different period) |
+| False declines | 2/16 | **0/16** |
+| Adversarial + unsafe declines | 16/16 | 16/16 |
+| Clarifies vague questions | 2/4 | 3/4 |
+| Regression, same 30 questions | 23/30 | **21/30** (paired difference -10 points, 95% CI -26 to +6) |
+
+Read with care: the three holdout questions that started passing (x01, y16, z01) informed the fixes and
+are marked `tuned_on`, so the holdout gain shows the fixes work rather than that the system generalises.
+On the regression suite two questions were fixed (m11, h05) and four that passed before failed (m08,
+m12, h02, h10): the same question got different SQL in the two runs (a dropped column, "this year"
+instead of all data, True/False instead of New/Repeat labels, events matched by id instead of date
+window). Rules for the last three were added afterwards and are **not yet re-measured**. The regression
+run stopped at the daily budget after 31 of 44 questions (one OpenAI error, not scored).
+
 
 **Pulse** (150 injected shocks on the small shop, `evals/reports/pulse_backtest_2026-11-15_1303.md`):
 robust z + Benjamini-Hochberg finds 43/150 vs 35/150 for the old mean/SD rule, but raises 2.77 vs 1.17
@@ -266,6 +287,9 @@ the daily LLM budget is reached and never scores a budget refusal or a provider 
 - **Small holdout, written by the author.** 31 answer questions: one question moves accuracy by about 3
   points (CI 77-100%). No external questions yet; 4 holdout and 2 behaviour questions informed fixes and
   are marked `tuned_on`, so the "clean" score excluding them is not used as a headline.
+- **Run-to-run variation.** The same question can get different SQL on different runs (regression: 4
+  questions passed in one run and failed in the next). One run per change is not enough to call a small
+  difference; the paired CI above includes zero.
 - **Same-model validator.** The validator is the same model family as the SQL writer, so it shares its
   blind spots; it catches some errors but is not an independent check.
 - **Pulse raises false alerts** (about 2.8 a week on the backtest besides real changes) and misses most
