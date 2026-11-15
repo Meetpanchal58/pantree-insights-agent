@@ -171,11 +171,21 @@ class Examples(BaseModel):
 class Glossary(BaseModel):
     value_aliases: dict[str, list[str]] = {}     # stored value -> other names people use
     terms: dict[str, str] = {}                   # business word -> meaning
+    term_tables: dict[str, list[str]] = {}       # business phrase -> tables it needs (added by retrieval)
 
     def terms_in(self, text: str) -> dict[str, str]:
         """Glossary terms mentioned in a question (whole words, any case)."""
-        return {term: meaning for term, meaning in self.terms.items()
-                if re.search(rf"(?<![\w-]){re.escape(term)}(?![\w-])", text, re.I)}
+        return {term: meaning for term, meaning in self.terms.items() if _mentions(term, text)}
+
+    def tables_in(self, text: str) -> list[str]:
+        """Tables named by the glossary phrases a question uses, in glossary order."""
+        return list(dict.fromkeys(t for phrase, tables in self.term_tables.items() if _mentions(phrase, text)
+                                  for t in tables))
+
+
+def _mentions(phrase: str, text: str) -> bool:
+    """Whole-word match, any case; a trailing s is optional ("city tiers" mentions "city tier")."""
+    return re.search(rf"(?<![\w-]){re.escape(phrase)}s?(?![\w-])", text, re.I) is not None
 
 
 # ----------------------------------------------------------------------------- loading

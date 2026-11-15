@@ -210,8 +210,9 @@ class Retriever:
         values = [Value(h.node.metadata["key"], h.node.metadata["columns"], round(h.score or 0.0, 4))
                   for h in self._search("values", question)]
 
-        # Tables the examples, metrics and values point to come first: they are the strongest signal.
-        ordered: list[str] = []
+        # Tables named by glossary phrases ("delivery region" -> customer_addresses) and those the examples,
+        # metrics and values point to come first: they are the strongest signals.
+        ordered: list[str] = self.glossary.tables_in(question)
         for e in examples[:2]:
             ordered += sorted(tables_in(e.sql) & set(self.schema.tables))
         for name in metric_names[:2]:
