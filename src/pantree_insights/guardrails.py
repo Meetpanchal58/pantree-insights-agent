@@ -263,8 +263,8 @@ PERSONAL_DATA = re.compile(
     # "email/phone/address/name of/for (the/each/top ...) customer(s)"
     rf"\b{_CONTACT} (of|for) (\w+ ){{0,3}}?{_PEOPLE}\b|"
     # "customer emails", "customers' phone numbers", "buyer contact details"
-    rf"\b{_PEOPLE}'?s?'? (e-?mails?|e-?mail address(es)?|phone numbers?|mobile numbers?|contact( details| info)?|"
-    r"home address(es)?|addresses|full names?|first names?|last names?)\b|"
+    rf"\b{_PEOPLE}'?s?'? (e-?mails?|e-?mail address(es)?|phone numbers?|mobile numbers?|"
+    r"contact (details|info(rmation)?)|home address(es)?|addresses|full names?|first names?|last names?)\b|"
     # explicit personal-data phrases on their own
     r"\b(contact details|home address(es)?|street address(es)?|full address(es)?|address line|"
     r"first names?|last names?|full names?|pii|personal data|personal details)\b", re.I)

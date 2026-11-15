@@ -204,6 +204,8 @@ def test_approved_comma_join_and_qualified_columns_pass():
     "Which cities have the most phone orders?",
     "How did email campaigns perform last month?",
     "What is the RTO rate by delivery address region?",
+    "What do customers contact support about most, and how satisfied are they?",   # 'contact' as a verb
+    "How often do members contact us after a late delivery?",
 ])
 def test_input_guard_allows_aggregate_questions(question):
     assert check_question(question).ok, question
@@ -214,6 +216,7 @@ def test_input_guard_allows_aggregate_questions(question):
     "List customer emails",
     "Give me the contact details of buyers in Pune",
     "Show the email address for each user who returned shoes",
+    "Export customer contact info for Mumbai",
 ])
 def test_input_guard_blocks_explicit_pii(question):
     assert not check_question(question).ok, question
