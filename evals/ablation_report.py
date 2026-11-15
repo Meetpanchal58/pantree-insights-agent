@@ -35,6 +35,9 @@ def build(paths: list[Path]) -> str:
         lines.append(f"| {variant} | {fmt(summarize(part, 'result_correct'))} | "
                      f"{fmt(summarize(part, 'answer_correct'))} | ${statistics.mean(r['cost'] for r in part):.3f} | "
                      f"{statistics.median(r['seconds'] for r in part):.0f} s | {diff} |")
+    missing = [v for v in ORDER if v not in by_variant]
+    if missing:
+        lines += ["", f"Not run: {', '.join(missing)}."]
     return "\n".join(lines) + "\n"
 
 
