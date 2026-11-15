@@ -106,8 +106,9 @@ def decline_layer(events: list[dict]) -> str | None:
 
 
 def judge(con, item: dict, final: dict, events: list[dict]) -> dict:
-    out = {"result_correct": None, "answer_correct": None, "decline_layer": decline_layer(events)}
     kind, status = item["set"], final.get("status") or final["type"]
+    wrong = False if kind == "answer" else None           # an answer question with no result is wrong, not missing
+    out = {"result_correct": wrong, "answer_correct": wrong, "decline_layer": decline_layer(events)}
     asked = final["type"] == "clarify"
     if kind == "clarify":
         return {**out, "passed": asked, "reason": "asked" if asked else "did not clarify",
@@ -273,6 +274,8 @@ def rescore(report: Path) -> None:
             final = {"status": "done", "type": "final", "sql": row["sql"], "grounded": row.get("grounded"),
                      "analysis": {"claims": row.get("claims") or []}}
             row.update(judge(con, item, final, []))
+        elif item["set"] == "answer":                        # no result: wrong (older reports stored None)
+            row.update(result_correct=False, answer_correct=False)
     report.write_text(json.dumps(rows, indent=1, default=str))
     text = summary(rows)
     report.with_suffix(".md").write_text(text + "\n")

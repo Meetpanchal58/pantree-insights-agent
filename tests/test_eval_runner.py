@@ -71,3 +71,15 @@ def test_summary_and_ablation_report(tmp_path):
     table = ablation_report.build([tmp_path / "f.json", tmp_path / "b.json"])
     assert "| baseline |" in table and "| full |" in table and "pairs=6" in table
     assert pd.notna(len(table))
+
+
+def test_answer_question_without_a_result_counts_as_wrong_not_missing():
+    """An answer question with no SQL, a decline or a clarification is a wrong result, not an excluded one."""
+    item = {"set": "answer"}
+    for final in ({"type": "final", "status": "failed", "message": "Could not produce a valid query after 3 attempts"},
+                  {"type": "final", "status": "declined"}, {"type": "clarify"}):
+        out = run_eval.judge(None, item, final, [])
+        assert out["result_correct"] is False and out["answer_correct"] is False, final
+    for kind in ("false_decline", "overask"):                 # behaviour sets have no result measure
+        out = run_eval.judge(None, {"set": kind}, {"type": "final", "status": "declined"}, [])
+        assert out["result_correct"] is None
