@@ -144,6 +144,19 @@ def judge(con, item: dict, final: dict, events: list[dict]) -> dict:
             "failure_type": None if out["answer_correct"] else "claims_unverified"}
 
 
+def ask(agent, item: dict, tries: int = 2, wait: float = 20) -> list[dict] | None:
+    """Run one question; retry a provider error (e.g. HTTP 502) once. None = still failing (not scored)."""
+    for attempt in range(tries):
+        try:
+            _, stream = agent.start(item["question"], use_defaults=item["set"] not in NO_DEFAULTS,
+                                    exclude_examples=item.get("exclude"))
+            return list(stream)
+        except Exception as error:                        # noqa: BLE001 - any provider/transport failure
+            print(f"API ERROR {item.get('id', '?')} (try {attempt + 1}/{tries}): {str(error)[:120]}", flush=True)
+            time.sleep(wait)
+    return None
+
+
 def run(items: list[dict], variant: str, repeats: int, offset: int = 0) -> list[dict]:
     from pantree_insights.graph import VARIANTS, Agent
 
@@ -154,9 +167,9 @@ def run(items: list[dict], variant: str, repeats: int, offset: int = 0) -> list[
     for repeat in range(offset, offset + repeats):
         for item in items:
             started = time.time()
-            _, stream = agent.start(item["question"], use_defaults=item["set"] not in NO_DEFAULTS,
-                                    exclude_examples=item.get("exclude"))
-            events = list(stream)
+            events = ask(agent, item)
+            if events is None:                                # provider kept failing: listed, never scored
+                events = [{"type": "final", "status": "api_error", "message": "provider error after retry"}]
             final = events[-1]
             if "LLM budget" in (final.get("message") or ""):      # budget reached: stop, never score it
                 print(f"STOP: {final['message']} ({len(rows)} rows kept)", flush=True)
@@ -172,9 +185,14 @@ def run(items: list[dict], variant: str, repeats: int, offset: int = 0) -> list[
                    "grounded": final.get("grounded"), "claims": (final.get("analysis") or {}).get("claims"),
                    "context_tables": (writes[0].get("detail") or {}).get("context_tables") if writes else None,
                    "required_tables": item.get("required_tables")}
-            row.update(judge(con, item, final, events))
+            if final.get("status") == "api_error":
+                row.update(result_correct=None, answer_correct=None, decline_layer=None, passed=None,
+                           reason="provider error after retry (not scored)", failure_type="api_error")
+            else:
+                row.update(judge(con, item, final, events))
             rows.append(row)
-            print(f"{'PASS' if row['passed'] else 'FAIL'} r{repeat} {row['set'][:8]:8s} {row['id']:7s} "
+            label = "ERR " if row["passed"] is None else "PASS" if row["passed"] else "FAIL"
+            print(f"{label} r{repeat} {row['set'][:8]:8s} {row['id']:7s} "
                   f"{row['seconds']:5.1f}s ${row['cost']:.3f}  {row['reason'][:55]}", flush=True)
     return rows
 
@@ -194,9 +212,10 @@ def summary(rows: list[dict]) -> str:
            "", "Format: mean [95% bootstrap CI over questions] (n questions, k repeats, pass^k = correct in all k).",
            ""]
     for suite in ("holdout", "regression"):
-        part = [r for r in rows if r["suite"] == suite]
-        if not part:
+        everything = [r for r in rows if r["suite"] == suite]
+        if not everything:
             continue
+        part = [r for r in everything if r["status"] != "api_error"]      # provider errors: listed, not scored
         answer = [r for r in part if r["set"] == "answer"]
         done = [r for r in answer if r["status"] == "done"]
         lines = [
@@ -232,12 +251,12 @@ def summary(rows: list[dict]) -> str:
         if len(authors) > 1:
             out += ["", "| Author | Correct result tables |", "|---|---|"]
             out += [f"| {a} | {_rate([r for r in answer if r['author'] == a], 'result_correct')} |" for a in authors]
-        failures = Counter(r["failure_type"] for r in part if r["failure_type"])
+        failures = Counter(r["failure_type"] for r in everything if r["failure_type"])
         if failures:
             out += ["", "Failure types: " + ", ".join(f"{k} {v}" for k, v in failures.most_common()), "",
                     "Failures:"]
             out += [f"- r{r['repeat']} {r['id']} [{r['failure_type']}] \"{r['question'][:70]}\": {r['reason'][:120]}"
-                    for r in part if r["failure_type"]]
+                    for r in everything if r["failure_type"]]
         out.append("")
     return "\n".join(out)
 

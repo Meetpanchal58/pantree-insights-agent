@@ -83,3 +83,38 @@ def test_answer_question_without_a_result_counts_as_wrong_not_missing():
     for kind in ("false_decline", "overask"):                 # behaviour sets have no result measure
         out = run_eval.judge(None, {"set": kind}, {"type": "final", "status": "declined"}, [])
         assert out["result_correct"] is None
+
+
+def test_transient_api_error_is_retried_then_recorded_not_crashed():
+    """A provider error (e.g. HTTP 502) must not end the whole run: retry once, then return None."""
+    class Flaky:
+        def __init__(self, failures):
+            self.failures, self.calls = failures, 0
+
+        def start(self, question, **kwargs):
+            self.calls += 1
+            if self.calls <= self.failures:
+                def boom():
+                    raise RuntimeError("Error code: 502")
+                    yield
+                return "run", boom()
+            return "run", iter([{"type": "final", "status": "done"}])
+
+    item = {"question": "q", "set": "answer"}
+    once = Flaky(1)
+    assert run_eval.ask(once, item, wait=0) == [{"type": "final", "status": "done"}] and once.calls == 2
+    always = Flaky(5)
+    assert run_eval.ask(always, item, wait=0) is None and always.calls == 2
+
+
+def test_provider_errors_are_listed_but_not_scored():
+    base = {"suite": "holdout", "variant": "full", "repeat": 0, "model": "m", "temperature": None, "author": "self",
+            "set": "answer", "tuned": False, "question": "q", "seconds": 1.0, "cost": 0.01, "attempts": 1,
+            "grounded": True, "decline_layer": None}
+    ok = {**base, "id": "a1", "status": "done", "result_correct": True, "answer_correct": True, "passed": True,
+          "failure_type": None, "reason": "match"}
+    err = {**base, "id": "a2", "status": "api_error", "result_correct": None, "answer_correct": None,
+           "passed": None, "failure_type": "api_error", "reason": "provider error after retry (not scored)"}
+    text = run_eval.summary([ok, err])
+    assert "| SQL execution success | 100% [100%-100%] (n=1) |" in text
+    assert "api_error 1" in text and "a2 [api_error]" in text
