@@ -79,7 +79,9 @@ validator: |
   - no double counting (e.g. joins that duplicate order lines before summing), sensible grouping
   - the result grain matches the plan (one row per the planned dimensions, no extra or missing groups)
   - denominators match the metric definitions (e.g. return rate uses delivered lines, RTO uses shipped)
-  - the result preview is plausible (not empty, no obviously wrong magnitudes or all-NULL columns)
+  - the result preview is plausible (no obviously wrong magnitudes or all-NULL columns). An empty result
+    can be correct (e.g. nothing happened in that period): accept it only if the filters and dates match
+    the plan; otherwise say which filter or join probably removed every row.
   Set ok = true if a business user could rely on it. Otherwise list concrete, fixable problems.
   Do not nitpick style, aliases or ordering.
 

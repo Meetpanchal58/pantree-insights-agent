@@ -17,6 +17,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import duckdb
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -37,9 +38,11 @@ AFTER_EVENT_DAYS = 14
 class Settings:
     window_days: int = 7
     baseline_windows: int = 8
-    min_z: float = 2.5
+    min_z: float = 2.5             # legacy method only
     min_change: float = 0.15
     min_denominator: int = 50
+    method: str = "robust_bh"      # robust_bh (median/MAD z + Benjamini-Hochberg) or legacy (mean/SD z)
+    fdr_q: float = 0.10            # Benjamini-Hochberg false discovery rate across all series tested in a run
 
 
 def load_definitions(memory_dir: Path) -> tuple[Settings, dict[str, dict]]:
@@ -112,10 +115,40 @@ def _value(num: float, den: float | None, is_ratio: bool) -> float | None:
     return num
 
 
+def robust_z(current: float, base: list[float]) -> float:
+    """(current - median) / (1.4826 * MAD): a z-score that one unusual baseline week cannot inflate.
+    Falls back to the standard deviation when MAD is 0 (flat baseline)."""
+    med = float(np.median(base))
+    mad = float(np.median(np.abs(np.array(base) - med))) * 1.4826
+    if mad == 0:
+        sd = float(np.std(base, ddof=1)) if len(base) > 1 else 0.0
+        return (current - med) / sd if sd > 0 else (float("inf") if current != med else 0.0)
+    return (current - med) / mad
+
+
+def benjamini_hochberg(pvalues: list[float], q: float) -> list[bool]:
+    """Which hypotheses are rejected at false discovery rate q (step-up procedure)."""
+    m = len(pvalues)
+    order = sorted(range(m), key=lambda i: pvalues[i])
+    cutoff = 0
+    for rank, i in enumerate(order, start=1):
+        if pvalues[i] <= q * rank / m:
+            cutoff = rank
+    keep = set(order[:cutoff])
+    return [i in keep for i in range(m)]
+
+
 def detect(history: pd.DataFrame, metrics: Metrics, kpis: dict[str, dict], cfg: Settings, last_day: date,
            events: pd.DataFrame, data_size: str) -> list[Flag]:
-    flags = []
+    """Compare each series' latest 7-day window with the 8 windows before it.
+
+    Windows are whole weeks (each weekday once), so day-of-week patterns cancel out. Method robust_bh: robust
+    z (median/MAD) -> two-sided normal p-value -> Benjamini-Hochberg across all series tested; legacy: mean/SD
+    z >= min_z. Both also require |change| >= min_change."""
+    from math import erfc, sqrt
+
     w = cfg.window_days
+    tested = []                                      # (kpi, breakdown, segment, current, centre, z, change, end)
     for (kpi, breakdown, segment), series in history.groupby(["kpi", "breakdown", "segment"], sort=False):
         metric = metrics.metrics[kpi]
         is_ratio = metric.denominator is not None
@@ -136,15 +169,28 @@ def detect(history: pd.DataFrame, metrics: Metrics, kpis: dict[str, dict], cfg: 
         base = [b for b in base if b is not None]
         if current is None or len(base) < cfg.baseline_windows // 2:
             continue
-        mean = sum(base) / len(base)
-        std = (sum((b - mean) ** 2 for b in base) / max(len(base) - 1, 1)) ** 0.5
-        if mean == 0:
+        if cfg.method == "legacy":
+            centre = sum(base) / len(base)
+            std = (sum((b - centre) ** 2 for b in base) / max(len(base) - 1, 1)) ** 0.5
+            z = (current - centre) / std if std > 0 else float("inf")
+        else:
+            centre = float(np.median(base))
+            z = robust_z(current, base)
+        if centre == 0:
             continue
-        change = current / mean - 1
-        z = (current - mean) / std if std > 0 else float("inf")
-        if abs(z) < cfg.min_z or abs(change) < cfg.min_change:
-            continue
+        tested.append((kpi, breakdown, segment, current, centre, z, current / centre - 1, end, is_ratio))
 
+    if cfg.method == "legacy":
+        chosen = [abs(t[5]) >= cfg.min_z for t in tested]
+    else:
+        pvalues = [erfc(abs(t[5]) / sqrt(2)) if t[5] != float("inf") else 0.0 for t in tested]
+        chosen = benjamini_hochberg(pvalues, cfg.fdr_q)
+
+    flags = []
+    for (kpi, breakdown, segment, current, centre, z, change, end, is_ratio), keep in zip(tested, chosen, strict=True):
+        if not keep or abs(change) < cfg.min_change:
+            continue
+        metric = metrics.metrics[kpi]
         start = end - timedelta(days=w - 1)
         names = events[(events.start_date <= end) & (events.end_date >= start)].name.tolist()
         recent = events[(events.end_date < start)
@@ -169,7 +215,8 @@ def detect(history: pd.DataFrame, metrics: Metrics, kpis: dict[str, dict], cfg: 
         flags.append(Flag(
             id=f"{kpi}|{breakdown}|{segment}", kpi=kpi, label=metric.label, breakdown=breakdown, segment=segment,
             window_start=str(start.date()), window_end=str(end.date()), value=round(current, 6),
-            baseline=round(mean, 6), change_pct=round(change * 100, 1), z=round(z, 2) if z != float("inf") else 99.0,
+            baseline=round(centre, 6), change_pct=round(change * 100, 1),
+            z=round(z, 2) if z != float("inf") else 99.0,
             direction=direction, last_year=round(last_year, 6) if last_year is not None else None,
             sale_events=names, explained=explained, data_size=data_size, data_as_of=str(last_day)))
     return sorted(flags, key=lambda f: -abs(f.z))

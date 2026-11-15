@@ -47,3 +47,10 @@ def test_dates_align_across_formats_and_single_values():
     agent = pd.DataFrame({"month": ["2026-01-01T00:00:00.000", "2026-02-01T00:00:00.000"], "orders": [10, 12]})
     assert score(gold, agent, ["month"], ["orders"])[0]
     assert score(pd.DataFrame({"aov": [1796.9]}), pd.DataFrame({"x": [1797.0]}), [], ["aov"])[0]
+
+
+def test_empty_gold_needs_empty_agent_and_zero_counts_compare():
+    empty = pd.DataFrame({"category": [], "orders": []})
+    assert score(empty, empty.copy(), ["category"], ["orders"])[0]
+    assert not score(empty, pd.DataFrame({"category": ["A"], "orders": [1]}), ["category"], ["orders"])[0]
+    assert score(pd.DataFrame({"orders": [0]}), pd.DataFrame({"n": [0]}), [], ["orders"])[0]

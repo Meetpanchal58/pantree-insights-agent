@@ -223,3 +223,38 @@ def test_ungrounded_answer_is_flagged_after_one_rewrite(con, retriever, tmp_path
     assert final["status"] == "done" and final["grounded"] is False
     assert any(w.startswith("Unverified claims") for w in final["warnings"])
     assert "{c1}" not in final["analysis"]["headline"]                 # placeholders are rendered
+
+
+def test_ungrounded_or_disputed_answers_are_not_remembered(con, retriever, tmp_path):
+    agent, _, memory = make_agent(con, retriever, tmp_path, Script(
+        planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}], validator=[{"ok": True}],
+        analyst=[lambda u: analysis_from(u, wrong=True)]))
+    _, events = run(agent, "What is revenue by category?")
+    remember = [e for e in events if e.get("step") == "remember" and e["status"] != "started"][0]
+    assert remember["status"] == "skipped" and "did not verify" in remember["detail"]["reason"]
+    assert memory.insights() == []
+    agent, _, memory = make_agent(con, retriever, tmp_path / "b", Script(
+        planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+        validator=[{"ok": False, "problems": ["Wrong denominator"]}], analyst=[analysis_from]))
+    _, events = run(agent, "What is revenue by category?")
+    assert events[-1]["status"] == "done" and memory.insights() == []    # validator concern after 3 tries
+
+
+def test_empty_result_goes_to_the_validator(con, retriever, tmp_path):
+    empty = ("SELECT COUNT(DISTINCT order_id) AS orders FROM sales WHERE placed_at < TIMESTAMP '2000-01-01' "
+             "GROUP BY line_type")
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        planner=[PLAN], sql_writer=[{"sql": empty, "explanation": "x"}], validator=[{"ok": True}],
+        analyst=[{"headline": "No orders were placed before the shop opened.", "findings": ["Nothing to report."]}]))
+    _, events = run(agent, "How many orders were placed before 2000?")
+    assert events[-1]["status"] == "done" and events[-1]["attempts"] == 1
+    assert events[-1]["result"]["data"] == []
+
+
+def test_old_insights_are_left_out_of_memory_context(tmp_path):
+    memory = Memory(tmp_path / "m", data_size="small")
+    analysis = {"headline": "Footwear returns are high", "memory": []}
+    memory.save_insight(question="footwear returns", plan={}, sql="SELECT 1", analysis=analysis,
+                        data_as_of="2026-09-01")
+    assert "footwear returns" in memory.context("footwear returns", as_of="2026-09-20").lower()
+    assert "footwear returns" not in memory.context("footwear returns", as_of="2026-11-14").lower()

@@ -142,7 +142,7 @@ class Agent:
                      "examples": [e.id for e in context.examples], "terms": context.terms}
         return {"context": context.to_prompt(self.retriever.schema, self.metrics), "retrieved": retrieved,
                 "metric_names": context.metrics,
-                "memory": self.mem(state).context(state["question"]),
+                "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"]),
                 "_detail": {"tables": context.tables, "metrics": context.metrics,
                             "values": [v.value for v in context.values[:6]],
                             "examples": [e.question for e in context.examples[:3]]}}
@@ -221,9 +221,7 @@ class Agent:
             return self._retry_or_fail(state, [f"{error}. Simplify the query or aggregate earlier."], "database")
         except Exception as error:                                          # DuckDB error: let the writer fix it
             return self._retry_or_fail(state, [f"Database error: {str(error).splitlines()[0][:300]}"], "database")
-        if result.frame.empty:
-            return self._retry_or_fail(state, ["The query returned no rows. Check filter values, date range "
-                                               "and join conditions against the context."], "empty result")
+        # 0 rows is not automatically wrong (e.g. no orders before launch): the validator decides
         return {"result": _result(result.frame, result.truncated), "route": "validate",
                 "_detail": {"rows": len(result.frame), "columns": list(result.frame.columns),
                             "query_seconds": round(result.seconds, 2), "truncated": result.truncated}}
@@ -275,6 +273,11 @@ class Agent:
     def remember(self, state: State) -> dict:
         a = state["analysis"]
         memory = self.mem(state)
+        concerns = [w for w in state.get("warnings", []) if w.startswith("Reviewer concern")]
+        if concerns or state.get("grounded") is not True:
+            reason = "validator raised concerns" if concerns else "claims did not verify"
+            return {"insight_id": None, "status": "done", "_status": "skipped",
+                    "_detail": {"saved": False, "reason": f"not saved to memory: {reason}"}}
         item = memory.save_insight(question=state["question"], plan=state["plan"], sql=state["sql"],
                                    analysis=a, data_as_of=self.data["last_day"], chat_id=state.get("chat_id"))
         closed = memory.close_gaps(a.get("explains_gap_ids", []), item["id"], self.data["last_day"])

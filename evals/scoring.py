@@ -47,6 +47,8 @@ def _numeric(frame: pd.DataFrame) -> list[str]:
 
 def score(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
           metric_columns: list[str]) -> tuple[bool, str]:
+    if gold.empty:                                    # the correct answer is "no rows"
+        return (agent is None or agent.empty), ("match" if agent is None or agent.empty else "expected no rows")
     if agent is None or agent.empty:
         return False, "empty result"
     gold, agent = gold.reset_index(drop=True), agent.reset_index(drop=True)
