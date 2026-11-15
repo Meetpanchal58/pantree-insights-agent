@@ -8,8 +8,25 @@ Data: 22 months of shop history (catalogue, customers, browsing, orders, returns
 support) from my [ecommerce-simulator](https://github.com/Meetpanchal58/ecommerce-simulator), refreshed
 nightly. Sister project: [pantree-recommendation-system](https://github.com/Meetpanchal58/pantree-recommendation-system).
 
-> **Status: complete.** The app runs locally and is ready for Google Cloud Run
-> ([deploy guide](#deploy-on-google-cloud-run)); 28 of 30 unseen business questions answered correctly on the holdout ([Evaluation](#evaluation)).
+### [▶ Live demo](https://pantree-insights-um7bylhdra-uc.a.run.app/)
+
+Hosted on Google Cloud Run (scales to zero, so the first visit after a quiet period takes about 30 seconds).
+Visitors can replay recorded demo runs without signing in; sign in with Google for 10 live questions a day.
+
+> **Accuracy:** 28 of 30 unseen business questions answered correctly on the holdout, scored against
+> independently written SQL ([Evaluation](#evaluation)).
+
+![A demo answer: findings, chart and exports, with the agents' work in the right panel](docs/screenshots/demo-answer-chart.png)
+
+## Screenshots
+
+| Agents working, live | Answer with plan and SQL |
+|---|---|
+| ![The planner, SQL writer, safety checks and validator, step by step](docs/screenshots/agents-working.png) | ![Answer in a project, with the analysis plan and SQL in the agent panel](docs/screenshots/answer-plan-sql.png) |
+| **Clarifying questions** | **Memory** |
+| ![Vague questions get 2-3 clarifying choices with a recommended default](docs/screenshots/clarifying-questions.png) | ![What the analyst remembers: preferences, insights per project, shared business knowledge](docs/screenshots/memory.png) |
+
+<p align="center"><img src="docs/screenshots/mobile.png" alt="Mobile layout" width="260"></p>
 
 ## The app
 
