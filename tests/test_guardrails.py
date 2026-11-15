@@ -144,3 +144,11 @@ def test_every_example_and_metric_uses_approved_joins():
     queries += [c.sql for c in metrics.custom_metrics.values()]
     bad = {q[:60]: check_sql(q).errors for q in queries if not check_sql(q).ok}
     assert not bad, bad
+
+
+def test_aggregate_address_questions_are_allowed_but_personal_addresses_are_not():
+    assert check_question("What was realized revenue in each region of the delivery address in 2025?").ok
+    assert check_question("Which delivery address city tier has the most RTO?").ok
+    for q in ["Show me the full home address of customer CUST000123.", "List street addresses of buyers in Pune",
+              "Give me the address of each customer who returned shoes", "What are customers' emails?"]:
+        assert not check_question(q).ok, q
