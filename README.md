@@ -26,8 +26,6 @@ Visitors can replay recorded demo runs without signing in; sign in with Google f
 | **Clarifying questions** | **Memory** |
 | ![Vague questions get 2-3 clarifying choices with a recommended default](docs/screenshots/clarifying-questions.png) | ![What the analyst remembers: preferences, insights per project, shared business knowledge](docs/screenshots/memory.png) |
 
-<p align="center"><img src="docs/screenshots/mobile.png" alt="Mobile layout" width="260"></p>
-
 ## The app
 
 | Left | Middle | Right |
