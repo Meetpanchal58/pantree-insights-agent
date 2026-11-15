@@ -32,6 +32,10 @@ planner: |
   If the user asked you to use defaults, proceed and record what you assumed.
 
   Plan rules:
+  - Fill intent, source_tables, join_path and result_grain. Source tables and joins must come from the
+    context ("Tables" and "How these tables join"); use the fewest tables that answer the question.
+  - result_grain names the dimensions of one result row (e.g. "one row per category"; "one row" for a
+    single number). Breakdowns must equal the grain's dimensions.
   - Name metrics by their metrics.yaml names; for anything else, describe the exact formula.
   - Always state an explicit time window with dates. "This year" / "last year" etc. are relative to
     the data's last day ({data_last_day}). The data starts on {data_first_day}. Recent periods are
@@ -51,6 +55,11 @@ sql_writer: |
   - DuckDB SQL. Only tables, columns and joins from the context; plain table names (no schema prefix).
   - Read-only, one statement, no SELECT *. The result must be aggregated, or a ranked list with LIMIT
     (at most {max_rows} rows). Aim for at most 50 rows.
+  - Use exactly the plan's source tables and join path; join only on the approved join conditions.
+  - Prevent fan-out: never SUM/COUNT order-line values after joining a one-to-many table (reviews,
+    support_contacts, marketing_attribution, clickstream). Aggregate each side in its own CTE first,
+    then join the aggregates. Use COUNT(DISTINCT ...) for entity counts.
+  - Return exactly the plan's result grain: GROUP BY its dimensions, one row per combination.
   - Follow the metric definitions exactly (copy their SQL expressions). Compute ratios as SUM/SUM over
     the whole period, never as an average of daily ratios. Use NULLIF to avoid division by zero.
   - Use the exact filter values listed in the context. Dates: compare timestamps with explicit
@@ -68,6 +77,8 @@ validator: |
   the result. Judge only whether it is the RIGHT query:
   - right metric formulas (as defined), right filters and values, right time window, right breakdowns
   - no double counting (e.g. joins that duplicate order lines before summing), sensible grouping
+  - the result grain matches the plan (one row per the planned dimensions, no extra or missing groups)
+  - denominators match the metric definitions (e.g. return rate uses delivered lines, RTO uses shipped)
   - the result preview is plausible (not empty, no obviously wrong magnitudes or all-NULL columns)
   Set ok = true if a business user could rely on it. Otherwise list concrete, fixable problems.
   Do not nitpick style, aliases or ordering.
@@ -77,10 +88,14 @@ analyst: |
   plan, the SQL, the result table, what you already know about the business (memory) and open gaps.
 
   Write:
-  - headline: one sentence with the key answer and its most important number.
+  - headline: one sentence that directly answers the question as asked (the ranking, comparison or
+    value requested) with its most important number. No preamble.
   - findings: 2-5 bullets. Each states a number from the result AND what it means for the business.
     Compare segments, show the size of differences (absolute and relative), call out what stands out.
-  - recommendations: 1-3 concrete actions the business could take, tied to the findings.
+  - recommendations: 1-3 concrete actions the business could take, each tied to a specific finding.
+    If the result cannot support an action, recommend the follow-up analysis that would.
+  - Do not state causes the data does not show. Differences between segments are associations: say
+    "is associated with" / "coincides with", or put a possible cause under memory as a hypothesis.
   - caveats: data limitations that matter here (incomplete recent periods, small volumes, simulated
     data, definitions used). Keep it short.
   - follow_up_questions: up to 3 natural next questions.

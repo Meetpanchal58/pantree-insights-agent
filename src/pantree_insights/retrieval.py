@@ -50,6 +50,8 @@ MAX_DISTINCT_VALUES = 800                       # index text columns with at mos
 SKIP_COLUMN = re.compile(r"(_id$|^id$|pincode|barcode|image_url|^utm_campaign$|^agent_name$|description|"
                          r"transcript|review_text|search_query)")
 TOP_K = {"tables": 5, "metrics": 4, "examples": 4, "values": 8}
+MAX_TABLES = 6          # tables passed to the agent (tuned on the regression suite only, evals/retrieval_eval.py)
+TABLE_HITS = 3          # direct table-search hits added after tables implied by examples, metrics and values
 LlamaSettings.llm = MockLLM()                   # retrieval never needs an LLM; avoid default OpenAI lookup
 
 
@@ -216,8 +218,8 @@ class Retriever:
             ordered += self._metric_tables(name)
         for v in values[:3]:
             ordered += [c.split(".")[0] for c in v.columns[:2]]
-        ordered += tables
-        selected = list(dict.fromkeys(t for t in ordered if t in self.schema.tables))[:7]
+        ordered += tables[:TABLE_HITS]
+        selected = list(dict.fromkeys(t for t in ordered if t in self.schema.tables))[:MAX_TABLES]
         joins = [j for j in self.schema.joins
                  if all(side.strip().split(".")[0] in selected for side in j.split("="))]
         return Context(question, selected, metric_names, examples, values, joins, self.glossary.terms_in(question))

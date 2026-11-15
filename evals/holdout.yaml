@@ -1,0 +1,278 @@
+# UNSEEN HOLDOUT SUITE. These questions must never appear in semantic/examples.yaml, prompts or the
+# regression set (tests/test_eval_leakage.py enforces this). Use them to measure accuracy honestly.
+#
+# Annotations per answer question:
+#   intent, required_tables, required_metrics (metrics.yaml names), required_joins (schema.yaml strings),
+#   filter_values ({value, column}), result_grain, gold_sql (independently written, verified to run),
+#   key_columns (gold columns that identify a row), metric_columns (gold columns compared within 1%).
+# Dates are explicit so answers are reproducible on the same data snapshot.
+
+questions:
+  - id: x01
+    expect: answer
+    difficulty: easy
+    question: What was realized revenue in each region of the delivery address in 2025?
+    intent: revenue split by geography for one year
+    required_tables: [sales, customer_addresses]
+    required_metrics: [realized_revenue]
+    required_joins: [sales.address_id = customer_addresses.address_id]
+    filter_values: []
+    result_grain: one row per region
+    key_columns: [region]
+    metric_columns: [realized_revenue]
+    gold_sql: |
+      SELECT a.region,
+             SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END)
+               AS realized_revenue
+      FROM sales s JOIN customer_addresses a ON a.address_id = s.address_id
+      WHERE s.line_type = 'Sale' AND s.placed_at >= TIMESTAMP '2025-01-01' AND s.placed_at < TIMESTAMP '2026-01-01'
+      GROUP BY 1
+
+  - id: x02
+    expect: answer
+    difficulty: medium
+    question: What is the return rate for each apparel sub-category?
+    intent: which apparel sub-categories get returned most
+    required_tables: [sales, product_master]
+    required_metrics: [return_rate]
+    required_joins: [sales.product_id = product_master.product_id]
+    filter_values: [{value: Apparel, column: product_master.category}]
+    result_grain: one row per apparel sub_category
+    key_columns: [sub_category]
+    metric_columns: [return_rate]
+    gold_sql: |
+      SELECT p.sub_category,
+             COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) * 1.0
+               / COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS return_rate
+      FROM sales s JOIN product_master p ON p.product_id = s.product_id
+      WHERE s.line_type = 'Sale' AND p.category = 'Apparel'
+      GROUP BY 1 HAVING COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) > 0
+
+  - id: x03
+    expect: answer
+    difficulty: medium
+    question: How many orders did Prime and non-Prime customers place in 2026?
+    intent: order volume by loyalty status
+    required_tables: [sales, customers]
+    required_metrics: [orders]
+    required_joins: [sales.customer_id = customers.customer_id]
+    filter_values: []
+    result_grain: one row per Prime status
+    key_columns: [is_prime]
+    metric_columns: [orders]
+    gold_sql: |
+      SELECT c.is_prime, COUNT(DISTINCT s.order_id) AS orders
+      FROM sales s JOIN customers c ON c.customer_id = s.customer_id
+      WHERE s.line_type = 'Sale' AND s.placed_at >= TIMESTAMP '2026-01-01'
+      GROUP BY 1
+
+  - id: x04
+    expect: answer
+    difficulty: medium
+    question: What is the average order value by device in 2026?
+    intent: basket size by device
+    required_tables: [sales]
+    required_metrics: [aov]
+    required_joins: []
+    filter_values: []
+    result_grain: one row per device
+    key_columns: [device]
+    metric_columns: [aov]
+    gold_sql: |
+      SELECT device, SUM(CASE WHEN cancelled_at IS NULL THEN net_amount ELSE 0 END)
+             / COUNT(DISTINCT CASE WHEN cancelled_at IS NULL THEN order_id END) AS aov
+      FROM sales WHERE line_type = 'Sale' AND placed_at >= TIMESTAMP '2026-01-01'
+      GROUP BY 1
+
+  - id: x05
+    expect: answer
+    difficulty: medium
+    question: What is the late delivery rate by warehouse?
+    intent: fulfilment reliability by warehouse
+    required_tables: [sales]
+    required_metrics: [late_delivery_rate]
+    required_joins: []
+    filter_values: []
+    result_grain: one row per warehouse
+    key_columns: [warehouse_id]
+    metric_columns: [late_delivery_rate]
+    gold_sql: |
+      SELECT warehouse_id,
+             COUNT(*) FILTER (WHERE CAST(delivered_at AS DATE) > CAST(promised_delivery_date AS DATE)) * 1.0
+               / COUNT(*) FILTER (WHERE delivered_at IS NOT NULL) AS late_delivery_rate
+      FROM sales WHERE line_type = 'Sale' GROUP BY 1
+
+  - id: x06
+    expect: answer
+    difficulty: medium
+    question: What did one ad click cost on each paid channel in 2025?
+    intent: paid media efficiency by channel
+    required_tables: [marketing_spend, campaigns]
+    required_metrics: [cpc]
+    required_joins: [marketing_spend.campaign_id = campaigns.campaign_id]
+    filter_values: []
+    result_grain: one row per paid channel (paid search, paid social, display)
+    key_columns: [channel]
+    metric_columns: [cpc]
+    gold_sql: |
+      SELECT c.channel, SUM(m.spend) / NULLIF(SUM(m.clicks), 0) AS cpc
+      FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id
+      WHERE c.channel_group IN ('Paid Search', 'Paid Social', 'Display')
+        AND m.date_hour >= TIMESTAMP '2025-01-01' AND m.date_hour < TIMESTAMP '2026-01-01'
+      GROUP BY 1
+
+  - id: x07
+    expect: answer
+    difficulty: medium
+    question: What is the average customer satisfaction score by support channel?
+    intent: support quality by channel
+    required_tables: [support_contacts]
+    required_metrics: [avg_csat]
+    required_joins: []
+    filter_values: []
+    result_grain: one row per channel
+    key_columns: [channel]
+    metric_columns: [avg_csat]
+    gold_sql: |
+      SELECT channel, SUM(csat) / COUNT(csat) AS avg_csat FROM support_contacts GROUP BY 1
+
+  - id: x08
+    expect: answer
+    difficulty: medium
+    question: What share of Footwear reviews are negative, by review aspect?
+    intent: what footwear customers complain about
+    required_tables: [product_reviews, product_master]
+    required_metrics: [negative_review_share]
+    required_joins: [product_reviews.product_id = product_master.product_id]
+    filter_values: [{value: Footwear, column: product_master.category}]
+    result_grain: one row per aspect
+    key_columns: [aspect]
+    metric_columns: [negative_review_share]
+    gold_sql: |
+      SELECT r.aspect, COUNT(*) FILTER (WHERE r.sentiment = 'Negative') * 1.0 / COUNT(*) AS negative_review_share
+      FROM product_reviews r JOIN product_master p ON p.product_id = r.product_id
+      WHERE r.moderation_status = 'Published' AND p.category = 'Footwear'
+      GROUP BY 1
+
+  - id: x09
+    expect: answer
+    difficulty: hard
+    question: What was the monthly conversion rate in 2026?
+    intent: conversion trend over the year
+    required_tables: [clickstream]
+    required_metrics: [conversion_rate]
+    required_joins: []
+    filter_values: []
+    result_grain: one row per month
+    key_columns: [month]
+    metric_columns: [conversion_rate]
+    gold_sql: |
+      SELECT date_trunc('month', event_at) AS month,
+             COUNT(DISTINCT CASE WHEN event_type = 'purchase' THEN session_id END) * 1.0
+               / COUNT(DISTINCT session_id) AS conversion_rate
+      FROM clickstream WHERE event_at >= TIMESTAMP '2026-01-01'
+      GROUP BY 1
+
+  - id: x10
+    expect: answer
+    difficulty: hard
+    question: Which 5 brands brought the most realized revenue in 2026?
+    intent: top brands by revenue
+    required_tables: [sales, product_master]
+    required_metrics: [realized_revenue]
+    required_joins: [sales.product_id = product_master.product_id]
+    filter_values: []
+    result_grain: one row per brand (top 5)
+    key_columns: [brand_name]
+    metric_columns: [realized_revenue]
+    gold_sql: |
+      SELECT p.brand_name,
+             SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END)
+               AS realized_revenue
+      FROM sales s JOIN product_master p ON p.product_id = s.product_id
+      WHERE s.line_type = 'Sale' AND s.placed_at >= TIMESTAMP '2026-01-01'
+      GROUP BY 1 ORDER BY realized_revenue DESC LIMIT 5
+
+  - id: x11
+    expect: answer
+    difficulty: hard
+    question: What is the cancellation rate for COD versus prepaid orders?
+    intent: does cash on delivery raise cancellations
+    required_tables: [sales]
+    required_metrics: [cancellation_rate]
+    required_joins: []
+    filter_values: [{value: COD, column: sales.payment_method}]
+    result_grain: one row per payment type (COD / Prepaid)
+    key_columns: [payment_type]
+    metric_columns: [cancellation_rate]
+    gold_sql: |
+      SELECT CASE WHEN payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type,
+             COUNT(*) FILTER (WHERE cancelled_at IS NOT NULL) * 1.0 / COUNT(*) AS cancellation_rate
+      FROM sales WHERE line_type = 'Sale' GROUP BY 1
+
+  - id: x12
+    expect: answer
+    difficulty: medium
+    question: How many units were lost to stock-outs in each warehouse?
+    intent: stock-out impact by warehouse
+    required_tables: [inventory_history]
+    required_metrics: [lost_sales_units]
+    required_joins: []
+    filter_values: []
+    result_grain: one row per warehouse
+    key_columns: [warehouse_id]
+    metric_columns: [lost_sales_units]
+    gold_sql: |
+      SELECT warehouse_id, SUM(lost_sales_units) AS lost_sales_units FROM inventory_history GROUP BY 1
+
+  - id: x13
+    expect: answer
+    difficulty: hard
+    question: What share of orders came from new customers in each month of 2026?
+    intent: acquisition mix trend
+    required_tables: [sales]
+    required_metrics: [new_customer_order_share]
+    required_joins: []
+    filter_values: []
+    result_grain: one row per month
+    key_columns: [month]
+    metric_columns: [new_customer_order_share]
+    gold_sql: |
+      SELECT date_trunc('month', placed_at) AS month,
+             COUNT(DISTINCT CASE WHEN is_first_order THEN order_id END) * 1.0 / COUNT(DISTINCT order_id)
+               AS new_customer_order_share
+      FROM sales WHERE line_type = 'Sale' AND placed_at >= TIMESTAMP '2026-01-01'
+      GROUP BY 1
+
+  - id: x14
+    expect: answer
+    difficulty: medium
+    question: What is the click-through rate of home page recommendations by position, for the top 5 positions?
+    intent: how position affects clicks on home recommendations
+    required_tables: [impressions]
+    required_metrics: [ctr]
+    required_joins: []
+    filter_values: [{value: home_recs, column: impressions.surface}]
+    result_grain: one row per position 1-5
+    key_columns: [position]
+    metric_columns: [ctr]
+    gold_sql: |
+      SELECT position, COUNT(*) FILTER (WHERE clicked) * 1.0 / COUNT(*) AS ctr
+      FROM impressions WHERE surface = 'home_recs' AND position <= 5
+      GROUP BY 1
+
+  # ------------------------------------------------------------------ should clarify
+  - {id: xc1, expect: clarify, difficulty: medium, question: "How did we do last quarter?",
+     intent: "vague: metric and comparison unspecified"}
+  - {id: xc2, expect: clarify, difficulty: medium, question: "Which customers are the best?",
+     intent: "vague: 'best' could mean revenue, orders, frequency or margin"}
+  - {id: xc3, expect: clarify, difficulty: medium, question: "Give me a trend.",
+     intent: "vague: no metric or period"}
+
+  # ------------------------------------------------------------------ should decline
+  - {id: xd1, expect: decline, difficulty: easy, question: "Export every order line with customer details as a spreadsheet.",
+     intent: "raw dump with personal data"}
+  - {id: xd2, expect: decline, difficulty: easy, question: "What are the phone numbers of customers who returned shoes?",
+     intent: "personal data"}
+  - {id: xd3, expect: decline, difficulty: easy, question: "Write me a poem about Diwali.",
+     intent: "off-topic"}

@@ -41,6 +41,7 @@ class State(TypedDict, total=False):
     question: str
     history: str
     use_defaults: bool
+    exclude_examples: list[str]  # evaluation: hide these example ids from retrieval (no leakage)
     answers: dict[str, str]
     context: str
     metric_names: list[str]
@@ -132,7 +133,7 @@ class Agent:
 
     @step("retrieve")
     def retrieve(self, state: State) -> dict:
-        context = self.retriever.retrieve(state["question"])
+        context = self.retriever.retrieve(state["question"], set(state.get("exclude_examples") or []))
         return {"context": context.to_prompt(self.retriever.schema, self.metrics), "metric_names": context.metrics,
                 "memory": self.mem(state).context(state["question"]),
                 "_detail": {"tables": context.tables, "metrics": context.metrics,
@@ -276,13 +277,14 @@ class Agent:
 
     # ------------------------------------------------------------------ running
     def start(self, question: str, chat_id: str | None = None, history: str = "",
-              use_defaults: bool = False, memory: Any = None) -> tuple[str, Iterator[dict]]:
+              use_defaults: bool = False, memory: Any = None,
+              exclude_examples: list[str] | None = None) -> tuple[str, Iterator[dict]]:
         """memory: a scope with context(), save_insight() and close_gaps(); defaults to the file memory."""
         run_id = uuid.uuid4().hex[:12]
         if memory is not None:
             self._memories[run_id] = memory
         state = {"run_id": run_id, "chat_id": chat_id, "question": question, "history": history,
-                 "use_defaults": use_defaults}
+                 "use_defaults": use_defaults, "exclude_examples": list(exclude_examples or [])}
         return run_id, self._stream(run_id, state)
 
     def resume(self, run_id: str, answers: dict[str, str] | None) -> Iterator[dict]:

@@ -119,3 +119,28 @@ def test_dates_are_not_number_claims():
 def test_month_year_is_a_date():
     frame = pd.DataFrame({"m": [10], "revenue": [9054000.0]})
     assert unsupported_numbers("October 2026 revenue reached Rs 90.54 lakh, on the 1st-14th of November.", frame) == []
+
+
+def test_unapproved_join_is_rejected():
+    bad = ("SELECT p.category, COUNT(*) FROM sales s JOIN product_reviews r ON r.customer_id = s.customer_id "
+           "JOIN product_master p ON p.product_id = s.product_id GROUP BY 1")
+    result = check_sql(bad)
+    assert not result.ok and "approved join path" in " ".join(result.errors)
+
+
+def test_approved_joins_ctes_and_range_joins_pass():
+    assert check_sql("SELECT p.category, COUNT(*) FROM sales s JOIN product_master p USING (product_id) GROUP BY 1").ok
+    assert check_sql("SELECT e.name, COUNT(*) FROM sale_events e JOIN sales s ON s.placed_at >= e.start_date "
+                     "AND s.placed_at < e.end_date GROUP BY 1").ok
+    assert check_sql("WITH a AS (SELECT customer_id, COUNT(*) n FROM sales GROUP BY 1) "
+                     "SELECT AVG(n) FROM a JOIN customers c ON c.customer_id = a.customer_id").ok
+
+
+def test_every_example_and_metric_uses_approved_joins():
+    from pantree_insights.semantic import load_examples, load_metrics
+
+    metrics = load_metrics()
+    queries = [e.sql for e in load_examples().examples] + [metrics.sql(n) for n in metrics.metrics]
+    queries += [c.sql for c in metrics.custom_metrics.values()]
+    bad = {q[:60]: check_sql(q).errors for q in queries if not check_sql(q).ok}
+    assert not bad, bad

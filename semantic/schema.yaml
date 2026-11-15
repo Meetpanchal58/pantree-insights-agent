@@ -459,6 +459,10 @@ joins:
 - sales.transaction_id = product_reviews.transaction_id
 - sales.transaction_id = support_contacts.transaction_id
 - product_skus.product_id = product_master.product_id
+- product_reviews.product_id = product_master.product_id
+- support_contacts.product_id = product_master.product_id
+- inventory_history.product_id = product_master.product_id
+- inventory_live.product_id = product_master.product_id
 - product_master.seller_id = sellers.seller_id
 - clickstream.session_id = sales.session_id
 - clickstream.customer_id = customers.customer_id

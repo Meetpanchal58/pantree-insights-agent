@@ -77,3 +77,10 @@ def test_terms_added_to_context(retriever):
     context = retriever.retrieve("What is our RTO rate for COD vs prepaid?")
     assert {"RTO", "COD", "prepaid"} <= set(context.terms)
     assert "Business terms" in context.to_prompt()
+
+
+def test_held_out_example_is_never_retrieved(retriever):
+    """Evaluation hides each question's own example; it must not come back through retrieval."""
+    for e in load_examples().examples:
+        context = retriever.retrieve(e.question, exclude_examples={e.id})
+        assert e.id not in {x.id for x in context.examples}
