@@ -47,10 +47,18 @@ def _numeric(frame: pd.DataFrame) -> list[str]:
 
 def score(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
           metric_columns: list[str]) -> tuple[bool, str]:
+    ok, reason, _ = align(gold, agent, key_columns, metric_columns)
+    return ok, reason
+
+
+def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
+          metric_columns: list[str]) -> tuple[bool, str, dict[str, str]]:
+    """Like score(), plus the column mapping agent column -> gold column (keys and matched metrics)."""
+    found_map: dict[str, str] = {}
     if gold.empty:                                    # the correct answer is "no rows"
-        return (agent is None or agent.empty), ("match" if agent is None or agent.empty else "expected no rows")
+        return (agent is None or agent.empty), ("match" if agent is None or agent.empty else "extra rows"), {}
     if agent is None or agent.empty:
-        return False, "empty result"
+        return False, "missing rows (empty result)", {}
     gold, agent = gold.reset_index(drop=True), agent.reset_index(drop=True)
 
     # 1. dimensions
@@ -61,19 +69,25 @@ def score(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
         found = next((c for c in candidates if c not in mapping.values()
                       and sorted(map(_norm, agent[c])) == wanted), None)
         if found is None:
-            return False, f"missing or different dimension rows for '{key}'"
+            if key not in agent.columns and not any(sorted(map(_norm, agent[c])) for c in agent.columns
+                                                    if set(map(_norm, agent[c])) & set(wanted)):
+                return False, f"wrong dimension: no column matches '{key}'", {}
+            have = {v for c in agent.columns for v in map(_norm, agent[c])}
+            missing = set(wanted) - have
+            return False, ("missing rows" if missing else "extra rows") + f" for '{key}'", {}
         mapping[key] = found
     if key_columns:
         agent_keys = agent[list(mapping.values())].map(_norm).apply(tuple, axis=1)
         if agent_keys.duplicated().any():
-            return False, "duplicate rows for the same dimension values"
+            return False, "extra rows (duplicates for the same dimension values)", {}
         gold_keys = gold[key_columns].map(_norm).apply(tuple, axis=1)
         if set(agent_keys) != set(gold_keys):
-            return False, "missing or extra dimension rows"
+            return False, ("missing rows" if set(agent_keys) < set(gold_keys) else "extra rows"), {}
         order = {k: i for i, k in enumerate(agent_keys)}
         agent = agent.iloc[[order[k] for k in gold_keys]].reset_index(drop=True)
     elif len(agent) != len(gold):
-        return False, f"expected {len(gold)} row(s), got {len(agent)}"
+        return False, ("missing rows" if len(agent) < len(gold) else "extra rows") + \
+            f" (expected {len(gold)}, got {len(agent)})", {}
 
     # 3. metrics on aligned rows
     numeric = _numeric(agent)
@@ -86,10 +100,11 @@ def score(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
             if all(_close(e, g) for e, g in zip(expected, got, strict=True)) or \
                     all(_close(e * 100, g) for e, g in zip(expected, got, strict=True)):
                 ok = True
+                found_map[col] = metric
                 break
         if not ok:
-            return False, f"metric '{metric}' does not match (wrong value, denominator or category)"
-    return True, "match"
+            return False, f"wrong metric value: '{metric}' does not match (value, denominator or category)", {}
+    return True, "match", {**{v: k for k, v in mapping.items()}, **found_map}
 
 
 def infer_columns(gold: pd.DataFrame) -> tuple[list[str], list[str]]:

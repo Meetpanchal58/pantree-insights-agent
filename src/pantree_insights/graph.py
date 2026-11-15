@@ -15,6 +15,7 @@ import contextlib
 import time
 import uuid
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any, TypedDict
 
@@ -34,6 +35,28 @@ from .llm import LLM, BudgetExceeded, ChatLLM
 from .memory import Memory
 from .retrieval import Retriever, get_retriever
 from .semantic import load_metrics, tables_in
+
+
+@dataclass(frozen=True)
+class Features:
+    """Switches for ablations (evals/run_eval.py --variant). The default is the full system."""
+    retrieval: bool = True        # hybrid retrieval context (off: the whole schema.yaml)
+    semantic: bool = True         # metric definitions and glossary in the context
+    planner: bool = True          # planner step (off: the question goes straight to the SQL writer)
+    validator: bool = True        # validator retry loop
+    narrow: bool = True           # SQL writer's first attempt sees only the plan's tables
+    memory: bool = True           # memory in prompts and saving insights
+
+
+VARIANTS = {
+    "baseline": Features(retrieval=False, semantic=False, planner=False, validator=False, narrow=False, memory=False),
+    "semantic": Features(retrieval=False, semantic=True, planner=False, validator=False, narrow=False, memory=False),
+    "retrieval": Features(retrieval=True, semantic=True, planner=False, validator=False, narrow=False, memory=False),
+    "planner": Features(retrieval=True, semantic=True, planner=True, validator=False, narrow=False, memory=False),
+    "validator": Features(retrieval=True, semantic=True, planner=True, validator=True, narrow=False, memory=False),
+    "full": Features(),
+    "full_no_memory": Features(memory=False),
+}
 
 
 class State(TypedDict, total=False):
@@ -104,8 +127,10 @@ def step(name: str):
 
 class Agent:
     def __init__(self, llm_factory: Callable[[], LLM] | None = None, retriever: Retriever | None = None,
-                 memory: Memory | None = None, con=None, data: dict | None = None):
+                 memory: Memory | None = None, con=None, data: dict | None = None,
+                 features: Features | None = None):
         settings = get_settings()
+        self.features = features or Features()
         self.llm_factory = llm_factory or ChatLLM
         self.con = con or connect(settings.shop_dir)
         self.retriever = retriever or get_retriever()
@@ -136,19 +161,35 @@ class Agent:
 
     @step("retrieve")
     def retrieve(self, state: State) -> dict:
+        f = self.features
         context = self.retriever.retrieve(state["question"], set(state.get("exclude_examples") or []))
+        if not f.retrieval:
+            prompt = "## Tables\n" + self.retriever.schema.describe() + "\n\n## How tables join\n" + "\n".join(
+                f"- {j}" for j in self.retriever.schema.joins)
+            if f.semantic:
+                prompt += "\n\n## Metric definitions (use these exactly)\n" + self.metrics.describe()
+                prompt += "\n\n## Business terms\n" + "\n".join(
+                    f"- {t}: {m}" for t, m in self.retriever.glossary.terms.items())
+            return {"context": prompt, "retrieved": {}, "metric_names": [],
+                    "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"])
+                    if f.memory else "(memory disabled)",
+                    "_detail": {"tables": list(self.retriever.schema.tables), "mode": "full schema"}}
         retrieved = {"tables": context.tables, "metrics": context.metrics, "joins": context.joins,
                      "values": [[v.value, v.columns, v.score] for v in context.values],
                      "examples": [e.id for e in context.examples], "terms": context.terms}
         return {"context": context.to_prompt(self.retriever.schema, self.metrics), "retrieved": retrieved,
                 "metric_names": context.metrics,
-                "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"]),
+                "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"])
+                if f.memory else "(memory disabled)",
                 "_detail": {"tables": context.tables, "metrics": context.metrics,
                             "values": [v.value for v in context.values[:6]],
                             "examples": [e.question for e in context.examples[:3]]}}
 
     @step("plan")
     def plan(self, state: State) -> dict:
+        if not self.features.planner:                      # ablation: no planning, question goes to the writer
+            plan = agents.AnalysisPlan(decision="proceed", restated_question=state["question"])
+            return {"plan": plan.model_dump(), "route": "write_sql", "_detail": {"decision": "skipped"}}
         result = agents.plan(self.llm(state), state["question"], state["context"], state["memory"], self.data,
                              state.get("history", ""), state.get("answers"), state.get("use_defaults", False))
         detail = {"decision": result.decision, "plan": agents.plan_text(result)}
@@ -188,7 +229,7 @@ class Agent:
     @step("write_sql")
     def write_sql(self, state: State) -> dict:
         plan = agents.AnalysisPlan.model_validate(state["plan"])
-        first = state.get("attempts", 0) == 0
+        first = state.get("attempts", 0) == 0 and self.features.narrow
         # first attempt: only the plan's tables; retries get the full context so recovery stays possible
         context, tables = self.narrowed_context(state, plan) if first else (
             state["context"], list((state.get("retrieved") or {}).get("tables", [])))
@@ -222,7 +263,8 @@ class Agent:
         except Exception as error:                                          # DuckDB error: let the writer fix it
             return self._retry_or_fail(state, [f"Database error: {str(error).splitlines()[0][:300]}"], "database")
         # 0 rows is not automatically wrong (e.g. no orders before launch): the validator decides
-        return {"result": _result(result.frame, result.truncated), "route": "validate",
+        return {"result": _result(result.frame, result.truncated),
+                "route": "validate" if self.features.validator else "analyse",
                 "_detail": {"rows": len(result.frame), "columns": list(result.frame.columns),
                             "query_seconds": round(result.seconds, 2), "truncated": result.truncated}}
 
@@ -273,6 +315,9 @@ class Agent:
     def remember(self, state: State) -> dict:
         a = state["analysis"]
         memory = self.mem(state)
+        if not self.features.memory:
+            return {"insight_id": None, "status": "done", "_status": "skipped",
+                    "_detail": {"saved": False, "reason": "memory disabled"}}
         concerns = [w for w in state.get("warnings", []) if w.startswith("Reviewer concern")]
         if concerns or state.get("grounded") is not True:
             reason = "validator raised concerns" if concerns else "claims did not verify"
@@ -301,7 +346,7 @@ class Agent:
         g.add_edge("clarify", "plan")
         g.add_edge("write_sql", "check_sql")
         for name in ["check_sql", "run_query"]:
-            g.add_conditional_edges(name, route, ["write_sql", "run_query", "validate", "finish"])
+            g.add_conditional_edges(name, route, ["write_sql", "run_query", "validate", "analyse", "finish"])
         g.add_conditional_edges("validate", route, ["write_sql", "analyse"])
         g.add_edge("analyse", "chart")
         g.add_edge("chart", "remember")

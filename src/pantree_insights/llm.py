@@ -117,6 +117,8 @@ class ChatLLM:
         key = (name, effort)
         if key not in self._models:
             kwargs: dict[str, Any] = {"max_tokens": get_settings().max_output_tokens}
+            if get_settings().temperature is not None:
+                kwargs["temperature"] = get_settings().temperature
             if name.startswith("openai:") and effort != "none":
                 kwargs["reasoning"] = {"effort": effort}
             self._models[key] = init_chat_model(name, **kwargs)

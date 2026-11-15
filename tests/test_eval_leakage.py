@@ -7,7 +7,9 @@ import yaml
 from pantree_insights.semantic import load_examples
 
 ROOT = Path(__file__).resolve().parents[1]
-HOLDOUT = yaml.safe_load((ROOT / "evals" / "holdout.yaml").read_text())["questions"]
+HOLDOUT = (yaml.safe_load((ROOT / "evals" / "holdout.yaml").read_text())["questions"]
+           + (yaml.safe_load((ROOT / "evals" / "holdout_external.yaml").read_text())["questions"] or [])
+           + yaml.safe_load((ROOT / "evals" / "behaviour.yaml").read_text())["questions"])
 REGRESSION = yaml.safe_load((ROOT / "evals" / "questions.yaml").read_text())["questions"]
 
 
@@ -51,5 +53,10 @@ def test_holdout_answers_are_fully_annotated():
     needed = {"intent", "required_tables", "required_metrics", "required_joins", "filter_values", "result_grain",
               "gold_sql", "key_columns", "metric_columns"}
     for q in HOLDOUT:
-        if q["expect"] == "answer":
+        if q["expect"] == "answer" and "set" not in q:          # behaviour items have no gold by design
             assert needed <= set(q), f"{q['id']} missing {needed - set(q)}"
+
+
+def test_external_items_are_marked():
+    external = yaml.safe_load((ROOT / "evals" / "holdout_external.yaml").read_text())["questions"] or []
+    assert all(q.get("author") == "external" for q in external)

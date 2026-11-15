@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "low"
     sql_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "medium"
     max_output_tokens: int = 4000
+    # Sampling temperature. None = provider default: OpenAI reasoning models (gpt-6.x) do not accept a
+    # temperature, so it is only sent when set. Reports record the value used.
+    temperature: float | None = None
     max_sql_attempts: int = 3                    # SQL writer tries (guardrail / database / validator feedback)
     daily_budget_usd: float = 1.00               # live LLM calls stop for the day after this
 

@@ -1,0 +1,31 @@
+# EXTERNAL HOLDOUT: questions written by people outside the project (author: external), collected with
+# evals/EXTERNAL_QUESTIONS.md. Same schema as holdout.yaml plus `author: external`. Gold SQL and
+# annotations are added afterwards by the project owner. tests/test_eval_leakage.py checks these too.
+#
+# Template (copy, uncomment, fill in):
+#
+#  - id: e01
+#    author: external
+#    expect: answer
+#    difficulty: medium
+#    question: "..."
+#    decision_informed: "..."          # what the asker would decide with the answer
+#    intent: "..."
+#    required_tables: []
+#    required_metrics: []
+#    required_joins: []
+#    filter_values: []
+#    result_grain: "one row per ..."
+#    key_columns: []
+#    metric_columns: []
+#    gold_sql: |
+#      SELECT ...
+#
+#  - id: e02
+#    author: external
+#    expect: clarify                     # or: decline
+#    difficulty: medium
+#    question: "..."
+#    intent: "..."
+
+questions: []

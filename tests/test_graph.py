@@ -258,3 +258,30 @@ def test_old_insights_are_left_out_of_memory_context(tmp_path):
                         data_as_of="2026-09-01")
     assert "footwear returns" in memory.context("footwear returns", as_of="2026-09-20").lower()
     assert "footwear returns" not in memory.context("footwear returns", as_of="2026-11-14").lower()
+
+
+@pytest.mark.parametrize("variant,expected", [
+    ("baseline", ["sql_writer", "analyst"]),
+    ("retrieval", ["sql_writer", "analyst"]),
+    ("validator", ["planner", "sql_writer", "validator", "analyst"]),
+    ("full", ["planner", "sql_writer", "validator", "analyst"]),
+])
+def test_variants_switch_agents(con, retriever, tmp_path, variant, expected):
+    from pantree_insights.db import manifest
+    from pantree_insights.graph import VARIANTS, Agent
+
+    fakes = []
+
+    def factory():
+        fakes.append(FakeLLM(Script(planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+                                    validator=[{"ok": True}], analyst=[analysis_from])))
+        return fakes[-1]
+
+    agent = Agent(llm_factory=factory, retriever=retriever, memory=Memory(tmp_path / "m", data_size="small"),
+                  con=con, data=manifest(retriever_shop(con)), features=VARIANTS[variant])
+    _, events = run(agent, "What is revenue by category?")
+    assert events[-1]["status"] == "done"
+    assert [a for a, _, _ in fakes[0].prompts] == expected
+    writer_prompt = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][0]
+    if variant == "baseline":
+        assert "TABLE support_contacts" in writer_prompt and "Metric definitions" not in writer_prompt
