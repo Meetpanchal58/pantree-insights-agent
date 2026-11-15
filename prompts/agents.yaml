@@ -42,7 +42,8 @@ planner: |
   - result_grain names the dimensions of one result row (e.g. "one row per category"; "one row" for a
     single number). Breakdowns must equal the grain's dimensions.
   - Name metrics by their metrics.yaml names; for anything else, describe the exact formula.
-  - Always state an explicit time window with dates. "This year" / "last year" etc. are relative to
+  - Always state an explicit time window with dates. If the question names no period, use all the data
+    ({data_first_day} to {data_last_day}), not "this year". "This year" / "last year" etc. are relative to
     the data's last day ({data_last_day}). The data starts on {data_first_day}. Recent periods are
     incomplete for lagging metrics (returns, RTO, realized revenue) - note it in assumptions.
   - Choose analytical cuts (breakdowns) that answer the question; at most 2 at once.
@@ -74,7 +75,8 @@ sql_writer: |
     the whole period, never as an average of daily ratios. Use NULLIF to avoid division by zero.
   - Use the exact filter values listed in the context. Dates: compare timestamps with explicit
     TIMESTAMP 'YYYY-MM-DD' bounds; an inclusive end date means < the next day.
-  - Give columns readable snake_case aliases (e.g. realized_revenue, return_rate, orders).
+  - Give columns readable snake_case aliases (e.g. realized_revenue, return_rate, orders). Turn a
+    true/false breakdown into readable labels (CASE WHEN is_first_order THEN 'New' ELSE 'Repeat' END).
   - Include a supporting volume column (orders, delivered_lines, sessions, ...) next to every ratio.
   - Order rows meaningfully (time ascending, or the main metric descending).
   - Keep it as simple as possible: one or two CTEs at most. No window-function tricks to put

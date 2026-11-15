@@ -372,7 +372,8 @@ tables:
       gst_rate: number
       unit_cost: number
       payment_method: text
-      event_id: text - sale event whose price applied (NULL = normal day)
+      event_id: text - sale event whose price applied (NULL = normal day). Events overlap, so to measure one
+        event use its date window (placed_at between start_date and end_date), not this column
       campaign_id: text - links to campaigns
       traffic_source: text
       device: text

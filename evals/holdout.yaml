@@ -506,6 +506,7 @@ questions:
   - id: y14
     expect: answer
     difficulty: hard
+    tuned_on: true    # chose "this year" for an unspecified period; informed the all-data default
     question: What is the average order value for Prime versus non-Prime customers?
     intent: basket size by loyalty status
     required_tables: [sales, customers]
