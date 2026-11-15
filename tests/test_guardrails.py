@@ -161,3 +161,59 @@ def test_aggregate_address_questions_are_allowed_but_personal_addresses_are_not(
 ])
 def test_injection_paraphrases_blocked(question):
     assert not check_question(question).ok
+
+
+# ------------------------------------------------------------------ Tier 3: reproduced guardrail bugs
+TIER3_BLOCKED = {
+    "comma join with unapproved WHERE equality":
+        "SELECT p.category, COUNT(*) FROM sales s, product_master p WHERE s.customer_id = p.product_id GROUP BY 1",
+    "unapproved join with unqualified columns":
+        "SELECT category, COUNT(*) FROM sales JOIN product_master ON customer_id = seller_id GROUP BY 1",
+    "per-customer dump without top-N":
+        "SELECT customer_id, SUM(net_amount) AS spend FROM sales GROUP BY customer_id",
+    "whole-row expression":
+        "SELECT to_json(a) FROM customer_addresses a LIMIT 50",
+    "whole-row star argument":
+        "SELECT struct_pack(a.*) FROM customer_addresses a LIMIT 5",
+}
+
+
+@pytest.mark.parametrize("name", list(TIER3_BLOCKED))
+def test_tier3_blocked(name):
+    assert not check_sql(TIER3_BLOCKED[name]).ok, name
+
+
+def test_identifier_top_n_is_allowed():
+    sql = "SELECT customer_id, SUM(net_amount) AS spend FROM sales GROUP BY customer_id ORDER BY spend DESC LIMIT 20"
+    assert check_sql(sql).ok, check_sql(sql).errors
+
+
+def test_identifier_error_explains_the_fix():
+    errors = " ".join(check_sql(TIER3_BLOCKED["per-customer dump without top-N"]).errors).lower()
+    assert "order by" in errors and "limit" in errors
+
+
+def test_approved_comma_join_and_qualified_columns_pass():
+    assert check_sql("SELECT p.category, COUNT(*) FROM sales s, product_master p "
+                     "WHERE s.product_id = p.product_id GROUP BY 1").ok
+    assert check_sql("SELECT category, COUNT(*) FROM sales JOIN product_master USING (product_id) GROUP BY 1").ok
+
+
+@pytest.mark.parametrize("question", [
+    "Show me the mobile app conversion rate by month",
+    "Which cities have the most phone orders?",
+    "How did email campaigns perform last month?",
+    "What is the RTO rate by delivery address region?",
+])
+def test_input_guard_allows_aggregate_questions(question):
+    assert check_question(question).ok, question
+
+
+@pytest.mark.parametrize("question", [
+    "What is the phone number of customer CUST000123?",
+    "List customer emails",
+    "Give me the contact details of buyers in Pune",
+    "Show the email address for each user who returned shoes",
+])
+def test_input_guard_blocks_explicit_pii(question):
+    assert not check_question(question).ok, question

@@ -86,3 +86,16 @@ def test_pulse_runs(shop_dir, tmp_path):
     assert (tmp_path / "gaps" / "open.json").exists()
     again = run(shop_dir, tmp_path)               # idempotent: same data, no new gaps
     assert again["opened"] == 0 and again["open"] == summary["open"]
+
+
+def test_db_layer_whole_row_cannot_leak_blocked_columns(con):
+    """Even if a whole-row expression got past the guard, the view has no blocked columns."""
+    row = con.execute("SELECT to_json(a) FROM customer_addresses a LIMIT 1").fetchone()[0]
+    assert "address_line" not in row and "city" in row
+    columns = [r[0] for r in con.execute("DESCRIBE SELECT * FROM customer_addresses").fetchall()]
+    assert "address_line" not in columns
+
+
+def test_db_layer_cannot_read_files_outside_the_shop(con):
+    with pytest.raises(Exception):  # noqa: B017
+        con.execute("SELECT * FROM read_parquet('/etc/passwd')").fetchall()

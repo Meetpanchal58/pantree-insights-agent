@@ -32,7 +32,15 @@ class Blocked(BaseModel):
 class Schema(BaseModel):
     tables: dict[str, Table]
     joins: list[str]
+    identifier_columns: list[str] = []
     blocked: Blocked
+
+    def column_types(self) -> dict[str, dict[str, str]]:
+        """{table: {column: duckdb type}} for sqlglot's qualify (resolves unqualified columns)."""
+        kinds = {"text": "VARCHAR", "number": "DOUBLE", "integer": "BIGINT", "timestamp": "TIMESTAMP",
+                 "boolean": "BOOLEAN"}
+        return {t: {c: kinds.get(d.split(" - ")[0].strip(), "VARCHAR") for c, d in info.columns.items()}
+                for t, info in self.tables.items()}
 
     @model_validator(mode="after")
     def _check(self) -> Schema:

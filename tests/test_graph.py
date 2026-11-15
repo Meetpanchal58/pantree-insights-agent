@@ -108,7 +108,7 @@ def test_guardrail_and_database_errors_are_fed_back(con, retriever, tmp_path):
     agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
         planner=[PLAN],
         sql_writer=[{"sql": "SELECT * FROM sales", "explanation": "x"},
-                    {"sql": "SELECT no_such_column, COUNT(*) FROM sales GROUP BY 1", "explanation": "x"},
+                    {"sql": "SELECT CAST(payment_method AS INTEGER) AS n, COUNT(*) FROM sales GROUP BY 1", "explanation": "x"},
                     {"sql": GOOD_SQL, "explanation": "ok"}],
         validator=[{"ok": True}], analyst=[analysis_from]))
     _, events = run(agent, "What is revenue by category?")
@@ -116,7 +116,7 @@ def test_guardrail_and_database_errors_are_fed_back(con, retriever, tmp_path):
     assert ("check_sql", "retry") in steps(events) and ("run_query", "retry") in steps(events)
     writer_prompts = [u for a, _, u in fakes[0].prompts if a == "sql_writer"]
     assert "SELECT * is not allowed" in writer_prompts[1]
-    assert "no_such_column" in writer_prompts[2]
+    assert "Database error" in writer_prompts[2]
 
 
 def test_validator_feedback_then_success(con, retriever, tmp_path):
