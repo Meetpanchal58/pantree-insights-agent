@@ -4800,7 +4800,7 @@
   "set": "answer",
   "expect": "answer",
   "difficulty": "medium",
-  "tuned": false,
+  "tuned": true,
   "question": "How many orders were placed in December 2024?",
   "seconds": 13.3,
   "status": "done",

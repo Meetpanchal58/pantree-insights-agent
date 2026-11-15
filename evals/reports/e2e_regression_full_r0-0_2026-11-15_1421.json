@@ -328,11 +328,11 @@
   ],
   "required_tables": null,
   "result_correct": true,
-  "answer_correct": false,
+  "answer_correct": true,
   "decline_layer": null,
   "passed": true,
-  "reason": "claims: c1 (10.2): result has 0.102012 for value of prime_share",
-  "failure_type": "claims_unverified"
+  "reason": "match",
+  "failure_type": null
  },
  {
   "suite": "regression",
@@ -1533,12 +1533,12 @@
    "product_skus"
   ],
   "required_tables": null,
-  "result_correct": false,
-  "answer_correct": false,
+  "result_correct": true,
+  "answer_correct": true,
   "decline_layer": null,
-  "passed": false,
-  "reason": "wrong dimension: no column matches 'category'",
-  "failure_type": "wrong_dimension"
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
  },
  {
   "suite": "regression",
@@ -1767,12 +1767,12 @@
    "campaigns"
   ],
   "required_tables": null,
-  "result_correct": false,
-  "answer_correct": false,
+  "result_correct": true,
+  "answer_correct": true,
   "decline_layer": null,
-  "passed": false,
-  "reason": "wrong dimension: no column matches 'channel_group'",
-  "failure_type": "wrong_dimension"
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
  },
  {
   "suite": "regression",
@@ -2954,8 +2954,8 @@
   "answer_correct": false,
   "decline_layer": null,
   "passed": false,
-  "reason": "extra rows for 'campaign_id'",
-  "failure_type": "extra_rows"
+  "reason": "wrong metric value: 'last_click_revenue' does not match (value, denominator or category)",
+  "failure_type": "wrong_metric_value"
  },
  {
   "suite": "regression",
@@ -4000,8 +4000,8 @@
   "answer_correct": false,
   "decline_layer": null,
   "passed": false,
-  "reason": "missing rows for 'day_type'",
-  "failure_type": "missing_rows"
+  "reason": "wrong metric value: 'avg_discount_pct' does not match (value, denominator or category)",
+  "failure_type": "wrong_metric_value"
  },
  {
   "suite": "regression",
@@ -4579,12 +4579,12 @@
    "sales"
   ],
   "required_tables": null,
-  "result_correct": false,
+  "result_correct": true,
   "answer_correct": false,
   "decline_layer": null,
-  "passed": false,
-  "reason": "extra rows for 'ship_city'",
-  "failure_type": "extra_rows"
+  "passed": true,
+  "reason": "claims: c10 (2.6%): \"0 rows match [('ship_city', 'Bengaluru')]\"",
+  "failure_type": "claims_unverified"
  },
  {
   "suite": "regression",

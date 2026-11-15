@@ -1,4 +1,4 @@
-# End-to-end evaluation 2026-11-15 13:55
+# End-to-end evaluation 2026-11-15 14:44
 
 Data: full shop · model: openai:gpt-6.1-terra · temperature: provider default (not settable for this model) · variant(s): baseline · repeats: 1
 
@@ -9,8 +9,8 @@ Format: mean [95% bootstrap CI over questions] (n questions, k repeats, pass^k =
 | Measure | Result |
 |---|---|
 | Correct result tables (dimension-aware, 1%) | 48% [32%-68%] (n=31) |
-| Correct answers (result + claims verified against gold) | 45% [29%-65%] (n=31) |
-| Correct result tables, excluding questions used for tuning | 54% [36%-71%] (n=28) |
+| Correct answers (result + claims verified against gold) | 48% [32%-68%] (n=31) |
+| Correct result tables, excluding questions used for tuning | 52% [33%-70%] (n=27) |
 | SQL execution success | 87% [74%-97%] (n=31) |
 | Grounded answers (all claims verified in the app) | 100% [100%-100%] (n=27) |
 | Clarification accuracy (vague questions) | - |
@@ -22,7 +22,7 @@ Format: mean [95% bootstrap CI over questions] (n questions, k repeats, pass^k =
 | Declines caught by input guard / planner | 0 / 0 |
 | Median latency · mean cost per question | 17 s · $0.013 |
 
-Failure types: wrong_dimension 6, sql_error 4, wrong_metric_value 4, claims_unverified 1, extra_rows 1, missing_rows 1
+Failure types: wrong_dimension 6, sql_error 4, wrong_metric_value 4, extra_rows 1, missing_rows 1
 
 Failures:
 - r0 x01 [sql_error] "What was realized revenue in each region of the delivery address in 20": no answer (failed: Could not produce a valid query after 3 attempts (safety checks): Exactly one statement is allowed, f
@@ -33,7 +33,6 @@ Failures:
 - r0 x08 [sql_error] "What share of Footwear reviews are negative, by review aspect?": no answer (failed: Could not produce a valid query after 3 attempts (safety checks): Exactly one statement is allowed, f
 - r0 x10 [wrong_dimension] "Which 5 brands brought the most realized revenue in 2026?": wrong dimension: no column matches 'brand_name'
 - r0 x11 [wrong_metric_value] "What is the cancellation rate for COD versus prepaid orders?": wrong metric value: 'cancellation_rate' does not match (value, denominator or category)
-- r0 x13 [claims_unverified] "What share of orders came from new customers in each month of 2026?": claims: c1 (31.7): result has 0.317179 for value of new_customer_order_share; c2 (31.5): result has 0.314664 for value o
 - r0 y01 [wrong_dimension] "How many units did we sell in each product category in 2025?": wrong dimension: no column matches 'category'
 - r0 y04 [wrong_dimension] "What is the return rate for women's products versus men's products?": wrong dimension: no column matches 'gender'
 - r0 y07 [extra_rows] "How many support tickets were opened each month in 2026?": extra rows for 'month'

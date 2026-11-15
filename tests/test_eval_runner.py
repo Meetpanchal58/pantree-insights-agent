@@ -118,3 +118,12 @@ def test_provider_errors_are_listed_but_not_scored():
     text = run_eval.summary([ok, err])
     assert "| SQL execution success | 100% [100%-100%] (n=1) |" in text
     assert "api_error 1" in text and "a2 [api_error]" in text
+
+
+def test_claims_in_percent_points_hold_on_a_ratio_gold_column():
+    gold = pd.DataFrame({"prime_share": [0.102012]})
+    claims = [{"id": "c1", "value": 10.2, "unit": "number", "column": "prime_share_pct", "row": []}]
+    ok, _ = run_eval.claims_hold_on_gold(claims, gold, {"prime_share_pct": "prime_share"})
+    assert ok
+    bad = [{"id": "c1", "value": 12.0, "unit": "number", "column": "prime_share_pct", "row": []}]
+    assert not run_eval.claims_hold_on_gold(bad, gold, {"prime_share_pct": "prime_share"})[0]

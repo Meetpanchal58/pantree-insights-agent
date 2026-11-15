@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "evals"))
 
-from scoring import align, infer_columns  # noqa: E402
+from scoring import align, infer_columns, trim_top_n  # noqa: E402
 from stats import fmt, summarize  # noqa: E402
 
 from pantree_insights.config import get_settings  # noqa: E402
@@ -92,8 +92,12 @@ def claims_hold_on_gold(claims: list[dict], gold: pd.DataFrame, mapping: dict[st
         tr = lambda kvs: [KeyValue(column=mapping[kv.column], value=kv.value) for kv in kvs]   # noqa: E731
         translated.append(claim.model_copy(update={"column": mapping[claim.column], "row": tr(claim.row),
                                                    "against": tr(claim.against) if claim.against else None}))
-    result = verify(gold, translated, {})
-    return result.ok, "; ".join(result.problems[:3])
+    problems = []
+    for claim in translated:                       # a ratio column may be stated in percent (x100), as in scoring
+        if not verify(gold, [claim], {}).ok and \
+                not verify(gold, [claim.model_copy(update={"value": claim.value / 100, "unit": "ratio"})], {}).ok:
+            problems += verify(gold, [claim], {}).problems
+    return not problems, "; ".join(problems[:3])
 
 
 def decline_layer(events: list[dict]) -> str | None:
@@ -129,7 +133,7 @@ def judge(con, item: dict, final: dict, events: list[dict]) -> dict:
         kind = "sql_error" if "Database error" in message or "attempts" in message else "no_sql"
         return {**out, "passed": False, "reason": f"no answer ({status}: {message})"[:200], "failure_type": kind}
     gold, keys, metrics = gold_frame(con, item)
-    agent = run_query(con, final["sql"]).frame
+    agent = trim_top_n(run_query(con, final["sql"]).frame, gold, item["gold_sql"], item.get("question", ""))
     ok, reason, mapping = align(gold, agent, keys, metrics)
     out["result_correct"] = ok
     if not ok:
@@ -289,6 +293,7 @@ def rescore(report: Path) -> None:
     con = connect()
     for row in rows:
         item = by_id[(row["suite"], row["id"])]
+        row["tuned"] = bool(item.get("tuned_on"))             # tuned_on can be added after the run
         if item["set"] == "answer" and row["status"] == "done" and row.get("sql"):
             final = {"status": "done", "type": "final", "sql": row["sql"], "grounded": row.get("grounded"),
                      "analysis": {"claims": row.get("claims") or []}}

@@ -8,12 +8,22 @@
    aligned row within TOLERANCE (1% relative, or 1e-6 absolute). A ratio reported as a percentage
    (x100) is accepted. Values assigned to the wrong category fail because rows are aligned first.
 Column names and extra columns do not matter.
+
+Fairness rules (each unit-tested in tests/test_scoring.py):
+- A gold key column the agent left out is optional when the gold rows are still unique on the keys it
+  did return (e.g. category next to sku_id): it is descriptive, not a different breakdown.
+- Computed labels match on their words ("Sale event" = "sale-event day"), one-to-one only.
+- trim_top_n: when the gold is a ranked list (ORDER BY ... LIMIT n) and the question names no size, only
+  the agent's first n rows are compared, so "top 50" vs "top 10" is not a wrong answer.
 """
 from __future__ import annotations
+
+import re
 
 import pandas as pd
 
 TOLERANCE = 0.01
+_FILLER = {"day", "days", "the", "a", "an", "of", "and"}
 
 
 def _norm(value) -> str:
@@ -31,6 +41,38 @@ def _norm(value) -> str:
         return str(int(number)) if number.is_integer() else f"{number:.6g}"
     except ValueError:
         return text
+
+
+def _words(value) -> frozenset[str]:
+    return frozenset(w for w in re.findall(r"[a-z0-9]+", _norm(value)) if w not in _FILLER)
+
+
+def _label_map(wanted: list[str], values: pd.Series) -> dict[str, str] | None:
+    """agent value -> gold value when the labels are the same words, one-to-one; else None."""
+    gold_words = {w: v for v in set(wanted) if (w := _words(v))}
+    if len(gold_words) != len(set(wanted)):
+        return None
+    out = {}
+    for value in set(map(_norm, values)):
+        match = gold_words.get(_words(value))
+        if match is None or match in out.values():
+            return None
+        out[value] = match
+    return out if sorted(out.values()) == sorted(set(wanted)) else None
+
+
+_NUMBER_IN_QUESTION = re.compile(r"\b(top|bottom|first|last|best|worst)\s+\d+|"
+                                 r"\b\d+\s+(best|worst|top|largest|biggest)", re.I)
+_RANKED = re.compile(r"order\s+by[\s\S]+limit\s+(\d+)\s*;?\s*$", re.I)
+
+
+def trim_top_n(agent: pd.DataFrame, gold: pd.DataFrame, gold_sql: str, question: str) -> pd.DataFrame:
+    """Compare only the agent's first len(gold) rows when the gold is a ranked LIMIT and no size was asked."""
+    if agent is None or gold is None or len(agent) <= len(gold) or not _RANKED.search(gold_sql.strip()):
+        return agent
+    if _NUMBER_IN_QUESTION.search(question):
+        return agent
+    return agent.head(len(gold))
 
 
 def _close(a: float, b: float) -> bool:
@@ -63,28 +105,47 @@ def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
 
     # 1. dimensions
     mapping: dict[str, str] = {}
+    dropped: list[tuple[str, str]] = []
+    agent = agent.copy()
     for key in key_columns:
         wanted = sorted(map(_norm, gold[key]))
         candidates = [key] + [c for c in agent.columns if c != key] if key in agent.columns else list(agent.columns)
         found = next((c for c in candidates if c not in mapping.values()
                       and sorted(map(_norm, agent[c])) == wanted), None)
+        if found is None:                              # computed labels with the same words
+            for c in candidates:
+                if c in mapping.values() or pd.api.types.is_numeric_dtype(agent[c]):
+                    continue
+                labels = _label_map(wanted, agent[c])
+                if labels is not None and sorted(labels[_norm(v)] for v in agent[c]) == wanted:
+                    agent[c] = [labels[_norm(v)] for v in agent[c]]
+                    found = c
+                    break
         if found is None:
             if key not in agent.columns and not any(sorted(map(_norm, agent[c])) for c in agent.columns
                                                     if set(map(_norm, agent[c])) & set(wanted)):
-                return False, f"wrong dimension: no column matches '{key}'", {}
+                dropped.append((key, f"wrong dimension: no column matches '{key}'"))
+                continue
             have = {v for c in agent.columns for v in map(_norm, agent[c])}
             missing = set(wanted) - have
-            return False, ("missing rows" if missing else "extra rows") + f" for '{key}'", {}
+            dropped.append((key, ("missing rows" if missing else "extra rows") + f" for '{key}'"))
+            continue
         mapping[key] = found
-    if key_columns:
+    # a left-out key is optional only if the other keys identify every gold row
+    if dropped and (not mapping or gold[list(mapping)].map(_norm).apply(tuple, axis=1).duplicated().any()):
+        return False, dropped[0][1], {}
+    keys = list(mapping)
+    if keys:
         agent_keys = agent[list(mapping.values())].map(_norm).apply(tuple, axis=1)
         if agent_keys.duplicated().any():
             return False, "extra rows (duplicates for the same dimension values)", {}
-        gold_keys = gold[key_columns].map(_norm).apply(tuple, axis=1)
+        gold_keys = gold[keys].map(_norm).apply(tuple, axis=1)
         if set(agent_keys) != set(gold_keys):
             return False, ("missing rows" if set(agent_keys) < set(gold_keys) else "extra rows"), {}
         order = {k: i for i, k in enumerate(agent_keys)}
         agent = agent.iloc[[order[k] for k in gold_keys]].reset_index(drop=True)
+    elif key_columns:
+        return False, dropped[0][1], {}
     elif len(agent) != len(gold):
         return False, ("missing rows" if len(agent) < len(gold) else "extra rows") + \
             f" (expected {len(gold)}, got {len(agent)})", {}

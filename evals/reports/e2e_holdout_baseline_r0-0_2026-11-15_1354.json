@@ -1362,11 +1362,11 @@
    "sales"
   ],
   "result_correct": true,
-  "answer_correct": false,
+  "answer_correct": true,
   "decline_layer": null,
   "passed": true,
-  "reason": "claims: c1 (31.7): result has 0.317179 for value of new_customer_order_share; c2 (31.5): result has 0.314664 for value of new_customer_order_share; c3 (30.2): result has 0.302224 for value of new_customer_order_share",
-  "failure_type": "claims_unverified"
+  "reason": "match",
+  "failure_type": null
  },
  {
   "suite": "holdout",
@@ -3345,7 +3345,7 @@
   "set": "answer",
   "expect": "answer",
   "difficulty": "medium",
-  "tuned": false,
+  "tuned": true,
   "question": "How many orders were placed in December 2024?",
   "seconds": 6.9,
   "status": "done",
