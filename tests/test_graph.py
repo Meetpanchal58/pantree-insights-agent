@@ -285,3 +285,22 @@ def test_variants_switch_agents(con, retriever, tmp_path, variant, expected):
     writer_prompt = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][0]
     if variant == "baseline":
         assert "TABLE support_contacts" in writer_prompt and "Metric definitions" not in writer_prompt
+
+
+def test_empty_sql_gets_specific_feedback_and_the_writers_reason_is_kept(con, retriever, tmp_path):
+    """Seen in the paid runs: the writer returned no SQL three times and the failure said only 'found 0'."""
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        planner=[PLAN],
+        sql_writer=[{"sql": "  ", "explanation": "Region of the delivery address may be personal data"},
+                    {"sql": GOOD_SQL, "explanation": "ok"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    _, events = run(agent, "What is revenue by category?")
+    assert events[-1]["status"] == "done" and events[-1]["attempts"] == 2
+    retry_prompt = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][1]
+    assert "No SQL was returned" in retry_prompt and "may be personal data" in retry_prompt
+
+    agent, _, _ = make_agent(con, retriever, tmp_path, Script(
+        planner=[PLAN], sql_writer=[{"sql": "", "explanation": "cannot answer this"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    _, events = run(agent, "What is revenue by category?")
+    assert events[-1]["status"] == "failed" and "cannot answer this" in events[-1]["message"]

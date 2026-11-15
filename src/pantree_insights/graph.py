@@ -249,6 +249,12 @@ class Agent:
 
     @step("check_sql")
     def check_sql(self, state: State) -> dict:
+        if not (state.get("sql") or "").strip():          # the writer declined or ran out of room: say so
+            reason = (state.get("explanation") or "").strip()[:300] or "no reason given"
+            return self._retry_or_fail(state, [
+                f"No SQL was returned (writer's note: {reason}). Return exactly one SELECT statement in the "
+                "sql field. Aggregates by region, city or tier, and questions about email or SMS campaigns, "
+                "are allowed; only the hidden personal columns are unavailable."], "safety checks")
         verdict = check_sql(state["sql"])
         if not verdict.ok:
             return self._retry_or_fail(state, verdict.errors, "safety checks")
