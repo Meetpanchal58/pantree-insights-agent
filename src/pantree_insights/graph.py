@@ -32,7 +32,7 @@ from .guardrails import check_question, check_sql, unsupported_numbers
 from .llm import LLM, BudgetExceeded, ChatLLM
 from .memory import Memory
 from .retrieval import Retriever, get_retriever
-from .semantic import load_metrics
+from .semantic import load_metrics, tables_in
 
 
 class State(TypedDict, total=False):
@@ -44,6 +44,7 @@ class State(TypedDict, total=False):
     exclude_examples: list[str]  # evaluation: hide these example ids from retrieval (no leakage)
     answers: dict[str, str]
     context: str
+    retrieved: dict              # the retrieved context's parts, for narrowing it after planning
     metric_names: list[str]
     memory: str
     plan: dict
@@ -134,7 +135,11 @@ class Agent:
     @step("retrieve")
     def retrieve(self, state: State) -> dict:
         context = self.retriever.retrieve(state["question"], set(state.get("exclude_examples") or []))
-        return {"context": context.to_prompt(self.retriever.schema, self.metrics), "metric_names": context.metrics,
+        retrieved = {"tables": context.tables, "metrics": context.metrics, "joins": context.joins,
+                     "values": [[v.value, v.columns, v.score] for v in context.values],
+                     "examples": [e.id for e in context.examples], "terms": context.terms}
+        return {"context": context.to_prompt(self.retriever.schema, self.metrics), "retrieved": retrieved,
+                "metric_names": context.metrics,
                 "memory": self.mem(state).context(state["question"]),
                 "_detail": {"tables": context.tables, "metrics": context.metrics,
                             "values": [v.value for v in context.values[:6]],
@@ -159,15 +164,38 @@ class Agent:
             answers = {q["question"]: q["default"] for q in questions}
         return {"answers": answers, "status": "running"}
 
+    def narrowed_context(self, state: State, plan: agents.AnalysisPlan) -> tuple[str, list[str]]:
+        """Context limited to the plan's source tables (less distraction for the SQL writer).
+        Falls back to the full context when the plan names no valid tables."""
+        from .retrieval import Context, Value
+
+        r = state.get("retrieved") or {}
+        tables = [t for t in dict.fromkeys(plan.source_tables) if t in self.retriever.schema.tables]
+        if not r or not tables:
+            return state["context"], list(r.get("tables", []))
+        keep = set(tables)
+        joins = [j for j in self.retriever.schema.joins
+                 if all(side.strip().split(".")[0] in keep for side in j.split("="))]
+        values = [Value(v, [c for c in cols if c.split(".")[0] in keep], sc) for v, cols, sc in r["values"]]
+        examples = [self.retriever.examples[i] for i in r["examples"] if i in self.retriever.examples]
+        examples = [e for e in examples if tables_in(e.sql) & keep] or examples[:1]
+        ctx = Context(state["question"], tables, r["metrics"], examples, [v for v in values if v.columns], joins,
+                      r.get("terms", {}))
+        return ctx.to_prompt(self.retriever.schema, self.metrics), tables
+
     @step("write_sql")
     def write_sql(self, state: State) -> dict:
         plan = agents.AnalysisPlan.model_validate(state["plan"])
-        draft = agents.write_sql(self.llm(state), state["question"], plan, state["context"],
+        first = state.get("attempts", 0) == 0
+        # first attempt: only the plan's tables; retries get the full context so recovery stays possible
+        context, tables = self.narrowed_context(state, plan) if first else (
+            state["context"], list((state.get("retrieved") or {}).get("tables", [])))
+        draft = agents.write_sql(self.llm(state), state["question"], plan, context,
                                  state.get("feedback") or None, state.get("sql"))
         attempt = state.get("attempts", 0) + 1
         return {"sql": draft.sql.strip().rstrip(";"), "explanation": draft.explanation, "attempts": attempt,
                 "feedback": [], "_detail": {"attempt": attempt, "sql": draft.sql.strip(),
-                                            "explanation": draft.explanation}}
+                                            "explanation": draft.explanation, "context_tables": tables}}
 
     def _retry_or_fail(self, state: State, problems: list[str], step_name: str) -> dict:
         if state.get("attempts", 0) < get_settings().max_sql_attempts:

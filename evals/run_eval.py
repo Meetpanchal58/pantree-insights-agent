@@ -88,13 +88,18 @@ def run(items: list[dict]) -> list[dict]:
         started = time.time()
         _, events = agent.start(item["question"], use_defaults=item["expect"] != "clarify",
                                 exclude_examples=item.get("exclude"))
-        final = list(events)[-1]
+        events = list(events)
+        final = events[-1]
+        writes = [e for e in events if e.get("step") == "write_sql" and e.get("status") == "done"]
+        context_tables = (writes[0].get("detail") or {}).get("context_tables") if writes else None
         warnings = final.get("warnings", [])
         row = {"suite": item["suite"], "id": item["id"], "question": item["question"], "expect": item["expect"],
                "difficulty": item.get("difficulty"), "seconds": round(time.time() - started, 1),
                "status": final.get("status") or final["type"], "cost": (final.get("cost") or {}).get("usd", 0.0),
                "attempts": final.get("attempts") or 0, "sql": final.get("sql"), "warnings": warnings,
-               "grounded": final.get("status") == "done" and not any("verify" in w for w in warnings)}
+               "grounded": final.get("status") == "done" and not any("verify" in w for w in warnings),
+               "tuned": bool(item.get("tuned_on")), "context_tables": context_tables,
+               "required_tables": item.get("required_tables")}
         row["passed"], row["reason"] = judge(con, item, final)
         rows.append(row)
         print(f"{'PASS' if row['passed'] else 'FAIL'} {row['suite'][:4]} {row['id']:4s} {row['seconds']:5.1f}s "
@@ -104,6 +109,18 @@ def run(items: list[dict]) -> list[dict]:
 
 def rate(part: list[dict], key: str = "passed") -> str:
     return f"{sum(r[key] for r in part)}/{len(part)} ({sum(r[key] for r in part) / len(part):.0%})" if part else "-"
+
+
+def context_line(answer: list[dict]) -> str:
+    """Precision / recall of the tables the SQL writer saw on its first attempt (holdout annotations)."""
+    scored = [r for r in answer if r.get("context_tables") and r.get("required_tables")]
+    if not scored:
+        return "| SQL-writer context precision / recall (first attempt) | - |"
+    p = statistics.mean(len(set(r["required_tables"]) & set(r["context_tables"])) / len(r["context_tables"])
+                        for r in scored)
+    rc = statistics.mean(len(set(r["required_tables"]) & set(r["context_tables"])) / len(r["required_tables"])
+                         for r in scored)
+    return f"| SQL-writer context precision / recall (first attempt, n={len(scored)}) | {p:.0%} / {rc:.0%} |"
 
 
 def summary(rows: list[dict]) -> str:
@@ -121,10 +138,13 @@ def summary(rows: list[dict]) -> str:
                 f"| SQL execution success (answer questions) | {len(done)}/{len(answer)} "
                 f"({len(done) / len(answer):.0%}) |" if answer else "| SQL execution success | - |",
                 f"| Dimension-aware result accuracy | {rate(answer)} |",
+                f"| Dimension-aware accuracy, clean (excluding questions used for tuning) | "
+                f"{rate([r for r in answer if not r.get('tuned')])} |",
                 f"| Clarification accuracy | {rate([r for r in part if r['expect'] == 'clarify'])} |",
                 f"| Decline accuracy | {rate([r for r in part if r['expect'] == 'decline'])} |",
                 f"| Grounded-number rate (answers passing the number check) | {rate(done, 'grounded')} |",
                 f"| Retry / validator recovery (correct after >1 SQL attempt) | {rate(retried)} |",
+                context_line(answer),
                 f"| Median latency per question | {statistics.median(r['seconds'] for r in part):.0f} s |",
                 f"| Cost per question (mean) | ${statistics.mean(r['cost'] for r in part):.3f} |", ""]
         fails = [r for r in part if not r["passed"]]

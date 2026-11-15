@@ -1,5 +1,6 @@
 """The agent flow end to end on the small shop, with a scripted fake LLM (no network, no cost)."""
 import json
+import re
 
 import pytest
 
@@ -191,3 +192,20 @@ def test_unsupported_numbers_trigger_a_rewrite(con, retriever, tmp_path):
     analyse_done = [e for e in events if e.get("step") == "analyse" and e["status"] == "done"][0]
     assert analyse_done["detail"]["rewritten"] and analyse_done["detail"]["number_check"] == "passed"
     assert events[-1]["warnings"] == []
+
+
+def test_sql_writer_gets_only_plan_tables_then_full_context_on_retry(con, retriever, tmp_path):
+    plan = {**PLAN, "source_tables": ["sales", "product_master"],
+            "join_path": ["sales.product_id = product_master.product_id"]}
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        planner=[plan],
+        sql_writer=[{"sql": "SELECT * FROM sales", "explanation": "x"}, {"sql": GOOD_SQL, "explanation": "ok"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    _, events = run(agent, "Which marketing campaigns drive realized revenue by product category?")
+    assert events[-1]["status"] == "done"
+    first, retry = [u for a, _, u in fakes[0].prompts if a == "sql_writer"]
+    first_tables = set(re.findall(r"TABLE (\w+)", first))
+    assert first_tables == {"sales", "product_master"}
+    assert len(set(re.findall(r"TABLE (\w+)", retry))) > 2           # retry widens to the full retrieved context
+    detail = [e for e in events if e.get("step") == "write_sql" and e["status"] == "done"][0]["detail"]
+    assert detail["context_tables"] == ["sales", "product_master"]

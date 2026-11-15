@@ -71,6 +71,7 @@ def items() -> list[dict]:
         if q["expect"] != "answer":
             continue
         out.append({"suite": "holdout", "id": q["id"], "question": q["question"], "exclude": set(),
+                    "tuned": bool(q.get("tuned_on")),
                     "tables": set(q["required_tables"]), "joins": {norm_join(j) for j in q["required_joins"]},
                     "metrics": set(q["required_metrics"]),
                     "values": {(v["value"], v["column"]) for v in q.get("filter_values", [])}})
@@ -93,7 +94,8 @@ def main() -> None:
         ms = (time.perf_counter() - started) * 1000
         got = {"tables": set(ctx.tables), "joins": {norm_join(j) for j in ctx.joins}, "metrics": set(ctx.metrics),
                "values": {(v.value, c) for v in ctx.values for c in v.columns}}
-        row = {"suite": it["suite"], "id": it["id"], "question": it["question"], "latency_ms": round(ms, 1)}
+        row = {"suite": it["suite"], "id": it["id"], "question": it["question"], "latency_ms": round(ms, 1),
+               "tuned": it.get("tuned", False)}
         missing = []
         for kind in ("tables", "joins", "metrics", "values"):
             req = it[kind]
@@ -131,7 +133,13 @@ def main() -> None:
         hit = sum(r["all_required_hit"] for r in part)
         lat = sorted(r["latency_ms"] for r in part)
         lines += ["", f"All required context retrieved: **{hit}/{len(part)} ({hit / len(part):.0%})** · "
-                  f"latency median {statistics.median(lat):.0f} ms, max {lat[-1]:.0f} ms", ""]
+                  f"latency median {statistics.median(lat):.0f} ms, max {lat[-1]:.0f} ms"]
+        clean = [r for r in part if not r["tuned"]]
+        if len(clean) < len(part):
+            ch = sum(r["all_required_hit"] for r in clean)
+            lines.append(f"Clean (excluding {len(part) - len(clean)} questions used for tuning): "
+                         f"**{ch}/{len(clean)} ({ch / len(clean):.0%})**")
+        lines.append("")
         misses = [r for r in part if not r["all_required_hit"]]
         if misses:
             lines.append("Failures:")
