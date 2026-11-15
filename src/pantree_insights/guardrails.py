@@ -108,9 +108,52 @@ def check_sql(sql: str, schema: Schema | None = None, max_rows: int | None = Non
         errors.append(f"Return summarised results: aggregate (GROUP BY / SUM / COUNT ...) "
                       f"or add LIMIT (at most {max_rows}) for a list of top rows.")
 
+    errors += join_errors(tree, schema, cte_names)
+
     if errors:
         return SQLCheck(False, sql, list(dict.fromkeys(errors)), used)
     return SQLCheck(True, tree.sql(dialect="duckdb", pretty=True), [], used)
+
+
+def _approved_joins(schema: Schema) -> set[frozenset]:
+    pairs = set()
+    for join in schema.joins:
+        left, right = (side.strip().split(".") for side in join.split("="))
+        pairs.add(frozenset({tuple(left), tuple(right)}))
+    return pairs
+
+
+def join_errors(tree: exp.Expression, schema: Schema, cte_names: set[str]) -> list[str]:
+    """Equality joins between two base tables must be approved joins from schema.yaml (prevents fan-out
+    from joining on look-alike keys). Joins involving CTEs/subqueries and range joins are allowed."""
+    approved = _approved_joins(schema)
+    alias: dict[str, str] = {}
+    for table in tree.find_all(exp.Table):
+        name = table.name.lower()
+        if name in schema.tables and name not in cte_names:
+            alias[table.alias_or_name.lower()] = name
+    errors = []
+    for join in tree.find_all(exp.Join):
+        right = join.this
+        right_table = alias.get(right.alias_or_name.lower()) if isinstance(right, exp.Table) else None
+        on = join.args.get("on")
+        if on is not None:
+            for eq in on.find_all(exp.EQ):
+                a, b = eq.left, eq.right
+                if not (isinstance(a, exp.Column) and isinstance(b, exp.Column) and a.table and b.table):
+                    continue
+                ta, tb = alias.get(a.table.lower()), alias.get(b.table.lower())
+                if not ta or not tb or ta == tb:
+                    continue
+                if frozenset({(ta, a.name.lower()), (tb, b.name.lower())}) not in approved:
+                    errors.append(f"Join {ta}.{a.name} = {tb}.{b.name} is not an approved join path "
+                                  "(see 'How these tables join'); it can duplicate or mismatch rows.")
+        for ident in join.args.get("using") or []:
+            column = ident.name.lower()
+            if right_table and not any(frozenset({(other, column), (right_table, column)}) in approved
+                                       for other in set(alias.values()) if other != right_table):
+                errors.append(f"JOIN {right_table} USING ({column}) is not an approved join path.")
+    return errors
 
 
 def _aggregated(query: exp.Expression, ctes: dict[str, exp.Expression], depth: int = 0) -> bool:

@@ -31,11 +31,16 @@ class AnalysisPlan(BaseModel):
     clarifying_questions: list[ClarifyingQuestion] = Field(default_factory=list,
                                                            description="Only for clarify; max 3")
     restated_question: str = Field(description="The question as you will answer it, precise and self-contained")
+    intent: str = Field("", description="What the stakeholder wants to learn, in one short phrase")
+    source_tables: list[str] = Field(default_factory=list, description="Tables the SQL must use (from the context)")
+    join_path: list[str] = Field(default_factory=list, description="Approved joins from the context, "
+                                 "e.g. sales.product_id = product_master.product_id")
     metrics: list[str] = Field(default_factory=list, description="metrics.yaml names, or exact formulas")
     breakdowns: list[str] = Field(default_factory=list, description="Analytical cuts, at most 2")
     filters: list[str] = Field(default_factory=list, description="Exact-value filters, e.g. category = 'Footwear'")
     time_window: str = Field("", description="Explicit dates, e.g. 2026-01-01 to 2026-11-14 (inclusive)")
     comparison: str | None = Field(None, description="Baseline to compare with, if any")
+    result_grain: str = Field("", description="One row per ... (the result's dimensions), e.g. one row per category")
     output_shape: str = Field("", description="Expected result: one row per ..., with columns ...")
     assumptions: list[str] = Field(default_factory=list)
 
@@ -88,7 +93,11 @@ def _join(*sections: str) -> str:
 
 
 def plan_text(plan: AnalysisPlan) -> str:
-    lines = [f"Question: {plan.restated_question}", f"Metrics: {', '.join(plan.metrics) or '-'}",
+    lines = [f"Question: {plan.restated_question}", f"Intent: {plan.intent or '-'}",
+             f"Source tables: {', '.join(plan.source_tables) or '-'}",
+             f"Join path: {'; '.join(plan.join_path) or 'none (single table)'}",
+             f"Result grain: {plan.result_grain or '-'}",
+             f"Metrics: {', '.join(plan.metrics) or '-'}",
              f"Breakdowns: {', '.join(plan.breakdowns) or 'none'}", f"Filters: {'; '.join(plan.filters) or 'none'}",
              f"Time window: {plan.time_window or 'all data'}", f"Comparison: {plan.comparison or 'none'}",
              f"Expected result: {plan.output_shape or '-'}"]

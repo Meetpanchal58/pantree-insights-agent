@@ -9,7 +9,7 @@ support) from my [ecommerce-simulator](https://github.com/Meetpanchal58/ecommerc
 nightly. Sister project: [pantree-recommendation-system](https://github.com/Meetpanchal58/pantree-recommendation-system).
 
 > **Status: complete.** The app runs locally and is ready for Google Cloud Run
-> ([deploy guide](#deploy-on-google-cloud-run)); it is scored on 44 evaluation questions ([results](#evaluation)).
+> ([deploy guide](#deploy-on-google-cloud-run)); evaluation methodology and verified results are in [Evaluation](#evaluation).
 
 ## The app
 
@@ -153,31 +153,57 @@ US$0.50 a day; the OpenAI project has its own monthly limit.
 
 ## Evaluation
 
-`evals/questions.yaml` + the 28 verified examples = 44 questions: 38 with gold SQL (scored by execution
-accuracy: the agent's result must contain the gold result's numbers), 3 vague questions that should get
-clarifying questions, 3 that must be declined.
+Two suites, kept separate:
+
+| Suite | What | Size |
+|---|---|---|
+| **Regression** | `semantic/examples.yaml` (each question's own example is hidden from retrieval during evaluation) + `evals/questions.yaml` | 44 questions (38 answer, 3 clarify, 3 decline) |
+| **Holdout (unseen)** | `evals/holdout.yaml`: never in examples, prompts or the regression set (`tests/test_eval_leakage.py` enforces it). Each answer question is annotated with intent, required tables, metrics, joins, filter values, result grain, independently written gold SQL, key columns and metric columns | 20 questions (14 answer, 3 clarify, 3 decline) |
+
+**Scoring** (`evals/scoring.py`, unit-tested in `tests/test_scoring.py`): the agent's rows are aligned with the
+gold rows on the business dimensions (category, month, region, ...) before comparing metrics; missing, extra
+or duplicate rows, values on the wrong category and wrong denominators fail. Numeric tolerance: 1% relative
+(a ratio reported as a percentage is accepted). Column names and extra columns do not matter.
+
+### Verified results (free, reproducible)
+
+Retrieval, `uv run python evals/retrieval_eval.py` (full shop, report: `evals/reports/retrieval_2026-11-15_0802.md`):
+
+| Suite | Tables recall / precision | Metrics recall / precision | Joins recall / precision | Filter values recall | All required context retrieved | Median latency |
+|---|---|---|---|---|---|---|
+| Holdout (14) | 96% / 28% | 100% / 25% | 83% / 25% | 100% | **13/14 (93%)** | 60 ms |
+| Regression (28, leave-one-out) | 100% / 28% | - | 100% / 23% | - | **28/28 (100%)** | 60 ms |
+
+The one holdout miss (x01, "region of the delivery address") is reported, not patched. Precision is low by
+design: the agent receives up to 6 tables so a needed table is rarely missing; the plan then names the exact
+source tables and join path. The table limit was tuned on the regression suite only.
+
+Gold SQL: `uv run python evals/run_eval.py --dry-run` checks that all 52 gold queries run, pass the guardrails
+and produce the annotated columns without duplicate keys (52/52).
+
+### Pending: paid end-to-end evaluation
+
+Not yet run with the current code. Earlier end-to-end scores (Nov 14) were withdrawn: they let retrieval show
+the agent the evaluated question's own gold SQL and used a lenient comparison. To produce current numbers
+(SQL execution success, dimension-aware accuracy, clarification and decline accuracy, grounded-number rate,
+retry/validator recovery, median latency, cost per question):
 
 ```bash
-uv run python evals/run_eval.py --dry-run     # free: checks the gold SQL
+uv run python evals/run_eval.py --suite holdout --yes        # 20 questions, about US$0.50
 ```
 
 ```bash
-uv run python evals/run_eval.py --yes         # real run, about US$0.70
+uv run python evals/run_eval.py --suite regression --yes     # 44 questions, about US$1.10
 ```
 
-**Latest run** (full shop, `gpt-6.1-terra`, report in `evals/reports/`): US$0.70 for 44 questions, median 21 s each.
+Reports are written to `evals/reports/e2e_<suite>_<date>.md` with failures listed question by question.
 
-| Measure | Result |
-|---|---|
-| Main number correct (extra rows/columns allowed) | **36 / 44 (82%)** |
-| Exact result match | 34 / 44 (77%) |
-| Easy / medium / hard (exact) | 11/11 · 15/21 · 8/12 |
-| Declines personal-data, off-topic and injection requests | 3 / 3 |
-| Asks clarifying questions when vague | 2 / 3 |
+### Limitations
 
-Most misses are reasonable alternative readings (e.g. top 20 instead of top 10, crediting realized instead of
-booked revenue). One real miss (an out-of-stock list declined as a "raw dump") was fixed in the planner prompt
-and passes on re-run.
+- The data is simulated (realistic, validated), not a real shop.
+- The holdout is small (20 questions); treat percentages as indicative, not precise.
+- Questions are answered against one data snapshot; the simulator adds a day every night.
+- One Cloud Run instance; clarifying questions in progress are lost if it restarts.
 
 ## Roadmap
 
