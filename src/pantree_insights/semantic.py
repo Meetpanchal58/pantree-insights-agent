@@ -211,9 +211,16 @@ class ConceptEntry(BaseModel):
     note: str | None = None
 
 
+class ConceptInfo(BaseModel):
+    label: str
+    group: str
+
+
 class Concepts(BaseModel):
     subjects: dict[str, Subject]
     concepts: dict[str, dict[str, ConceptEntry]]
+    concept_info: dict[str, ConceptInfo] = {}
+    id_entities: dict[str, str] = {}             # "order" -> "sales.order_id"
 
     @model_validator(mode="before")
     @classmethod
@@ -229,7 +236,18 @@ class Concepts(BaseModel):
             unknown = set(entries) - set(self.subjects)
             if unknown:
                 raise ValueError(f"concept {name}: unknown subjects {sorted(unknown)}")
+        missing = set(self.concepts) ^ set(self.concept_info)
+        if self.concept_info and missing:
+            raise ValueError(f"concepts and concept_info differ: {sorted(missing)}")
         return self
+
+    def label(self, concept: str) -> str:
+        info = self.concept_info.get(concept)
+        return info.label if info else concept.replace("_", " ")
+
+    def group(self, concept: str) -> str:
+        info = self.concept_info.get(concept)
+        return info.group if info else concept
 
     def column(self, concept: str, subject: str) -> ConceptEntry | None:
         """The column a concept means for a subject, or None if that cut does not exist for it."""

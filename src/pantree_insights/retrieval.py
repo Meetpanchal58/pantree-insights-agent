@@ -190,6 +190,7 @@ class Retriever:
         embed_with_cache([n for nodes in groups.values() for n in nodes], embed, cache_dir / "embeddings.npz")
         self.sizes = {kind: len(nodes) for kind, nodes in groups.items()}
         self.values = {n.metadata["key"] for n in groups["values"]}     # every indexed value
+        self.value_columns = {n.metadata["key"]: n.metadata["columns"] for n in groups["values"]}
         self._fusion = {}
         for kind, nodes in groups.items():
             k = TOP_K[kind] + 1                    # one spare, so a held-out example can be dropped

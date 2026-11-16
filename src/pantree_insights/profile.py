@@ -200,16 +200,20 @@ def cached_profile(con: duckdb.DuckDBPyConnection, key: str) -> Profile:
     return profile
 
 
+def profile_for(con: duckdb.DuckDBPyConnection, info: dict) -> Profile:
+    """Cached profile for the data snapshot described by `info` (db.manifest: size, last_day)."""
+    schema_text = (get_settings().semantic_dir / "schema.yaml").read_bytes()
+    code = Path(__file__).read_bytes()                       # a change in how we measure invalidates the cache
+    key = f"{info['size']}_{info['last_day']}_{hashlib.sha1(schema_text + code).hexdigest()[:8]}"
+    return cached_profile(con, key)
+
+
 @lru_cache
 def get_profile() -> Profile:
     from .db import connect, manifest
 
     settings = get_settings()
-    info = manifest(settings.shop_dir)
-    schema_text = (settings.semantic_dir / "schema.yaml").read_bytes()
-    code = Path(__file__).read_bytes()                       # a change in how we measure invalidates the cache
-    key = f"{info['size']}_{info['last_day']}_{hashlib.sha1(schema_text + code).hexdigest()[:8]}"
-    return cached_profile(connect(settings.shop_dir), key)
+    return profile_for(connect(settings.shop_dir), manifest(settings.shop_dir))
 
 
 def main() -> None:

@@ -238,3 +238,59 @@ concepts:
     reviews: product_reviews.aspect
   sentiment:
     reviews: product_reviews.sentiment
+
+# Labels shown in clarifying questions, and groups: a value that fits concepts in DIFFERENT groups is
+# ambiguous ("Mumbai": a customer city, a seller's city, a warehouse, or a brand) and the user is asked;
+# concepts in the same group mean nearly the same filter ("Watches": sub-category or article type), so the
+# first one listed for the subject is used.
+concept_info:
+  city: {label: customers' / delivery city, group: customer_place}
+  state: {label: customers' / delivery state, group: customer_place}
+  region: {label: customers' / delivery region, group: customer_place}
+  city_tier: {label: city tier, group: customer_place}
+  pincode: {label: delivery pincode, group: customer_place}
+  customer_gender: {label: customer's gender, group: customer}
+  age_bracket: {label: customer's age bracket, group: customer}
+  prime: {label: Prime membership, group: customer}
+  new_or_repeat: {label: new vs repeat customer, group: customer}
+  device: {label: device, group: device}
+  traffic_source: {label: traffic source of the visit, group: traffic}
+  marketing_channel: {label: marketing channel, group: marketing}
+  channel_group: {label: marketing channel group, group: marketing}
+  campaign: {label: campaign, group: marketing}
+  support_channel: {label: support channel (how the customer contacted us), group: support}
+  payment_method: {label: payment method, group: payment}
+  coupon: {label: coupon code, group: payment}
+  category: {label: product category, group: product}
+  sub_category: {label: product sub-category, group: product}
+  article_type: {label: product article type, group: product}
+  brand: {label: brand, group: brand}
+  product_gender: {label: product gender (men's / women's), group: product}
+  product: {label: product, group: product}
+  size: {label: size, group: product}
+  courier: {label: courier, group: fulfilment}
+  seller: {label: seller, group: seller}
+  seller_city: {label: seller's city, group: seller}
+  warehouse: {label: warehouse (city), group: warehouse}
+  sale_event: {label: sale event, group: event}
+  return_reason: {label: return reason, group: returns}
+  issue: {label: support issue, group: support}
+  review_aspect: {label: review aspect, group: reviews}
+  sentiment: {label: review sentiment, group: reviews}
+
+# Words for identifiers: "order 12345" -> sales.order_id = 'OD000012345' (format measured by pantree-profile).
+id_entities:
+  order: sales.order_id
+  customer: customers.customer_id
+  product: product_master.product_id
+  sku: product_skus.sku_id
+  campaign: campaigns.campaign_id
+  ticket: support_contacts.ticket_id
+  contact: support_contacts.contact_id
+  seller: sellers.seller_id
+  review: product_reviews.review_id
+  shipment: sales.shipment_id
+  session: clickstream.session_id
+  transaction: sales.transaction_id
+  agent: agents.agent_id
+  event: sale_events.event_id

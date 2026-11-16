@@ -1,0 +1,241 @@
+"""Question understanding, the code half: turn the LLM's question frame into exact columns, filters and joins.
+
+The understanding agent (agents.understand) says what the question is about (subjects), what it mentions
+("Mumbai", "footwear", "order 12345") and which cuts it wants. This module checks every word against the data
+and the concept map, and decides what can be decided without guessing:
+
+- IDs: "order 12345" / "OD000012345" -> sales.order_id = 'OD000012345' (formats measured by profile.py)
+- values: "Mumbai" exists in sales.ship_city, sellers.city, warehouses.city and product_master.brand_name; for
+  a question about orders those are four different meanings, so unless the LLM (or an earlier answer) chose
+  one, it becomes an open point for the user. Meanings in the same group (sub-category vs article type) are
+  not worth a question: the first listed is used.
+- cuts: a breakdown that does not exist for the subject (ad spend by city) becomes an open point offering
+  the cuts that do exist in the same group (region).
+- the time column follows the subject and the meaning ("delivered in October" -> sales.delivered_at)
+- the join path is built in code from the subject's table (joins.py)
+
+The result is rendered as a "Question understanding" section that the planner and SQL writer must follow.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from .joins import JoinGraph
+from .profile import IdFormat
+from .semantic import Concepts
+
+
+# ----------------------------------------------------------------------------- IDs
+@dataclass
+class IdMatch:
+    text: str                       # as written: "order 12345"
+    column: str                     # sales.order_id
+    value: str                      # OD000012345
+    exists: bool
+
+
+class IdResolver:
+    def __init__(self, formats: dict[str, IdFormat], entities: dict[str, str], con=None):
+        self.con = con
+        self.entities = {word: column for word, column in entities.items() if column in formats}
+        self.formats = {column: formats[column] for column in self.entities.values()}
+
+    def _exists(self, column: str, value: str) -> bool:
+        if self.con is None:
+            return True
+        table, col = column.split(".")
+        return self.con.execute(f'SELECT 1 FROM {table} WHERE "{col}" = ? LIMIT 1', [value]).fetchone() is not None
+
+    def find(self, question: str) -> list[IdMatch]:
+        found: dict[tuple[str, str], IdMatch] = {}
+        # 1. full identifiers typed as stored: OD000012345, CMP00012, P000123-M
+        for column, fmt in self.formats.items():
+            for m in re.finditer(rf"(?<![A-Za-z0-9]){fmt.regex}(?![A-Za-z0-9])", question, re.I):
+                value = m.group(0).upper()
+                found.setdefault((column, value), IdMatch(m.group(0), column, value, self._exists(column, value)))
+        # 2. "order 12345", "customer #4521", "ticket id: 77", "campaign CMP12"
+        words = "|".join(sorted(map(re.escape, self.entities), key=len, reverse=True))
+        pattern = rf"\b({words})s?\s*(?:id|no\.?|number)?\s*[:#]?\s*([A-Za-z]{{0,5}}\d{{1,12}})\b"
+        for m in re.finditer(pattern, question, re.I):
+            column = self.entities[m.group(1).lower()]
+            fmt = self.formats[column]
+            raw = m.group(2).upper()
+            prefix, digits = re.match(r"([A-Z]*)(\d+)", raw).groups()
+            if (prefix and prefix != fmt.prefix) or len(digits) > fmt.digits or fmt.suffix:
+                continue                                  # not this entity's format (or a sku needing a size)
+            value = fmt.prefix + digits.zfill(fmt.digits)
+            found.setdefault((column, value), IdMatch(m.group(0), column, value, self._exists(column, value)))
+        return list(found.values())
+
+
+# ----------------------------------------------------------------------------- resolution
+@dataclass
+class Filter:
+    text: str                       # as the user wrote it
+    concept: str
+    column: str
+    value: str
+
+
+@dataclass
+class SubjectView:
+    name: str
+    table: str
+    where: str | None
+    time_column: str
+    time_label: str
+    filters: list[Filter] = field(default_factory=list)
+    breakdowns: list[tuple[str, str]] = field(default_factory=list)      # (concept, column)
+    id_filters: list[IdMatch] = field(default_factory=list)
+    joins: str = ""
+
+
+@dataclass
+class OpenPoint:
+    """A question for the user. `meaning` maps each option to what code should do with it (internal)."""
+    key: str                        # "mention:Mumbai", "breakdown:city", "subject"
+    question: str
+    options: list[str]
+    default: str
+    why: str
+    meaning: dict[str, str] = field(default_factory=dict)
+
+    def public(self) -> dict:
+        return {"question": self.question, "options": self.options, "default": self.default, "why": self.why}
+
+
+@dataclass
+class Resolution:
+    subjects: list[SubjectView]
+    open_points: list[OpenPoint]
+    notes: list[str]
+
+    def tables(self) -> list[str]:
+        out: list[str] = []
+        for s in self.subjects:
+            out += [s.table] + [c.split(".")[0] for _, c in s.breakdowns] + [f.column.split(".")[0] for f in s.filters]
+            out += [i.column.split(".")[0] for i in s.id_filters]
+        return list(dict.fromkeys(out))
+
+    def to_prompt(self) -> str:
+        if not self.subjects:
+            return ""
+        lines = ["Resolved in code from the data and the concept map. Follow it exactly."]
+        for s in self.subjects:
+            where = f"; always filter {s.where}" if s.where else ""
+            lines.append(f"\nSubject: {s.name} (table {s.table}{where})")
+            lines.append(f"Time column: {s.time_column} ({s.time_label})")
+            for f in s.filters:
+                lines.append(f"Filter: {f.column} = '{f.value}'  (\"{f.text}\" = {f.concept.replace('_', ' ')})")
+            for i in s.id_filters:
+                lines.append(f"Filter: {i.column.split('.')[1]} = '{i.value}'  (\"{i.text}\")")
+            for concept, column in s.breakdowns:
+                lines.append(f"Breakdown: {concept.replace('_', ' ')} -> {column}")
+            lines.append("Join path (built from the approved joins; use these joins):\n" + s.joins)
+        if self.notes:
+            lines.append("\nNotes:\n" + "\n".join(f"- {n}" for n in self.notes))
+        return "\n".join(lines)
+
+
+def _find_value(text: str, value_columns: dict[str, list[str]], aliases: dict[str, str]) -> str | None:
+    """The stored value a mention refers to: exact (any case), or through a glossary alias."""
+    lowered = {v.lower(): v for v in value_columns}
+    t = text.strip().strip("'\"").lower()
+    return lowered.get(t) or (aliases.get(t) if aliases.get(t) in value_columns else None)
+
+
+def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str, list[str]],
+            ids: list[IdMatch], choices: dict[str, str] | None = None,
+            aliases: dict[str, str] | None = None) -> Resolution:
+    """`frame`: agents.QuestionFrame. `choices`: earlier answers, key -> chosen meaning (concept or subject).
+    `aliases`: lowercased alias -> stored value (glossary value_aliases)."""
+    choices, aliases = choices or {}, aliases or {}
+    open_points: list[OpenPoint] = []
+    notes: list[str] = []
+
+    names = [s for s in frame.subjects if s in concepts.subjects]
+    if "subject" in choices and choices["subject"] in concepts.subjects:
+        names = [choices["subject"]]
+    if not names:
+        options = list(concepts.subjects)[:4]
+        open_points.append(OpenPoint("subject", "What should I measure for this question?",
+                                     [concepts.subjects[o].about.split(",")[0] for o in options],
+                                     concepts.subjects[options[0]].about.split(",")[0],
+                                     "the answer decides which data is used",
+                                     {concepts.subjects[o].about.split(",")[0]: o for o in options}))
+        return Resolution([], open_points, notes)
+
+    views = []
+    for name in names:
+        subj = concepts.subjects[name]
+        time_column = subj.time_meanings.get(frame.time_meaning or "", subj.time)
+        label = next((k for k, v in subj.time_meanings.items() if v == time_column), "date") if time_column \
+            else "date"
+        view = SubjectView(name, subj.table, subj.where, time_column, f"{name} by the date they were {label}"
+                           if subj.time_meanings else f"{name} by {time_column.split('.')[1]}")
+
+        for mention in frame.mentions:
+            if mention.concept in ("id", "metric", "period"):    # "other" = the LLM was unsure: resolve it here
+                continue
+            value = _find_value(mention.text, value_columns, aliases)
+            if value is None:
+                if mention.concept in concepts.concepts:
+                    notes.append(f"'{mention.text}' was not found as a value of {concepts.label(mention.concept)}; "
+                                 "check the spelling against the values in the context")
+                continue
+            columns = set(value_columns[value])
+            candidates = [c for c, entries in concepts.concepts.items()
+                          if name in entries and entries[name].column in columns]
+            key = f"mention:{value}"
+            pick = choices.get(key) if choices.get(key) in candidates else None
+            pick = pick or (mention.concept if mention.concept in candidates else None)
+            if pick is None and len({concepts.group(c) for c in candidates}) == 1:
+                pick = candidates[0]
+            if pick is None and candidates:
+                options = {concepts.label(c): c for c in candidates}
+                open_points.append(OpenPoint(key, f"What does '{mention.text}' refer to in this question?",
+                                             list(options), next(iter(options)),
+                                             f"'{value}' exists as more than one thing in the data", options))
+                continue
+            if pick is None:
+                notes.append(f"'{value}' exists in the data ({', '.join(sorted(columns))}) but not as a cut of {name}")
+                continue
+            view.filters.append(Filter(mention.text, pick, concepts.column(pick, name).column, value))
+            if concepts.column(pick, name).note:
+                notes.append(f"{concepts.label(pick)} for {name}: {concepts.column(pick, name).note}")
+
+        for concept in frame.breakdowns:
+            entry = concepts.column(concept, name)
+            if entry:
+                view.breakdowns.append((concept, entry.column))
+                if entry.note:
+                    notes.append(f"{concepts.label(concept)} for {name}: {entry.note}")
+                continue
+            key = f"breakdown:{concept}"
+            same_group = [c for c, e in concepts.concepts.items()
+                          if name in e and concepts.group(c) == concepts.group(concept) and c != concept]
+            if choices.get(key) in same_group:
+                view.breakdowns.append((choices[key], concepts.column(choices[key], name).column))
+            elif choices.get(key) == "skip":
+                continue
+            elif concept in concepts.concepts:
+                options = {concepts.label(c): c for c in same_group} | {"Leave this breakdown out": "skip"}
+                open_points.append(OpenPoint(
+                    key, f"{subj.about.split(',')[0].capitalize()} cannot be split by {concepts.label(concept)}. "
+                    "What should I use instead?", list(options), next(iter(options)),
+                    f"the data has no {concepts.label(concept)} for {name}", options))
+
+        for match in ids:
+            id_col = match.column.split(".")[1]
+            own = f"{subj.table}.{id_col}"
+            column = own if id_col in graph.schema.tables[subj.table].columns else match.column
+            view.id_filters.append(IdMatch(match.text, column, match.value, match.exists))
+            if not match.exists:
+                notes.append(f"{match.text} ({match.value}) does not exist in the data; the result will be empty")
+
+        tables = [c.split(".")[0] for _, c in view.breakdowns] + [f.column.split(".")[0] for f in view.filters] + \
+            [i.column.split(".")[0] for i in view.id_filters]
+        view.joins = graph.render(subj.table, [t for t in dict.fromkeys(tables) if t != subj.table])
+        views.append(view)
+    return Resolution(views, open_points, notes)
