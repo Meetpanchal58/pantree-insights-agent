@@ -82,3 +82,44 @@ def test_keys_that_differ_only_in_case_are_different_groups():
     assert compare(result, canonical, ["brand"], "units") == []
     swapped = pd.DataFrame({"brand": ["ADIDAS", "Adidas"], "value": [20, 10]})
     assert len(compare(result, canonical.assign(value=swapped["value"]), ["brand"], "units")) == 2
+
+
+# ----------------------------------------------------------------------------- runtime: the agent's answer
+def test_answer_alignment_by_values_whatever_the_column_names():
+    import pandas as pd
+
+    from pantree_insights.recompute import check_answer
+
+    canonical = pd.DataFrame({"category": ["Apparel", "Footwear"], "value": [100.0, 50.0]})
+    agent = pd.DataFrame({"cat": ["Footwear", "Apparel"], "lines": [7, 9], "net": [50.2, 99.8]})
+    assert check_answer(agent, canonical, ["category"]) == ("verified", [])
+    wrong = agent.assign(net=[60.0, 99.8])
+    status, problems = check_answer(wrong, canonical, ["category"])
+    assert status == "mismatch" and "Footwear" in problems[0] and "50" in problems[0]
+    top1 = agent.iloc[[1]]                                              # top-N: a subset of the rows
+    assert check_answer(top1, canonical, ["category"])[0] == "verified"
+    in_percent = agent.assign(net=[5020.0, 9980.0])                     # not a ratio: x100 is a mismatch
+    assert check_answer(in_percent, canonical, ["category"])[0] == "mismatch"
+
+
+def test_answer_that_cannot_be_aligned_is_unverified_not_wrong():
+    import pandas as pd
+
+    from pantree_insights.recompute import check_answer
+
+    canonical = pd.DataFrame({"category": ["Apparel", "Footwear"], "value": [100.0, 50.0]})
+    by_month = pd.DataFrame({"month": ["2026-01", "2026-02"], "net": [70.0, 80.0]})   # a different breakdown
+    assert check_answer(by_month, canonical, ["category"])[0] == "unverified"
+    single = pd.DataFrame({"total": [150.0]})
+    assert check_answer(single, pd.DataFrame({"value": [150.0]}), []) == ("verified", [])
+    assert check_answer(single, pd.DataFrame({"value": [120.0]}), [])[0] == "mismatch"
+
+
+def test_ratio_in_percent_is_accepted():
+    import pandas as pd
+
+    from pantree_insights.recompute import check_answer
+
+    canonical = pd.DataFrame({"category": ["Apparel"], "value": [0.253]})
+    agent = pd.DataFrame({"category": ["Apparel"], "return_pct": [25.3]})
+    assert check_answer(agent, canonical, ["category"], ratio=True)[0] == "verified"

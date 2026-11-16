@@ -170,6 +170,7 @@ function answerCard(run, replay = false) {
     <ul>${(a.findings || []).slice(0, 3).map((f) => `<li>${esc(f)}</li>`).join("")}</ul>
     <div class="row"><button class="btn small" data-action="show-run">View analysis, chart & SQL</button>
     ${replay ? `<span class="tag replay">Replay · recorded run · data as of ${esc(run.data_as_of)}</span>` : `<span class="tag">Data as of ${esc(run.data_as_of)}</span>`}
+    ${run.verification && run.verification.status === "verified" ? `<span class="tag ok" title="Each metric was recomputed from its definition for the confirmed scope and matched">✓ Numbers verified against the data</span>` : run.verification && run.verification.status === "mismatch" ? `<span class="tag warn" title="The recomputed metric disagrees with this result; see the warnings">⚠ Numbers do not match the definition</span>` : run.verification ? `<span class="tag" title="This answer's metric could not be recomputed independently">Not independently verified</span>` : ""}
     ${run.cost && run.cost.usd ? `<span class="tag">$${run.cost.usd.toFixed(3)}</span>` : ""}</div></div>`;
   el.querySelector('[data-action="show-run"]').addEventListener("click", () => { showRunInPanel(run); openPanel(); });
   return el;

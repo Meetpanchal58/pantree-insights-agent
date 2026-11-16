@@ -145,3 +145,52 @@ def compare(result, canonical, keys: list[str], column: str, partial: bool = Fal
         if missing:
             problems.append(f"{len(missing)} recomputed rows missing, e.g. {sorted(missing)[:3]}")
     return problems
+
+
+# ----------------------------------------------------------------------------- runtime: the agent's answer
+def check_answer(agent, canonical, keys: list[str], ratio: bool = False,
+                 tolerance: float = 0.01) -> tuple[str, list[str]]:
+    """Compare the agent's result with the recomputed metric, matching columns by their values (the agent's
+    column names are unknown). Returns ("verified" | "mismatch" | "unverified", problems).
+    - every canonical key column must match an agent column whose values are among the canonical keys; the
+      agent may return only some rows (top-N); if keys cannot be matched the answer is "unverified"
+    - verified if some numeric agent column equals the metric on every aligned row (x100 accepted for ratios)"""
+    import pandas as pd
+
+    if agent is None or agent.empty or canonical.empty:
+        return "unverified", []
+    canon = canonical.copy()
+    canon_keys = {k: [_key(v) for v in canon[k]] for k in keys}
+    mapping: dict[str, str] = {}
+    for k in keys:
+        wanted = set(canon_keys[k]) - {"∅"}
+        found = next((c for c in agent.columns if c not in mapping.values()
+                      and set(_key(v) for v in agent[c]) <= wanted and agent[c].notna().any()), None)
+        if found is None:
+            return "unverified", []
+        mapping[k] = found
+    lookup = {tuple(canon_keys[k][i] for k in keys): canon["value"].iloc[i] for i in range(len(canon))}
+    rows = [(tuple(_key(r[mapping[k]]) for k in keys), r) for _, r in agent.iterrows()] if keys else \
+        [((), agent.iloc[0])]
+    if not keys and len(agent) != 1:
+        return "unverified", []
+    if any(key not in lookup for key, _ in rows):
+        return "unverified", []
+    numeric = [c for c in agent.columns if c not in mapping.values() and pd.api.types.is_numeric_dtype(agent[c])
+               and agent[c].dtype != bool]
+    scales = [1.0, 100.0] if ratio else [1.0]
+
+    def close(got, want, scale):
+        if pd.isna(got) and pd.isna(want):
+            return True
+        if pd.isna(got) or pd.isna(want):
+            return False
+        return abs(float(got) - float(want) * scale) <= max(tolerance * abs(float(want) * scale), 1e-6)
+
+    for col in numeric:
+        if any(all(close(r[col], lookup[key], s) for key, r in rows) for s in scales):
+            return "verified", []
+    sample = [f"{', '.join(key) or 'total'}: recomputed {lookup[key]:,.4g}" for key, _ in rows[:3]
+              if not pd.isna(lookup[key])]
+    return "mismatch", [f"No column of the result matches the metric recomputed from its definition for the same "
+                        f"scope ({'; '.join(sample)}). Check the formula, filters and period against the definition."]

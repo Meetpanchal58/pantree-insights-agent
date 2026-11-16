@@ -12,6 +12,7 @@ show the agents working. A run pauses at clarifying questions and resumes with A
 from __future__ import annotations
 
 import contextlib
+import re
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -36,6 +37,7 @@ from .joins import JoinGraph
 from .llm import LLM, BudgetExceeded, ChatLLM
 from .memory import Memory
 from .profile import profile_for
+from .recompute import canonical_sql, check_answer
 from .references import ReferenceIndex
 from .retrieval import Retriever, get_retriever
 from .semantic import load_concepts, load_metrics, tables_in
@@ -93,6 +95,8 @@ class State(TypedDict, total=False):
     choices: dict[str, str]      # answers code can act on: "mention:Mumbai" -> "city"
     clarify_rounds: int
     confirmed: bool              # the user confirmed the read-back of the understood question
+    verify_scope: dict           # confirmed scope for recomputing the answer's metrics (recompute.py)
+    verification: dict           # {"status": verified | mismatch | unverified, "metrics": {name: status}}
     readback: str
     context: str
     retrieved: dict              # the retrieved context's parts, for narrowing it after planning
@@ -261,7 +265,16 @@ class Agent:
         shown = set((state.get("retrieved") or {}).get("examples") or [])
         refs = self.references.pick(set(res.tables()), columns, wanted,
                                     exclude=set(state.get("exclude_examples") or []) | shown)
+        scope = None
+        if len(res.subjects) == 1:                         # one subject: its metrics can be recomputed for the scope
+            v = res.subjects[0]
+            dates = re.findall(r"\d{4}-\d{2}-\d{2}", frame.period or "")
+            scope = {"table": v.table, "metrics": [m for m in frame.measures if m in self.metrics.metrics],
+                     "by": {c.split(".")[1]: c for _, c in v.breakdowns},
+                     "filters": [[f.column, f.value] for f in v.filters] + [[i.column, i.value] for i in v.id_filters],
+                     "period": dates[:2] if len(dates) >= 2 else None, "time": v.time_column}
         out = {"frame": frame.model_dump(), "understanding": text, "understood_tables": res.tables(),
+               "verify_scope": scope,
                "resolved_filters": filters, "references": self.references.render(refs),
                "answers": answers, "choices": choices, "open_points": [], "warnings": warnings, "route": "plan"}
         detail = {"understood": frame.restated_question, "rounds": rounds, "subjects": [v.name for v in res.subjects],
@@ -400,10 +413,45 @@ class Agent:
             state_warnings = state.get("warnings", []) + [f"Result check: {p}" for p in problems]
         else:
             state_warnings = state.get("warnings", [])
+        verification = self.verify_numbers(state, result.frame)
+        if verification["status"] == "mismatch":
+            if state.get("attempts", 0) < get_settings().max_sql_attempts:
+                return self._retry_or_fail(state, verification["problems"], "number check")
+            state_warnings = state_warnings + [f"Numbers not confirmed: {p}" for p in verification["problems"]]
         return {"result": _result(result.frame, result.truncated), "warnings": state_warnings,
+                "verification": {k: v for k, v in verification.items() if k != "problems"},
                 "route": "validate" if self.features.validator else "analyse",
                 "_detail": {"rows": len(result.frame), "columns": list(result.frame.columns),
                             "query_seconds": round(result.seconds, 2), "truncated": result.truncated}}
+
+    def verify_numbers(self, state: State, frame: pd.DataFrame) -> dict:
+        """Recompute each confirmed metric from metrics.yaml for the confirmed scope and compare (recompute.py)."""
+        scope = state.get("verify_scope")
+        if not self.features.understand or not scope or not scope.get("metrics"):
+            return {"status": "unverified", "metrics": {}, "problems": []}
+        statuses, problems = {}, []
+        for metric in scope["metrics"]:
+            m = self.metrics.metrics[metric]
+            if self.metrics.sources[m.source].from_.split()[0] != scope["table"]:
+                statuses[metric] = "unverified"                # another subject's metric: not this scope
+                continue
+            period = tuple(scope["period"]) if scope.get("period") else None
+            sql = canonical_sql(metric, self.joins, by=scope["by"], filters=[tuple(f) for f in scope["filters"]],
+                                period=period, time_column=scope["time"])
+            if sql is None:
+                statuses[metric] = "unverified"
+                continue
+            try:
+                canonical = run_query(self.con, sql, max_rows=100_000).frame
+            except Exception:                                    # never fail an answer because a check failed
+                statuses[metric] = "unverified"
+                continue
+            status, found = check_answer(frame, canonical, list(scope["by"]), ratio=m.unit == "ratio")
+            statuses[metric] = status
+            problems += [f"{m.label}: {p}" for p in found]
+        values = set(statuses.values())
+        overall = "mismatch" if "mismatch" in values else "verified" if values == {"verified"} else "unverified"
+        return {"status": overall, "metrics": statuses, "problems": problems}
 
     @step("validate")
     def validate(self, state: State) -> dict:
@@ -530,7 +578,7 @@ class Agent:
                 "question": state.get("question"), "plan": state.get("plan"), "sql": state.get("sql"),
                 "result": state.get("result"), "analysis": state.get("analysis"), "chart": state.get("chart"),
                 "warnings": state.get("warnings", []), "insight_id": state.get("insight_id"),
-                "grounded": state.get("grounded"),
+                "grounded": state.get("grounded"), "verification": state.get("verification"),
                 "attempts": state.get("attempts"), "data_as_of": self.data["last_day"],
                 "data_size": self.data["size"], "cost": llm.tracker.summary() if llm else None,
                 "calls": [c.__dict__ for c in llm.tracker.calls] if llm else []}

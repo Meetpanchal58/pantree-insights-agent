@@ -139,7 +139,9 @@ flowchart LR
     DB -.->|error / empty| W
     V -.->|wrong query| W
     DB --> RC[Result checks<br/>filters used, no repeated<br/>rows, rates 0-100%]
+    RC --> NV[Number check<br/>metric recomputed from<br/>its definition]
     RC -.->|problem| W
+    NV -.->|mismatch| W
     V --> A[Analyst<br/>findings, actions,<br/>caveats]
     A --> N[Claim check] --> CH[Chart] --> OUT[Answer + chart + SQL<br/>+ exports]
     S[(semantic/<br/>metrics, schema,<br/>examples)] -.-> R
@@ -174,6 +176,7 @@ flowchart LR
 | `src/pantree_insights/joins.py` | Join paths built in code from the question's table to the tables it needs (bridge tables added), avoiding joins that repeat rows and flagging them when unavoidable. |
 | `src/pantree_insights/understanding.py` | Turns the understanding agent's reading into exact filters, columns, time column and join path; asks the user when a word fits meanings in different groups ("Mumbai": a customer city, a seller's city, a warehouse or a brand) or a cut does not exist for the subject. |
 | `src/pantree_insights/references.py`, `sqlinfo.py` | After the question is understood, picks the reference queries that use the **same tables, columns and metrics** (parsed with sqlglot), so a question worded unlike any reference still gets the right SQL pattern. |
+| `src/pantree_insights/recompute.py` | **Numbers checked against the data.** Builds each metric's SQL from its `metrics.yaml` definition with code-built LEFT JOINs, independent of the LLM. Build time: 52 library queries (78 result columns) must match it row by row within 1% on the small and the full shop; the rest are marked pattern-only. Runtime: after the agent's query runs, each confirmed metric is recomputed for the confirmed scope; a mismatch goes back to the SQL writer with the recomputed numbers, a match marks the answer "Numbers verified against the data", and what cannot be recomputed is shown as "not independently verified". No false alarm on the 78 verified library columns. |
 | `src/pantree_insights/checks.py` | Result checks in code, before the LLM validator: every filter the understanding resolved must be in the SQL on the right table ("sellers.city", not "customers.city"); no repeated rows; no empty columns; rates within 0-100%. Zero false alarms on the 156 reference queries; on the agent's SQL from earlier paid runs it flags 5 of 38 wrong answers and 1 of 207 correct ones. |
 | `src/pantree_insights/retrieval.py` | Hybrid search (LlamaIndex: BM25 keywords + local `bge-small` embeddings, fused by reciprocal rank) over four indexes: tables, metrics, examples and ~2,000 real filter values. Returns the tables, join paths, metric definitions, exact values and similar examples a question needs, in ~60 ms. With each example held out, it finds every table the example's SQL needs for 28 of 28. |
 | `prompts/agents.yaml` | The agents' instructions, editable without touching code. |

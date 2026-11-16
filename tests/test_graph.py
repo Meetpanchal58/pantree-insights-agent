@@ -417,7 +417,7 @@ def test_order_number_is_resolved_to_its_id(con, retriever, tmp_path):
 
 # ----------------------------------------------------------------------------- step 4: references and result checks
 MUMBAI_SELLERS = {**CLEAR_FRAME, "restated_question": "Orders from Mumbai sellers", "breakdowns": [],
-                  "mentions": [{"text": "Mumbai", "concept": "seller_city"}]}
+                  "measures": ["orders"], "mentions": [{"text": "Mumbai", "concept": "seller_city"}]}
 WITH_FILTER = ("SELECT se.city, COUNT(DISTINCT s.order_id) AS orders FROM sales s JOIN sellers se "
                "ON se.seller_id = s.seller_id WHERE s.line_type = 'Sale' AND se.city = 'Mumbai' GROUP BY 1")
 
@@ -502,3 +502,39 @@ def test_no_without_details_makes_the_model_ask_what_to_change(con, retriever, t
     events = resume(agent, run_id, {CONFIRM_QUESTION: CONFIRM_NO}, confirm=False)
     assert events[-1]["kind"] == "clarify"
     assert events[-1]["questions"][0]["question"] == "What would you like me to change?"
+
+
+# ----------------------------------------------------------------------------- numbers verified at runtime
+NET_BY_CATEGORY = {**CLEAR_FRAME, "restated_question": "Net sales by category", "measures": ["net_sales"]}
+NET_RIGHT = ("SELECT p.category, SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) AS net_sales "
+             "FROM sales s JOIN product_master p ON p.product_id = s.product_id WHERE s.line_type = 'Sale' GROUP BY 1")
+NET_WRONG = NET_RIGHT.replace("SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END)", "SUM(s.net_amount)")
+
+
+def test_happy_path_numbers_are_verified_against_the_data(con, retriever, tmp_path):
+    agent, _, _ = make_agent(con, retriever, tmp_path, Script(
+        planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}], validator=[{"ok": True}],
+        analyst=[analysis_from]))
+    final = run(agent, "What is revenue by category?")[1][-1]
+    assert final["verification"] == {"status": "verified", "metrics": {"realized_revenue": "verified"}}
+
+
+def test_numbers_that_disagree_with_the_definition_are_sent_back(con, retriever, tmp_path):
+    """Forgetting to exclude cancelled lines: the recomputation disagrees, the writer gets the numbers."""
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[NET_BY_CATEGORY], planner=[PLAN],
+        sql_writer=[{"sql": NET_WRONG, "explanation": "x"}, {"sql": NET_RIGHT, "explanation": "fixed"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    final = run(agent, "Net sales by category?")[1][-1]
+    assert final["attempts"] == 2 and final["verification"]["status"] == "verified"
+    retry = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][1]
+    assert "recomputed from its definition" in retry and "Apparel" in retry
+
+
+def test_a_measure_that_is_not_a_metric_is_unverified_not_wrong(con, retriever, tmp_path):
+    frame = {**CLEAR_FRAME, "measures": ["revenue per active seller"]}
+    agent, _, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[frame], planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    final = run(agent, "Revenue per active seller by category?")[1][-1]
+    assert final["status"] == "done" and final["verification"]["status"] == "unverified"
