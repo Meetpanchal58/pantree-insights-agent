@@ -71,9 +71,11 @@
       <div class="empty-panel">
         <p>Each question goes through a team of agents:</p>
         <ol class="agents-legend">
-          <li><b>Planner</b> turns it into an analysis plan, or asks you to clarify</li>
-          <li><b>SQL writer</b> writes the query using the shop's metric definitions</li>
-          <li><b>Safety checks</b> allow only read-only, summarised queries</li>
+          <li><b>Understanding</b> works out exactly what you mean, asks until nothing is unclear, then shows you what it will compute to confirm</li>
+          <li><b>Planner</b> turns it into an analysis plan</li>
+          <li><b>SQL writer</b> writes the query with the shop's metric definitions and verified reference queries</li>
+          <li><b>Safety checks</b> allow only read-only, summarised queries on the right joins</li>
+          <li><b>Number check</b> recomputes the metric from its definition and compares</li>
           <li><b>Validator</b> checks the query answers what you asked</li>
           <li><b>Analyst</b> explains the result; every number is checked</li>
         </ol>

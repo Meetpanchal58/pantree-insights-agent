@@ -55,3 +55,17 @@ again when secrets, the data or service settings change.
 The first request after an idle period starts a new instance (about 20-40 seconds: indexes and the KPI pulse
 are rebuilt). Live questions are limited to 10 per user per day and the app stops calling the model after
 US$0.50 a day; the OpenAI project has its own monthly limit.
+
+## Keep the instance warm (optional, about free)
+
+The service scales to zero, so the first visit after a quiet period waits 20-40 seconds. To avoid that during
+usage hours, a Cloud Scheduler job can call `/healthz` every 10 minutes from 08:00 to 23:00 India time:
+
+```bash
+bash scripts/keep_warm.sh
+```
+
+With request-based billing an idle instance that is not a minimum instance is not charged, and Cloud
+Scheduler includes 3 free jobs per billing account, so this costs about nothing. It is not a guarantee
+(Cloud Run can still restart an instance; outside those hours the first visit is cold). The guaranteed option
+is `--min-instances 1`, about 19 USD a month for 1 vCPU and 2 GiB at the idle rate.

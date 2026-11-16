@@ -597,6 +597,7 @@ document.addEventListener("click", async (ev) => {
   }
 });
 $("#dialog").addEventListener("click", (ev) => { if (ev.target.id === "dialog") closeDialog(); });
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !$("#dialog").hidden) closeDialog(); });
 $("#composer").addEventListener("submit", (ev) => { ev.preventDefault(); const q = $("#question").value; $("#question").value = ""; autosize(); ask(q); });
 const autosize = () => { const ta = $("#question"); ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; };
 $("#question").addEventListener("input", autosize);

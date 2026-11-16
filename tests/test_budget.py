@@ -9,3 +9,18 @@ def test_spend_survives_a_new_store_instance(tmp_path):
     store.Store(url).add_usd_today(BUDGET_KEY, 0.03)
     assert abs(store.Store(url).usd_today(BUDGET_KEY) - 0.15) < 1e-9     # a fresh instance sees it
     assert store.Store(url).usd_today("someone-else") == 0.0
+
+
+def test_llm_calls_have_a_timeout_and_one_retry(monkeypatch):
+    """A slow provider response (86 s for one planning call in production) is cut off and retried once."""
+    import langchain.chat_models as chat_models
+
+    from pantree_insights.config import get_settings
+    from pantree_insights.llm import ChatLLM
+
+    seen = {}
+    monkeypatch.setattr(chat_models, "init_chat_model", lambda name, **kw: seen.update(kw) or object())
+    ChatLLM()._model("openai:some-model", "low")
+    settings = get_settings()
+    assert seen["timeout"] == settings.llm_timeout_s and seen["max_retries"] == settings.llm_max_retries
+    assert 30 <= settings.llm_timeout_s <= 120 and settings.llm_max_retries == 1
