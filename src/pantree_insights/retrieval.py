@@ -40,6 +40,7 @@ from .semantic import (
     Schema,
     load_examples,
     load_glossary,
+    load_library,
     load_metrics,
     load_schema,
     tables_in,
@@ -79,7 +80,9 @@ def metric_nodes(metrics: Metrics) -> list[TextNode]:
 
 
 def example_nodes(examples: list[Example]) -> list[TextNode]:
-    return [TextNode(id_=f"example:{e.id}", text=e.question + (f" ({', '.join(e.tags)})" if e.tags else ""),
+    """One node per example; other phrasings of the question are part of the searchable text."""
+    return [TextNode(id_=f"example:{e.id}",
+                     text=" | ".join([e.question, *e.variants]) + (f" ({', '.join(e.tags)})" if e.tags else ""),
                      metadata={"kind": "examples", "key": e.id}) for e in examples]
 
 
@@ -179,7 +182,8 @@ class Retriever:
                  cache_dir: Path | None = None):
         self.schema = schema or load_schema()
         self.metrics = metrics or load_metrics()
-        self.examples = {e.id: e for e in (examples if examples is not None else load_examples().examples)}
+        self.examples = {e.id: e for e in (examples if examples is not None
+                                           else load_examples().examples + load_library())}
         self.glossary = load_glossary()
         con = con or connect()
         cache_dir = cache_dir or ROOT / ".cache"

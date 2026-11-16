@@ -1,7 +1,7 @@
 """Retrieval quality on the small shop (downloads a 65 MB embedding model on first run)."""
 import pytest
 
-from pantree_insights.semantic import load_examples, load_schema, tables_in
+from pantree_insights.semantic import load_examples, load_library, load_schema, tables_in
 
 pytestmark = pytest.mark.data
 
@@ -15,7 +15,7 @@ def retriever(con):
 
 def test_indexes_built(retriever):
     assert retriever.sizes["tables"] == 22
-    assert retriever.sizes["examples"] == len(load_examples().examples)
+    assert retriever.sizes["examples"] == len(load_examples().examples) + len(load_library())   # + query library
     assert retriever.sizes["values"] > 1000
 
 

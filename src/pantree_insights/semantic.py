@@ -163,6 +163,9 @@ class Example(BaseModel):
     difficulty: Literal["easy", "medium", "hard"]
     tags: list[str] = []
     notes: str | None = None
+    area: str | None = None          # query library only: sales, funnel, customers, marketing, ...
+    variants: list[str] = []         # other ways people ask the same thing (searched by retrieval)
+    metrics: list[str] = []          # metrics.yaml names the query computes (checked by tests)
 
 
 class Examples(BaseModel):
@@ -266,6 +269,19 @@ def _read(path: Path) -> dict:
 @lru_cache
 def load_concepts(folder: Path | None = None) -> Concepts:
     return Concepts.model_validate(_read((folder or get_settings().semantic_dir) / "concepts.yaml"))
+
+
+def load_library(folder: Path | None = None) -> list[Example]:
+    """The query library: semantic/library/<area>.yaml, each {area, queries: [...]}. Reference queries for
+    retrieval only; evaluation scores the verified examples in examples.yaml (load_examples)."""
+    out: list[Example] = []
+    for path in sorted(((folder or get_settings().semantic_dir) / "library").glob("*.yaml")):
+        raw = _read(path)
+        out += [Example(**{"area": raw["area"], **q}) for q in raw["queries"]]
+    ids = [e.id for e in out]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate query ids in semantic/library")
+    return out
 
 
 @lru_cache
