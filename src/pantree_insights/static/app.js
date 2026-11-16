@@ -19,13 +19,14 @@ const EXAMPLES = [
 ];
 
 const S = { me: null, projects: [], chats: [], chatId: null, expanded: new Set(), demoMode: false,
-            run: null, busy: false, pendingProject: null };
+            run: null, busy: false, pendingProject: null, view: 0, stream: null, chatRequest: null, demos: null,
+            chatCache: new Map(), sidebarRequest: 0 };
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 /* ---------------------------------------------------------------- helpers */
 async function api(path, opts = {}) {
-  const init = { method: opts.method || "GET", headers: {}, credentials: "same-origin" };
+  const init = { method: opts.method || "GET", headers: {}, credentials: "same-origin", signal: opts.signal };
   if (opts.body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
   const res = await fetch(path, init);
   const data = await res.json().catch(() => ({}));
@@ -52,6 +53,29 @@ function cssVar(name) { return getComputedStyle(document.documentElement).getPro
 function scrollDown() { const m = $("#messages"); m.scrollTop = m.scrollHeight; }
 function openPanel() { $("#app").classList.remove("panel-closed"); }
 
+// Navigation owns its requests and streams; late responses must not change a newer view.
+function leaveView() {
+  S.view += 1;
+  S.chatRequest?.abort(); S.chatRequest = null;
+  S.stream?.close(); S.stream = null;
+  S.busy = false; $(".send").disabled = false;
+  S.run = null;
+  if ($("#chart") && window.Plotly) window.Plotly.purge($("#chart"));
+  $("#panel-body").innerHTML = ""; $("#panel-sub").textContent = "";
+  return S.view;
+}
+const scripts = new Map();
+function loadScript(url, globalName) {
+  if (window[globalName]) return Promise.resolve();
+  if (!scripts.has(url)) scripts.set(url, new Promise((resolve, reject) => {
+    const script = document.createElement("script"); script.src = url;
+    script.onload = resolve;
+    script.onerror = () => { script.remove(); scripts.delete(url); reject(new Error("Could not load " + globalName)); };
+    document.head.appendChild(script);
+  }));
+  return scripts.get(url);
+}
+
 /* ---------------------------------------------------------------- start */
 async function init() {
   if (window.innerWidth <= 1180) $("#app").classList.add("panel-closed");
@@ -60,7 +84,7 @@ async function init() {
   if (!S.me.user) { showSignin(); renderWelcome(); renderUser(); return; }
   $("#signin").hidden = true;
   renderUser();
-  await refreshSidebar();
+  refreshSidebar();
   renderWelcome();
   loadPulseCount();
 }
@@ -94,7 +118,15 @@ function renderUser() {
 /* ---------------------------------------------------------------- sidebar */
 async function refreshSidebar() {
   if (!S.me.user) return;
-  [S.projects, S.chats] = await Promise.all([api("/api/projects"), api("/api/chats")]);
+  const request = ++S.sidebarRequest;
+  try {
+    const [projects, chats] = await Promise.all([api("/api/projects"), api("/api/chats")]);
+    if (request !== S.sidebarRequest) return;
+    S.projects = projects; S.chats = chats;
+    renderSidebar();
+  } catch (e) { if (request === S.sidebarRequest) toast(e.message); }
+}
+function renderSidebar() {
   const chatItem = (c) => `<button class="nav-item ${c.id === S.chatId ? "active" : ""}" data-action="open-chat" data-id="${c.id}">
       <span class="label">${esc(c.title)}</span><span class="more" data-action="chat-menu" data-id="${c.id}" title="Options">⋯</span></button>`;
   $("#project-list").innerHTML = S.projects.map((p) => {
@@ -117,28 +149,57 @@ async function refreshSidebar() {
 
 /* ---------------------------------------------------------------- welcome and chats */
 async function renderWelcome() {
-  S.chatId = null; S.run = null;
+  const view = leaveView();
+  S.chatId = null;
+  renderSidebar();
   $("#chat-title").textContent = S.pendingProject ? `New chat in ${S.projects.find((p) => p.id === S.pendingProject)?.name || "project"}` : "New chat";
   $("#move-project").hidden = true;
-  let demos = [];
-  try { demos = await api("/api/demos"); } catch { /* none */ }
-  const d = S.me && S.me.data;
-  $("#messages").innerHTML = `<div class="welcome">
-      <h2>What would you like to know?</h2>
-      <p class="muted">Ask about Pantree's sales, returns, delivery, marketing, stock or customers.
-      Data: ${d ? `${esc(d.first_day)} to ${esc(d.last_day)} (${esc(d.size)} shop, simulated)` : ""}.</p>
-      ${demos.length ? `<div class="section-label">Watch a recorded run</div><div class="cards">${demos.map((x) => `
-        <button class="qcard" data-action="replay" data-slug="${esc(x.slug)}"><div class="kind">▶ Demo · ${esc(x.seconds)}s</div>${esc(x.question)}</button>`).join("")}</div>` : ""}
-      ${S.me && S.me.user ? `<div class="section-label">Or try</div><div class="cards">${EXAMPLES.map(([k, q]) => `
-        <button class="qcard" data-action="example" data-q="${esc(q)}"><div class="kind">${esc(k)}</div>${esc(q)}</button>`).join("")}</div>` : ""}
-    </div>`;
-  refreshSidebar();
+  const paint = (demos) => {
+    const d = S.me && S.me.data;
+    $("#messages").innerHTML = `<div class="welcome">
+        <h2>What would you like to know?</h2>
+        <p class="muted">Ask about Pantree's sales, returns, delivery, marketing, stock or customers.
+        Data: ${d ? `${esc(d.first_day)} to ${esc(d.last_day)} (${esc(d.size)} shop, simulated)` : ""}.</p>
+        ${demos.length ? `<div class="section-label">Explore a recorded answer</div><div class="cards">${demos.map((x) => `
+          <button class="qcard" data-action="replay" data-slug="${esc(x.slug)}"><div class="kind">▶ Recorded answer</div>${esc(x.question)}</button>`).join("")}</div>` : ""}
+        ${S.me && S.me.user ? `<div class="section-label">Or try</div><div class="cards">${EXAMPLES.map(([k, q]) => `
+          <button class="qcard" data-action="example" data-q="${esc(q)}"><div class="kind">${esc(k)}</div>${esc(q)}</button>`).join("")}</div>` : ""}
+      </div>`;
+  };
+  paint(S.demos || []);
+  if (!S.demos) {
+    try {
+      S.demos = await api("/api/demos");
+      if (view === S.view) paint(S.demos);
+    } catch (e) { if (view === S.view) toast(e.message); }
+  }
 }
 
 async function openChat(id) {
+  const view = leaveView();
   S.chatId = id; S.pendingProject = null;
-  closeSidebarMobile();
-  const chat = await api(`/api/chats/${id}`);
+  closeSidebarMobile(); renderSidebar();
+  $("#chat-title").textContent = S.chats.find((c) => c.id === id)?.title || "Loading chat…";
+  $("#messages").replaceChildren(statusLine("Loading chat…"));
+  S.busy = true; $(".send").disabled = true;
+  if (S.chatCache.has(id)) renderChat(S.chatCache.get(id));
+  const controller = new AbortController(); S.chatRequest = controller;
+  try {
+    const chat = await api(`/api/chats/${id}`, { signal: controller.signal });
+    if (view !== S.view) return;
+    S.chatCache.delete(id); S.chatCache.set(id, chat);
+    if (S.chatCache.size > 10) S.chatCache.delete(S.chatCache.keys().next().value);
+    S.busy = false; $(".send").disabled = false;
+    renderChat(chat, true);
+  } catch (e) {
+    if (view !== S.view || e.name === "AbortError") return;
+    S.busy = false; $(".send").disabled = false;
+    $("#messages").textContent = "Could not load this chat. Select it again to retry.";
+    toast(e.message);
+  } finally { if (S.chatRequest === controller) S.chatRequest = null; }
+}
+
+function renderChat(chat, connect = false) {
   $("#chat-title").textContent = chat.title;
   const box = $("#messages"); box.innerHTML = "";
   let last = null;
@@ -146,9 +207,9 @@ async function openChat(id) {
     if (m.role === "user") box.insertAdjacentHTML("beforeend", userBubble(m.content));
     else { box.appendChild(answerCard(m.run || {})); last = m.run; }
   }
-  if (chat.pending_run) { const el = statusLine("Working on it…"); box.appendChild(el); streamRun(chat.pending_run, 0, el); }
+  if (connect && chat.pending_run) { const el = statusLine("Working on it…"); box.appendChild(el); streamRun(chat.pending_run, 0, el); }
   else if (last) showRunInPanel(last);
-  refreshSidebar(); scrollDown();
+  renderSidebar(); scrollDown();
 }
 
 const userBubble = (text) => `<div class="msg user"><div class="bubble">${esc(text)}</div></div>`;
@@ -180,10 +241,12 @@ function answerCard(run, replay = false) {
 async function ask(question) {
   if (S.busy || !question.trim()) return;
   if (!S.me.user) { showSignin(); return; }
+  const view = ++S.view;
   S.busy = true; $(".send").disabled = true;
   try {
     if (!S.chatId) {
       const chat = await api("/api/chats", { method: "POST", body: { project_id: S.pendingProject } });
+      if (view !== S.view) { refreshSidebar(); return; }
       S.chatId = chat.id; S.pendingProject = null;
       $("#messages").innerHTML = "";
       if (chat.project_id) S.expanded.add(chat.project_id);
@@ -191,10 +254,12 @@ async function ask(question) {
     $("#messages").insertAdjacentHTML("beforeend", userBubble(question));
     const status = statusLine("Starting…"); $("#messages").appendChild(status); scrollDown();
     const { run_id } = await api(`/api/chats/${S.chatId}/ask`, { method: "POST", body: { question, use_defaults: $("#use-defaults").checked } });
+    if (view !== S.view) { refreshSidebar(); return; }
     $("#chat-title").textContent = question.slice(0, 80);
     refreshSidebar();
     streamRun(run_id, 0, status);
   } catch (e) {
+    if (view !== S.view) return;
     toast(e.message, 4500); S.busy = false; $(".send").disabled = false;
     document.querySelectorAll(".status-line").forEach((n) => n.closest(".msg").remove());
   }
@@ -209,6 +274,7 @@ function newTimeline(question, replay) {
 function openPanelIfWide() { if (window.innerWidth > 1180) openPanel(); }
 
 function onEvent(e, status) {
+  if (!S.run) return;
   if (e.type === "step") {
     const label = STEP_LABELS[e.step] || e.step;
     if (e.status === "started") S.run.steps.push({ step: e.step, status: "running", detail: {}, t: e.t });
@@ -217,12 +283,13 @@ function onEvent(e, status) {
       Object.assign(item, { status: e.status, detail: e.detail || {} });
     }
     if (status && e.status === "started") status.querySelector(".txt").textContent = label + "…";
-    renderSteps();
+    if (!S.run.restoring) renderSteps();
   } else if (e.type === "clarify") {
     if (status) status.remove();
     $("#messages").appendChild(clarifyCard(e)); scrollDown();
     S.busy = false; $(".send").disabled = false;
   } else if (e.type === "final") {
+    if (S.chatId) S.chatCache.delete(S.chatId);
     if (status) status.remove();
     $("#messages").appendChild(answerCard(e, S.run && S.run.replay)); scrollDown();
     showResult(e);
@@ -233,16 +300,21 @@ function onEvent(e, status) {
 
 function streamRun(runId, since, status) {
   if (since === 0) newTimeline($("#chat-title").textContent, false);
+  S.stream?.close();
+  const view = S.view;
+  S.busy = true; $(".send").disabled = true;
   let count = since;
   const es = new EventSource(`/api/runs/${runId}/stream?since=${since}`);
+  S.stream = es;
   es.onmessage = (msg) => {
+    if (view !== S.view || S.stream !== es) return;
     count += 1;
     const e = JSON.parse(msg.data);
     if (e.type === "clarify") { e.run_id = runId; e.count = count; }
     onEvent(e, status);
     if (e.type === "clarify" || e.type === "final") es.close();
   };
-  es.onerror = () => { es.close(); if (S.busy) { toast("Connection lost. Reopen the chat to see the result."); S.busy = false; $(".send").disabled = false; } };
+  es.onerror = () => { es.close(); if (view !== S.view || S.stream !== es) return; if (S.busy) { toast("Connection lost. Reopen the chat to see the result."); S.busy = false; $(".send").disabled = false; } };
 }
 
 const clean = (o) => String(o).replace(/\s*\((recommended|default)\)\s*/gi, " ").trim();
@@ -263,6 +335,7 @@ function clarifyCard(e) {
     group.querySelectorAll(".chip").forEach((c) => c.classList.remove("selected")); chip.classList.add("selected");
   }));
   const submit = async (useDefaults) => {
+    const view = S.view;
     const answers = {};
     qs.forEach((q, i) => {
       const sel = el.querySelector(`.chips[data-q="${i}"] .chip.selected`);
@@ -274,8 +347,8 @@ function clarifyCard(e) {
     el.insertAdjacentHTML("afterend", userBubble(summary));
     const status = statusLine("Continuing…"); el.parentNode.appendChild(status); scrollDown();
     S.busy = true; $(".send").disabled = true;
-    try { await api(`/api/runs/${e.run_id}/answer`, { method: "POST", body: { answers } }); streamRun(e.run_id, e.count, status); }
-    catch (err) { toast(err.message); status.remove(); S.busy = false; $(".send").disabled = false; }
+    try { await api(`/api/runs/${e.run_id}/answer`, { method: "POST", body: { answers } }); if (view === S.view) streamRun(e.run_id, e.count, status); }
+    catch (err) { if (view !== S.view) return; toast(err.message); status.remove(); S.busy = false; $(".send").disabled = false; }
   };
   el.querySelector("[data-go]").addEventListener("click", () => submit(false));
   const defaults = el.querySelector("[data-defaults]");
@@ -285,17 +358,20 @@ function clarifyCard(e) {
 
 /* ---------------------------------------------------------------- demos */
 function replayDemo(slug, question) {
+  const view = leaveView();
   S.chatId = null;
   closeSidebarMobile();
-  $("#chat-title").textContent = "Demo replay";
+  renderSidebar();
+  $("#chat-title").textContent = "Recorded answer";
   $("#move-project").hidden = true;
   $("#messages").innerHTML = userBubble(question);
   const status = statusLine("Starting…"); $("#messages").appendChild(status);
   newTimeline(question, true);
-  S.busy = true;
-  const es = new EventSource(`/api/demos/${encodeURIComponent(slug)}/stream`);
-  es.onmessage = (msg) => { const e = JSON.parse(msg.data); onEvent(e, status); if (e.type === "final") es.close(); };
-  es.onerror = () => { es.close(); S.busy = false; };
+  S.busy = true; $(".send").disabled = true;
+  const es = new EventSource(`/api/demos/${encodeURIComponent(slug)}/stream?instant=true`);
+  S.stream = es;
+  es.onmessage = (msg) => { if (view !== S.view || S.stream !== es) return; const e = JSON.parse(msg.data); onEvent(e, status); if (e.type === "final") es.close(); };
+  es.onerror = () => { es.close(); if (view !== S.view || S.stream !== es) return; S.busy = false; $(".send").disabled = false; toast("Could not load this demo. Please try again."); };
 }
 
 /* ---------------------------------------------------------------- panel: steps and result */
@@ -332,8 +408,9 @@ function renderSteps() {
 
 function showRunInPanel(run) {
   newTimeline(run.question || $("#chat-title").textContent, false);
-  for (const e of run.events || []) if (e.type === "step") onEvent(e, null);
   S.run.restoring = true;
+  for (const e of run.events || []) if (e.type === "step") onEvent(e, null);
+  renderSteps();
   showResult(run);
   S.run.restoring = false;
   $("#panel-body").scrollTop = 0;
@@ -371,11 +448,11 @@ function showResult(run) {
     li.style.cursor = "pointer"; li.title = "Ask this";
     li.addEventListener("click", () => { $("#question").value = li.textContent; $("#question").focus(); });
   });
-  drawChart(run.chart);
+  S.chartReady = drawChart(run.chart);
   if (!S.run.restoring) requestAnimationFrame(() => box.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
 
-function drawChart(chart) {
+async function drawChart(chart) {
   const area = $("#chart-area"); if (!area || !chart) return;
   if (chart.kind === "kpi") {
     area.innerHTML = `<div class="kpis">${chart.values.map((v) => `<div class="kpi"><div class="v">${fmtNum(v.value, v.label.toLowerCase().replace(/ /g, "_"))}</div><div class="l">${esc(v.label)}</div></div>`).join("")}</div>`;
@@ -388,8 +465,14 @@ function drawChart(chart) {
     font: { family: "Inter, system-ui, sans-serif", color: cssVar("--text"), size: 12 },
   });
   ["xaxis", "yaxis"].forEach((ax) => { layout[ax] = Object.assign({}, layout[ax], { gridcolor: cssVar("--border"), zerolinecolor: cssVar("--border") }); });
-  const draw = () => window.Plotly.newPlot("chart", fig.data, layout, { displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
-  if (window.Plotly) draw(); else window.addEventListener("load", draw, { once: true });
+  const target = area.querySelector("#chart");
+  target.textContent = "Loading chart…";
+  try {
+    await loadScript("https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js", "Plotly");
+    if (!target.isConnected || target !== $("#chart")) return;
+    target.textContent = "";
+    await window.Plotly.newPlot(target, fig.data, layout, { displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
+  } catch (e) { if (target.isConnected) target.textContent = "Chart unavailable. Reopen the analysis to retry."; }
 }
 
 /* ---------------------------------------------------------------- exports */
@@ -404,6 +487,7 @@ function csv(run) {
   return [run.result.columns.map(q).join(","), ...run.result.data.map((r) => r.map(q).join(","))].join("\n");
 }
 async function chartPng(width = 1600, height = 900) {
+  await S.chartReady;
   const el = document.getElementById("chart");
   if (!el || !window.Plotly) return null;
   return window.Plotly.toImage(el, { format: "png", width, height,
@@ -420,7 +504,7 @@ async function exportRun(kind, run) {
   } catch (e) { toast("Export failed: " + e.message); }
 }
 async function exportPpt(run, name) {
-  if (!window.PptxGenJS) { toast("PowerPoint library still loading, try again"); return; }
+  await loadScript("https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js", "PptxGenJS");
   const a = run.analysis || {};
   const pptx = new window.PptxGenJS(); pptx.layout = "LAYOUT_WIDE";
   const accent = "4F46E5", grey = "6B6F85";
@@ -449,8 +533,21 @@ async function exportPpt(run, name) {
 }
 
 /* ---------------------------------------------------------------- dialogs: projects, memory, pulse */
-function dialog(html) { $("#dialog-body").innerHTML = html; $("#dialog").hidden = false; return $("#dialog-body"); }
-function closeDialog() { $("#dialog").hidden = true; }
+let dialogVersion = 0;
+function dialog(html) { dialogVersion += 1; $("#dialog-body").innerHTML = html; $("#dialog").hidden = false; return $("#dialog-body"); }
+function closeDialog() { dialogVersion += 1; $("#dialog").hidden = true; }
+async function dialogData(title, path) {
+  const d = dialog(`<h2>${esc(title)}</h2><p role="status">Loading…</p><button class="btn" data-close>Close</button>`);
+  const version = dialogVersion;
+  d.querySelector("[data-close]").onclick = closeDialog;
+  try {
+    const data = await api(path);
+    return version === dialogVersion && !$("#dialog").hidden ? data : null;
+  } catch (e) {
+    if (version === dialogVersion) { d.querySelector("p").textContent = "Could not load. Close and try again."; toast(e.message); }
+    return null;
+  }
+}
 
 function projectDialog(project) {
   const d = dialog(`<h2>${project ? "Project settings" : "New project"}</h2>
@@ -477,7 +574,8 @@ function projectDialog(project) {
 
 async function memoryDialog() {
   if (!S.me.user) return showSignin();
-  const m = await api("/api/memory");
+  const m = await dialogData("Memory", "/api/memory");
+  if (!m) return;
   const item = (x, admin) => `<div class="mem-item"><div class="head"><div><div class="q">${esc(x.question)}</div>
       <div class="muted" style="font-size:12px">${x.project_name ? "📁 " + esc(x.project_name) + " · " : ""}data as of ${esc(x.data_as_of)}</div></div>
       <div>${admin && x.scope !== "business" ? `<button class="btn small" data-promote="${x.id}">Share</button>` : ""}
@@ -508,7 +606,8 @@ async function loadPulseCount() {
 }
 
 async function pulseDialog() {
-  const p = await api("/api/pulse");
+  const p = await dialogData("Pulse", "/api/pulse");
+  if (!p) return;
   const pct = (f) => `${f.change_pct > 0 ? "+" : ""}${f.change_pct}%`;
   const row = (f) => `<div class="flag"><div class="chg ${f.direction}">${pct(f)}</div><div class="txt">
       <div><b>${esc(f.label)}</b> ${f.breakdown !== "total" ? `· ${esc(f.breakdown)} = ${esc(f.segment)}` : ""}</div>
@@ -537,7 +636,7 @@ function chatMenu(id) {
     <button class="btn" data-close>Cancel</button><button class="btn primary" data-save>Save</button></div>`);
   d.querySelector("[data-close]").onclick = closeDialog;
   d.querySelector("[data-save]").onclick = async () => { await api(`/api/chats/${id}`, { method: "PATCH", body: { title: $("#c-title").value } }); closeDialog(); refreshSidebar(); if (S.chatId === id) $("#chat-title").textContent = $("#c-title").value; };
-  d.querySelector("[data-del]").onclick = async () => { await api(`/api/chats/${id}`, { method: "DELETE", body: {} }); closeDialog(); if (S.chatId === id) renderWelcome(); else refreshSidebar(); };
+  d.querySelector("[data-del]").onclick = async () => { await api(`/api/chats/${id}`, { method: "DELETE", body: {} }); closeDialog(); S.chatCache.delete(id); if (S.chatId === id) renderWelcome(); refreshSidebar(); };
 }
 
 /* ---------------------------------------------------------------- sign-in */
@@ -568,11 +667,11 @@ document.addEventListener("click", async (ev) => {
     case "new-chat": S.pendingProject = t.dataset.project || null; closeSidebarMobile(); renderWelcome(); $("#question").focus(); break;
     case "open-chat": openChat(id); break;
     case "chat-menu": chatMenu(id); break;
-    case "toggle-project": S.expanded.has(id) ? S.expanded.delete(id) : S.expanded.add(id); refreshSidebar(); break;
+    case "toggle-project": S.expanded.has(id) ? S.expanded.delete(id) : S.expanded.add(id); renderSidebar(); break;
     case "new-project": if (!S.me.user) return showSignin(); projectDialog(null); break;
     case "edit-project": projectDialog(S.projects.find((p) => p.id === id)); break;
     case "example": $("#question").value = t.dataset.q; ask(t.dataset.q); $("#question").value = ""; break;
-    case "replay": replayDemo(t.dataset.slug, t.textContent.replace(/^▶ Demo · [\d.]+s/, "").trim()); break;
+    case "replay": replayDemo(t.dataset.slug, t.textContent.replace("▶ Recorded answer", "").trim()); break;
     case "toggle-panel": $("#app").classList.toggle("panel-closed"); break;
     case "toggle-step": {
       const det = t.parentElement.querySelector(".step-detail");
@@ -589,7 +688,7 @@ document.addEventListener("click", async (ev) => {
       const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
       root.dataset.theme = dark ? "light" : "dark";
       try { localStorage.setItem("theme", root.dataset.theme); } catch { /* private mode */ }
-      if (S.run && S.run.final) drawChart(S.run.final.chart);
+      if (S.run && S.run.final) S.chartReady = drawChart(S.run.final.chart);
       break;
     }
     case "open-sidebar": $("#app").classList.add("sidebar-open"); break;

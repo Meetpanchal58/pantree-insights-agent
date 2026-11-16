@@ -29,3 +29,5 @@ Thumbs.db
 
 # Downloaded models (embeddings)
 .cache/
+
+node_modules/
