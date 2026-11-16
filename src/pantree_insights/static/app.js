@@ -2,7 +2,8 @@
 /* Pantree Insights front end: no framework, no build step. */
 
 const STEP_LABELS = {
-  check_input: "Checking the question", retrieve: "Finding relevant data", plan: "Planning the analysis",
+  check_input: "Checking the question", retrieve: "Finding relevant data", understand: "Understanding the question",
+  plan: "Planning the analysis",
   write_sql: "Writing SQL", check_sql: "Safety checks", run_query: "Running the query",
   validate: "Reviewing the query", analyse: "Analysing the result", chart: "Building the chart",
   remember: "Saving to memory",
@@ -169,6 +170,7 @@ function answerCard(run, replay = false) {
     <ul>${(a.findings || []).slice(0, 3).map((f) => `<li>${esc(f)}</li>`).join("")}</ul>
     <div class="row"><button class="btn small" data-action="show-run">View analysis, chart & SQL</button>
     ${replay ? `<span class="tag replay">Replay · recorded run · data as of ${esc(run.data_as_of)}</span>` : `<span class="tag">Data as of ${esc(run.data_as_of)}</span>`}
+    ${run.verification && run.verification.status === "verified" ? `<span class="tag ok" title="Each metric was recomputed from its definition for the confirmed scope and matched">✓ Numbers verified against the data</span>` : run.verification && run.verification.status === "mismatch" ? `<span class="tag warn" title="The recomputed metric disagrees with this result; see the warnings">⚠ Numbers do not match the definition</span>` : run.verification ? `<span class="tag" title="This answer's metric could not be recomputed independently">Not independently verified</span>` : ""}
     ${run.cost && run.cost.usd ? `<span class="tag">$${run.cost.usd.toFixed(3)}</span>` : ""}</div></div>`;
   el.querySelector('[data-action="show-run"]').addEventListener("click", () => { showRunInPanel(run); openPanel(); });
   return el;
@@ -247,11 +249,15 @@ const clean = (o) => String(o).replace(/\s*\((recommended|default)\)\s*/gi, " ")
 function clarifyCard(e) {
   const el = document.createElement("div"); el.className = "msg";
   const qs = e.questions || [];
-  el.innerHTML = `<div class="clarify"><h4>A few quick questions before I write the query</h4>
+  const confirm = e.kind === "confirm";
+  const title = confirm ? "Here's what I'll compute" : (e.round || 1) > 1 ? `A few more questions (round ${e.round})` : "A few questions so I get this exactly right";
+  const readback = confirm && e.readback ? `<div class="readback">${e.readback.split("\n").map((l) => esc(l).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")).join("<br>")}</div>` : "";
+  el.innerHTML = `<div class="clarify"><h4>${esc(title)}</h4>${readback}
     ${qs.map((q, i) => `<div class="q">${esc(q.question)}</div><div class="why">${esc(q.why || "")}</div>
-      <div class="chips" data-q="${i}">${q.options.map((o) => { const rec = clean(o) === clean(q.default); return `<button class="chip ${rec ? "selected" : ""}" data-opt="${esc(o)}">${esc(clean(o))}${rec ? '<span class="rec">recommended</span>' : ""}</button>`; }).join("")}</div>`).join("")}
+      <div class="chips" data-q="${i}">${q.options.map((o) => { const rec = clean(o) === clean(q.default); return `<button class="chip ${rec ? "selected" : ""}" data-opt="${esc(o)}">${esc(clean(o))}${rec ? '<span class="rec">recommended</span>' : ""}</button>`; }).join("")}</div>
+      <input class="other" data-q="${i}" maxlength="300" placeholder="${confirm ? "Or tell me what to change" : "Or type your own answer"}">`).join("")}
     <div class="row" style="margin-top:14px"><button class="btn primary small" data-go>Continue</button>
-    <button class="btn small" data-defaults>Use recommended</button></div></div>`;
+    ${confirm ? "" : '<button class="btn small" data-defaults>Use recommended</button>'}</div></div>`;
   el.querySelectorAll(".chips").forEach((group) => group.addEventListener("click", (ev) => {
     const chip = ev.target.closest(".chip"); if (!chip) return;
     group.querySelectorAll(".chip").forEach((c) => c.classList.remove("selected")); chip.classList.add("selected");
@@ -260,7 +266,8 @@ function clarifyCard(e) {
     const answers = {};
     qs.forEach((q, i) => {
       const sel = el.querySelector(`.chips[data-q="${i}"] .chip.selected`);
-      answers[q.question] = clean(useDefaults || !sel ? q.default : sel.dataset.opt);
+      const own = el.querySelector(`.other[data-q="${i}"]`).value.trim();
+      answers[q.question] = useDefaults ? clean(q.default) : own || clean(!sel ? q.default : sel.dataset.opt);
     });
     el.querySelectorAll("button").forEach((b) => (b.disabled = true));
     const summary = Object.entries(answers).map(([k, v]) => `${k} → ${v}`).join("\n");
@@ -271,7 +278,8 @@ function clarifyCard(e) {
     catch (err) { toast(err.message); status.remove(); S.busy = false; $(".send").disabled = false; }
   };
   el.querySelector("[data-go]").addEventListener("click", () => submit(false));
-  el.querySelector("[data-defaults]").addEventListener("click", () => submit(true));
+  const defaults = el.querySelector("[data-defaults]");
+  if (defaults) defaults.addEventListener("click", () => submit(true));
   return el;
 }
 
@@ -296,6 +304,9 @@ function stepDetail(s) {
   const parts = [];
   if (d.tables) parts.push(`Tables: ${d.tables.map(esc).join(", ")}`);
   if (d.values && d.values.length) parts.push(`Values found: ${d.values.map((v) => `<code>${esc(v)}</code>`).join(", ")}`);
+  if (d.understood) parts.push(`Understood: ${esc(d.understood)}`);
+  if (d.questions && d.questions.length) parts.push(`Asking (round ${esc(d.round)}): ${d.questions.map(esc).join(" · ")}`);
+  if (d.resolved) parts.push(`<div class="plan">${esc(d.resolved)}</div>`);
   if (d.plan) parts.push(`<div class="plan">${esc(d.plan)}</div>`);
   if (d.sql) parts.push(`${d.attempt > 1 ? `Attempt ${d.attempt}. ` : ""}${esc(d.explanation || "")}<pre>${esc(d.sql)}</pre>`);
   if (d.problems) parts.push(d.problems.map((p) => `<div class="problem">⚠ ${esc(p)}</div>`).join(""));

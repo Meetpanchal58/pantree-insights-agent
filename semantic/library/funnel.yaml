@@ -1,0 +1,306 @@
+# Query library: funnel (visits, browsing, search, listings). Reference queries for retrieval.
+area: funnel
+queries:
+  - id: lib-funnel-01
+    question: How many visits reach each funnel step, from product view to purchase, on each device?
+    variants: [conversion funnel by device, drop-off from product page to cart to checkout to purchase]
+    difficulty: hard
+    tags: [funnel, device]
+    metrics: [sessions]
+    sql: |
+      WITH visits AS (
+        SELECT c.session_id, MIN(c.device) AS device,
+               MAX(CASE WHEN c.event_type = 'pdp_view' THEN 1 ELSE 0 END) AS viewed_product,
+               MAX(CASE WHEN c.event_type = 'add_to_cart' THEN 1 ELSE 0 END) AS added_to_cart,
+               MAX(CASE WHEN c.event_type = 'checkout_start' THEN 1 ELSE 0 END) AS started_checkout,
+               MAX(CASE WHEN c.event_type = 'purchase' THEN 1 ELSE 0 END) AS purchased
+        FROM clickstream c
+        GROUP BY 1)
+      SELECT device, COUNT(*) AS sessions,
+             SUM(viewed_product) AS viewed_product, SUM(added_to_cart) AS added_to_cart,
+             SUM(started_checkout) AS started_checkout, SUM(purchased) AS purchased,
+             SUM(added_to_cart) * 1.0 / NULLIF(SUM(viewed_product), 0) AS view_to_cart,
+             SUM(purchased) * 1.0 / NULLIF(SUM(started_checkout), 0) AS checkout_to_purchase
+      FROM visits
+      GROUP BY 1
+      ORDER BY sessions DESC
+    notes: One row per visit first (did it reach each step?), then counted, so repeated events are not double counted.
+
+  - id: lib-funnel-02
+    question: Which traffic sources leave the most full carts behind?
+    variants: [cart abandonment by traffic source, where do shoppers add to cart but not buy]
+    difficulty: hard
+    tags: [funnel, abandonment]
+    metrics: [cart_abandonment_rate]
+    sql: |
+      WITH visits AS (
+        SELECT c.session_id, MIN(c.traffic_source) AS traffic_source,
+               MAX(CASE WHEN c.event_type = 'add_to_cart' THEN 1 ELSE 0 END) AS carted,
+               MAX(CASE WHEN c.event_type = 'purchase' THEN 1 ELSE 0 END) AS bought
+        FROM clickstream c
+        GROUP BY 1)
+      SELECT traffic_source,
+             COUNT(*) AS sessions_with_cart,
+             1 - SUM(bought) * 1.0 / NULLIF(COUNT(*), 0) AS cart_abandonment_rate
+      FROM visits
+      WHERE carted = 1
+      GROUP BY 1
+      ORDER BY cart_abandonment_rate DESC
+
+  - id: lib-funnel-03
+    question: How many visits and purchases did each marketing channel bring to the site?
+    variants: [site visits by campaign channel, conversion of campaign traffic]
+    difficulty: medium
+    tags: [marketing, traffic]
+    metrics: [sessions, conversion_rate]
+    verify:
+    - metric: sessions
+      column: sessions
+      by: {channel: campaigns.channel}
+    - metric: conversion_rate
+      column: conversion_rate
+      by: {channel: campaigns.channel}
+    sql: |
+      SELECT cp.channel,
+             COUNT(DISTINCT c.session_id) AS sessions,
+             COUNT(DISTINCT CASE WHEN c.event_type = 'purchase' THEN c.session_id END) * 1.0
+               / COUNT(DISTINCT c.session_id) AS conversion_rate
+      FROM clickstream c JOIN campaigns cp ON cp.campaign_id = c.campaign_id
+      GROUP BY 1
+      ORDER BY sessions DESC
+    notes: Visits without a campaign (direct, organic) have no campaign channel and are left out.
+
+  - id: lib-funnel-04
+    question: What are the most common searches, and how often do those visits end in a purchase?
+    variants: [top search terms and their conversion, what do people search for]
+    difficulty: hard
+    tags: [search, ranking]
+    metrics: []
+    sql: |
+      WITH searches AS (
+        SELECT lower(c.search_query) AS search_query, c.session_id
+        FROM clickstream c
+        WHERE c.event_type = 'search' AND c.search_query IS NOT NULL),
+      bought AS (
+        SELECT DISTINCT c.session_id FROM clickstream c WHERE c.event_type = 'purchase')
+      SELECT s.search_query,
+             COUNT(DISTINCT s.session_id) AS sessions,
+             COUNT(DISTINCT b.session_id) * 1.0 / COUNT(DISTINCT s.session_id) AS purchase_rate
+      FROM searches s LEFT JOIN bought b ON b.session_id = s.session_id
+      GROUP BY 1
+      ORDER BY sessions DESC
+      LIMIT 20
+
+  - id: lib-funnel-05
+    question: Which product categories get clicked most when they are shown in lists?
+    variants: [click-through rate by category, which categories attract clicks in listings]
+    difficulty: medium
+    tags: [listings, ctr]
+    metrics: [ctr]
+    verify:
+    - metric: ctr
+      column: ctr
+      by: {category: product_master.category}
+    sql: |
+      SELECT p.category,
+             COUNT(*) AS impressions,
+             COUNT(*) FILTER (WHERE i.clicked) * 1.0 / COUNT(*) AS ctr
+      FROM impressions i JOIN product_master p ON p.product_id = i.product_id
+      GROUP BY 1
+      ORDER BY ctr DESC
+
+  - id: lib-funnel-06
+    question: How likely is a product shown in a list to be added to the cart, by position band?
+    variants: [add-to-cart rate by list position, does a higher position lead to more add to carts]
+    difficulty: medium
+    tags: [listings, bands]
+    metrics: []
+    sql: |
+      SELECT CASE WHEN i.position <= 3 THEN '1. positions 1-3'
+                  WHEN i.position <= 10 THEN '2. positions 4-10'
+                  WHEN i.position <= 20 THEN '3. positions 11-20'
+                  ELSE '4. below 20' END AS position_band,
+             COUNT(*) AS impressions,
+             AVG(CASE WHEN i.added_to_cart THEN 1.0 ELSE 0 END) AS add_to_cart_rate
+      FROM impressions i
+      GROUP BY 1
+      ORDER BY 1
+
+  - id: lib-funnel-07
+    question: How long do people stay on each kind of page, on each device?
+    variants: [median dwell time by page type, time spent on product pages by device]
+    difficulty: medium
+    tags: [engagement, median]
+    metrics: []
+    sql: |
+      SELECT c.page_type, c.device,
+             COUNT(*) AS page_events,
+             MEDIAN(c.dwell_seconds) AS median_dwell_seconds
+      FROM clickstream c
+      WHERE c.page_type IS NOT NULL AND c.dwell_seconds IS NOT NULL
+      GROUP BY 1, 2
+      ORDER BY 1, 2
+
+  - id: lib-funnel-08
+    question: How many visits come from logged-in customers in each city tier, and how often do they buy?
+    variants: [visits by customer city tier, conversion of signed-in visitors by tier]
+    difficulty: medium
+    tags: [traffic, geography]
+    metrics: [sessions, conversion_rate]
+    verify:
+    - metric: sessions
+      column: sessions
+      by: {city_tier: customers.city_tier}
+    - metric: conversion_rate
+      column: conversion_rate
+      by: {city_tier: customers.city_tier}
+    sql: |
+      SELECT cu.city_tier,
+             COUNT(DISTINCT c.session_id) AS sessions,
+             COUNT(DISTINCT CASE WHEN c.event_type = 'purchase' THEN c.session_id END) * 1.0
+               / COUNT(DISTINCT c.session_id) AS conversion_rate
+      FROM clickstream c JOIN customers cu ON cu.customer_id = c.customer_id
+      GROUP BY 1
+      ORDER BY 1
+    notes: Only logged-in visits carry a customer, so anonymous browsing is not included.
+
+  - id: lib-funnel-09
+    question: How much net sales does a visit bring in, by traffic source?
+    variants: [revenue per visit by source, value of a session from each channel]
+    difficulty: hard
+    tags: [traffic, value]
+    metrics: [sessions, net_sales]
+    sql: |
+      WITH visits AS (
+        SELECT c.session_id, MIN(c.traffic_source) AS traffic_source
+        FROM clickstream c
+        GROUP BY 1),
+      order_value AS (
+        SELECT s.session_id, SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) AS net_sales
+        FROM sales s
+        WHERE s.line_type = 'Sale'
+        GROUP BY 1)
+      SELECT v.traffic_source,
+             COUNT(*) AS sessions,
+             SUM(COALESCE(o.net_sales, 0)) AS net_sales,
+             SUM(COALESCE(o.net_sales, 0)) / COUNT(*) AS net_sales_per_session
+      FROM visits v LEFT JOIN order_value o ON o.session_id = v.session_id
+      GROUP BY 1
+      ORDER BY net_sales_per_session DESC
+    notes: Visits and orders are each aggregated per session before joining (session_id is many-to-many).
+
+  - id: lib-funnel-10
+    question: Which categories turn product-page views into purchases best?
+    variants: [view to buy conversion by category, product page conversion per category]
+    difficulty: hard
+    tags: [funnel, category]
+    metrics: [units_sold]
+    sql: |
+      WITH views AS (
+        SELECT p.category, COUNT(*) AS product_views
+        FROM clickstream c JOIN product_master p ON p.product_id = c.product_id
+        WHERE c.event_type = 'pdp_view'
+        GROUP BY 1),
+      bought AS (
+        SELECT p.category, SUM(CASE WHEN s.cancelled_at IS NULL THEN s.quantity ELSE 0 END) AS units_sold
+        FROM sales s JOIN product_master p ON p.product_id = s.product_id
+        WHERE s.line_type = 'Sale'
+        GROUP BY 1)
+      SELECT v.category, v.product_views, b.units_sold,
+             b.units_sold * 1.0 / NULLIF(v.product_views, 0) AS units_per_product_view
+      FROM views v LEFT JOIN bought b ON b.category = v.category
+      ORDER BY units_per_product_view DESC
+
+  - id: lib-funnel-11
+    question: How did weekly visits trend over the last 12 weeks, with a 4-week moving average?
+    variants: [weekly sessions trend, smoothed traffic over recent weeks]
+    difficulty: hard
+    tags: [trend, moving average]
+    metrics: [sessions]
+    verify:
+    - metric: sessions
+      column: sessions
+      by: {week: 'date_trunc(''week'', clickstream.event_at)'}
+      where: [clickstream.event_at >= TIMESTAMP '2026-08-17']
+    sql: |
+      WITH weekly AS (
+        SELECT date_trunc('week', c.event_at) AS week, COUNT(DISTINCT c.session_id) AS sessions
+        FROM clickstream c
+        WHERE c.event_at >= TIMESTAMP '2026-08-17'
+        GROUP BY 1)
+      SELECT week, sessions,
+             AVG(sessions) OVER (ORDER BY week ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) AS sessions_4wk_avg
+      FROM weekly
+      ORDER BY week
+    notes: The latest week may be incomplete.
+
+  - id: lib-funnel-12
+    question: How often do visitors hit an out-of-stock product page, and which categories cause it most?
+    variants: [out of stock views by category, lost interest from stock-outs on the site]
+    difficulty: medium
+    tags: [stock, browsing]
+    metrics: []
+    sql: |
+      SELECT p.category,
+             COUNT(*) FILTER (WHERE c.event_type = 'out_of_stock_view') AS out_of_stock_views,
+             COUNT(*) FILTER (WHERE c.event_type = 'pdp_view') AS product_views,
+             COUNT(*) FILTER (WHERE c.event_type = 'out_of_stock_view') * 1.0
+               / NULLIF(COUNT(*) FILTER (WHERE c.event_type = 'pdp_view'), 0) AS out_of_stock_view_share
+      FROM clickstream c JOIN product_master p ON p.product_id = c.product_id
+      GROUP BY 1
+      ORDER BY out_of_stock_views DESC
+
+  - id: lib-funnel-13
+    question: On which devices do shoppers abandon their carts most?
+    variants: [cart abandonment rate by device, app versus web abandoned carts]
+    difficulty: medium
+    tags: [funnel, abandonment, device]
+    metrics: [cart_abandonment_rate]
+    sql: |
+      WITH visits AS (
+        SELECT c.session_id, MIN(c.device) AS device,
+               MAX(CASE WHEN c.event_type = 'add_to_cart' THEN 1 ELSE 0 END) AS carted,
+               MAX(CASE WHEN c.event_type = 'purchase' THEN 1 ELSE 0 END) AS bought
+        FROM clickstream c
+        GROUP BY 1)
+      SELECT device, COUNT(*) AS sessions_with_cart,
+             1 - SUM(bought) * 1.0 / NULLIF(COUNT(*), 0) AS cart_abandonment_rate
+      FROM visits
+      WHERE carted = 1
+      GROUP BY 1
+      ORDER BY cart_abandonment_rate DESC
+
+  - id: lib-funnel-14
+    question: Do listed products get clicked more on the app or on the web?
+    variants: [listing click-through rate by device, CTR of product lists per device]
+    difficulty: medium
+    tags: [listings, ctr, device]
+    metrics: [ctr]
+    verify:
+    - metric: ctr
+      column: ctr
+      by: {device: clickstream.device}
+    sql: |
+      SELECT c.device,
+             COUNT(*) AS impressions,
+             COUNT(*) FILTER (WHERE i.clicked) * 1.0 / COUNT(*) AS ctr
+      FROM impressions i JOIN clickstream c ON c.event_id = i.page_event_id
+      GROUP BY 1
+      ORDER BY ctr DESC
+    notes: Each impression belongs to one page view (N:1), which carries the device.
+
+  - id: lib-funnel-15
+    question: How many orders come from visits on each device, and how many visits does that take?
+    variants: [orders per visit by device, sessions that ended in an order by device]
+    difficulty: medium
+    tags: [traffic, device]
+    metrics: [sessions, orders]
+    sql: |
+      SELECT c.device,
+             COUNT(DISTINCT c.session_id) AS sessions_with_order,
+             COUNT(DISTINCT s.order_id) AS orders
+      FROM clickstream c JOIN sales s ON s.session_id = c.session_id
+      WHERE s.line_type = 'Sale'
+      GROUP BY 1
+      ORDER BY orders DESC
+    notes: session_id links visits and orders many-to-many, so only distinct counts are used (no sums).

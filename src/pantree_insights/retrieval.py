@@ -32,7 +32,7 @@ from llama_index.embeddings.fastembed import FastEmbedEmbedding
 from llama_index.retrievers.bm25 import BM25Retriever
 
 from .config import ROOT, get_settings
-from .db import connect, manifest
+from .db import connect
 from .semantic import (
     Example,
     Glossary,
@@ -40,6 +40,7 @@ from .semantic import (
     Schema,
     load_examples,
     load_glossary,
+    load_library,
     load_metrics,
     load_schema,
     tables_in,
@@ -79,7 +80,9 @@ def metric_nodes(metrics: Metrics) -> list[TextNode]:
 
 
 def example_nodes(examples: list[Example]) -> list[TextNode]:
-    return [TextNode(id_=f"example:{e.id}", text=e.question + (f" ({', '.join(e.tags)})" if e.tags else ""),
+    """One node per example; other phrasings of the question are part of the searchable text."""
+    return [TextNode(id_=f"example:{e.id}",
+                     text=" | ".join([e.question, *e.variants]) + (f" ({', '.join(e.tags)})" if e.tags else ""),
                      metadata={"kind": "examples", "key": e.id}) for e in examples]
 
 
@@ -179,7 +182,8 @@ class Retriever:
                  cache_dir: Path | None = None):
         self.schema = schema or load_schema()
         self.metrics = metrics or load_metrics()
-        self.examples = {e.id: e for e in (examples if examples is not None else load_examples().examples)}
+        self.examples = {e.id: e for e in (examples if examples is not None
+                                           else load_examples().examples + load_library())}
         self.glossary = load_glossary()
         con = con or connect()
         cache_dir = cache_dir or ROOT / ".cache"
@@ -190,6 +194,7 @@ class Retriever:
         embed_with_cache([n for nodes in groups.values() for n in nodes], embed, cache_dir / "embeddings.npz")
         self.sizes = {kind: len(nodes) for kind, nodes in groups.items()}
         self.values = {n.metadata["key"] for n in groups["values"]}     # every indexed value
+        self.value_columns = {n.metadata["key"]: n.metadata["columns"] for n in groups["values"]}
         self._fusion = {}
         for kind, nodes in groups.items():
             k = TOP_K[kind] + 1                    # one spare, so a held-out example can be dropped
@@ -238,15 +243,6 @@ def get_retriever() -> Retriever:
     """One shared retriever per process (indexes are built once, in a few seconds)."""
     settings = get_settings()
     return Retriever(connect(settings.shop_dir))
-
-
-def fingerprint() -> str:
-    """Changes whenever the data or the semantic files change (for callers that cache contexts)."""
-    settings = get_settings()
-    h = hashlib.sha256(str(manifest(settings.shop_dir)).encode())
-    for path in sorted(settings.semantic_dir.glob("*.yaml")):
-        h.update(path.read_bytes())
-    return h.hexdigest()[:16]
 
 
 def main() -> None:

@@ -1,0 +1,296 @@
+# What a question is about (subject) and what its words mean for that subject (concepts).
+#
+# The same word points to different columns depending on the subject: "Mumbai" in a question about orders is
+# the delivery city (sales.ship_city); in a question about sign-ups it is the customer's city
+# (customers.city). The question-understanding step decides the subject; code then picks the column here and
+# builds the join path from the subject's table (joins.py). A concept missing for a subject means that cut
+# does not exist for it (ask the user or explain).
+#
+# Checked by tests/test_concepts.py: every table and column exists and every column is reachable from the
+# subject's table through approved joins.
+
+subjects:
+  orders:
+    table: sales
+    where: sales.line_type = 'Sale'
+    about: orders, order lines, revenue, sales, buyers, basket size, discounts, coupons, payments, deliveries,
+      returns, cancellations, RTO, couriers
+    time: sales.placed_at
+    time_meanings:
+      ordered: sales.placed_at
+      shipped: sales.shipped_at
+      delivered: sales.delivered_at
+      return requested: sales.return_requested_at
+      cancelled: sales.cancelled_at
+      returned to origin: sales.rto_at
+      refunded: sales.refunded_at
+  signups:
+    table: customers
+    about: sign-ups, registrations, the customer base, Prime membership, marketing opt-ins
+    time: customers.signup_at
+    time_meanings:
+      signed up: customers.signup_at
+      became Prime: customers.prime_start_date
+  browsing:
+    table: clickstream
+    about: visits, sessions, page views, searches, product views, add-to-cart, checkout steps, traffic
+    time: clickstream.event_at
+  listings:
+    table: impressions
+    about: products shown in lists and search results, impressions, click-through, list positions
+    time: impressions.shown_at
+  logins:
+    table: auth_events
+    about: logins, OTP attempts and failures
+    time: auth_events.event_at
+  ad_spend:
+    table: marketing_spend
+    about: ad spend, ad impressions and clicks, what ad platforms report (conversions, revenue)
+    time: marketing_spend.date_hour
+  attribution:
+    table: marketing_attribution
+    about: orders and revenue credited to campaigns or channels (last-click, first-click, linear), touchpoints
+    time: marketing_attribution.order_at
+  marketing_plan:
+    table: marketing_plan
+    about: planned spend and targets of paid campaigns
+    time: marketing_plan.date
+  support:
+    table: support_contacts
+    about: support tickets and contacts, issues, response and resolution times, CSAT
+    time: support_contacts.contact_at
+  reviews:
+    table: product_reviews
+    about: product reviews, ratings, sentiment, review aspects
+    time: product_reviews.reviewed_at
+  stock_history:
+    table: inventory_history
+    about: daily stock movements, stock-outs, lost sales, sell-through, damaged and restocked units
+    time: inventory_history.date
+  stock_now:
+    table: inventory_live
+    about: current stock on hand, inbound units, reorder points
+    time: inventory_live.updated_at
+  catalogue:
+    table: product_master
+    about: products in the catalogue, launches, assortment, list prices, unit costs
+    time: product_master.launch_date
+  prices:
+    table: price_history
+    about: selling price and discount changes over time
+    time: price_history.valid_from
+
+concepts:
+  # ---- geography of people and orders
+  city:
+    orders: sales.ship_city                         # = delivery address city (same on every sale line)
+    signups: customers.city
+    browsing: {column: customers.city, note: only logged-in visitors have a city}
+    logins: customers.city
+    support: customers.city
+    reviews: customers.city
+  state:
+    orders: customer_addresses.state
+    signups: customers.state
+    browsing: {column: customers.state, note: only logged-in visitors}
+    support: customers.state
+    reviews: customers.state
+  region:
+    orders: customer_addresses.region
+    signups: customers.region
+    browsing: {column: customers.region, note: only logged-in visitors}
+    ad_spend: {column: marketing_spend.region, note: paid media only; 'All' = not split by region}
+    support: customers.region
+    reviews: customers.region
+  city_tier:
+    orders: customer_addresses.city_tier
+    signups: customers.city_tier
+    browsing: {column: customers.city_tier, note: only logged-in visitors}
+    support: customers.city_tier
+    reviews: customers.city_tier
+  pincode:
+    orders: sales.ship_pincode
+  # ---- who the customer is
+  customer_gender:
+    orders: customers.gender
+    signups: customers.gender
+    support: customers.gender
+    reviews: customers.gender
+  age_bracket:
+    orders: customers.age_bracket
+    signups: customers.age_bracket
+    support: customers.age_bracket
+    reviews: customers.age_bracket
+  prime:
+    orders: {column: customers.is_prime, note: Prime status today, not at the time of the order}
+    signups: customers.is_prime
+    support: customers.is_prime
+    reviews: customers.is_prime
+  new_or_repeat:
+    orders: sales.is_first_order
+  # ---- how they came and what they used
+  device:
+    orders: sales.device
+    signups: customers.signup_device
+    browsing: clickstream.device
+    logins: auth_events.device
+  traffic_source:
+    orders: sales.traffic_source
+    browsing: clickstream.traffic_source
+    signups: customers.signup_channel
+  marketing_channel:
+    orders: {column: campaigns.channel, note: the campaign recorded on the order; for credit across touchpoints
+      use the attribution subject}
+    attribution: campaigns.channel
+    ad_spend: campaigns.channel
+    marketing_plan: campaigns.channel
+    browsing: campaigns.channel
+  channel_group:
+    orders: campaigns.channel_group
+    attribution: marketing_attribution.channel_group
+    ad_spend: campaigns.channel_group
+    marketing_plan: campaigns.channel_group
+    browsing: campaigns.channel_group
+  campaign:
+    orders: campaigns.campaign_name
+    attribution: campaigns.campaign_name
+    ad_spend: campaigns.campaign_name
+    marketing_plan: campaigns.campaign_name
+    browsing: campaigns.campaign_name
+  support_channel:
+    support: support_contacts.channel
+  payment_method:
+    orders: sales.payment_method
+  coupon:
+    orders: sales.coupon_code
+  # ---- product
+  category:
+    orders: product_master.category
+    browsing: product_master.category
+    listings: product_master.category
+    reviews: product_master.category
+    support: product_master.category
+    stock_history: product_master.category
+    stock_now: product_master.category
+    catalogue: product_master.category
+    prices: product_master.category
+  sub_category:
+    orders: product_master.sub_category
+    browsing: product_master.sub_category
+    listings: product_master.sub_category
+    reviews: product_master.sub_category
+    support: product_master.sub_category
+    stock_history: product_master.sub_category
+    stock_now: product_master.sub_category
+    catalogue: product_master.sub_category
+    prices: product_master.sub_category
+  article_type:
+    orders: product_master.article_type
+    reviews: product_master.article_type
+    stock_history: product_master.article_type
+    catalogue: product_master.article_type
+  brand:
+    orders: product_master.brand_name
+    browsing: product_master.brand_name
+    reviews: product_master.brand_name
+    stock_history: product_master.brand_name
+    stock_now: product_master.brand_name
+    catalogue: product_master.brand_name
+    prices: product_master.brand_name
+  product_gender:
+    orders: product_master.gender
+    reviews: product_master.gender
+    stock_history: product_master.gender
+    catalogue: product_master.gender
+  product:
+    orders: product_master.product_name
+    reviews: product_master.product_name
+    stock_history: product_master.product_name
+    stock_now: product_master.product_name
+    catalogue: product_master.product_name
+  size:
+    orders: product_skus.size
+    stock_history: product_skus.size
+    stock_now: product_skus.size
+  # ---- fulfilment, events, after-sales
+  courier:
+    orders: sales.courier
+  seller:
+    orders: sellers.seller_name
+    catalogue: sellers.seller_name
+  seller_city:
+    orders: sellers.city
+    catalogue: sellers.city
+  warehouse:
+    orders: warehouses.city
+    stock_history: warehouses.city
+    stock_now: warehouses.city
+  sale_event:
+    orders: {column: sale_events.name, note: measure an event by its date window (placed_at between start_date and
+      end_date); events overlap, so sales.event_id only says which event's price applied}
+    ad_spend: sale_events.name
+    prices: sale_events.name
+  return_reason:
+    orders: sales.return_reason
+  issue:
+    support: support_contacts.issue_category
+  review_aspect:
+    reviews: product_reviews.aspect
+  sentiment:
+    reviews: product_reviews.sentiment
+
+# Labels shown in clarifying questions, and groups: a value that fits concepts in DIFFERENT groups is
+# ambiguous ("Mumbai": a customer city, a seller's city, a warehouse, or a brand) and the user is asked;
+# concepts in the same group mean nearly the same filter ("Watches": sub-category or article type), so the
+# first one listed for the subject is used.
+concept_info:
+  city: {label: customers' / delivery city, group: customer_place}
+  state: {label: customers' / delivery state, group: customer_place}
+  region: {label: customers' / delivery region, group: customer_place}
+  city_tier: {label: city tier, group: customer_place}
+  pincode: {label: delivery pincode, group: customer_place}
+  customer_gender: {label: customer's gender, group: customer}
+  age_bracket: {label: customer's age bracket, group: customer}
+  prime: {label: Prime membership, group: customer}
+  new_or_repeat: {label: new vs repeat customer, group: customer}
+  device: {label: device, group: device}
+  traffic_source: {label: traffic source of the visit, group: traffic}
+  marketing_channel: {label: marketing channel, group: marketing}
+  channel_group: {label: marketing channel group, group: marketing}
+  campaign: {label: campaign, group: marketing}
+  support_channel: {label: support channel (how the customer contacted us), group: support}
+  payment_method: {label: payment method, group: payment}
+  coupon: {label: coupon code, group: payment}
+  category: {label: product category, group: product}
+  sub_category: {label: product sub-category, group: product}
+  article_type: {label: product article type, group: product}
+  brand: {label: brand, group: brand}
+  product_gender: {label: product gender (men's / women's), group: product}
+  product: {label: product, group: product}
+  size: {label: size, group: product}
+  courier: {label: courier, group: fulfilment}
+  seller: {label: seller, group: seller}
+  seller_city: {label: seller's city, group: seller}
+  warehouse: {label: warehouse (city), group: warehouse}
+  sale_event: {label: sale event, group: event}
+  return_reason: {label: return reason, group: returns}
+  issue: {label: support issue, group: support}
+  review_aspect: {label: review aspect, group: reviews}
+  sentiment: {label: review sentiment, group: reviews}
+
+# Words for identifiers: "order 12345" -> sales.order_id = 'OD000012345' (format measured by pantree-profile).
+id_entities:
+  order: sales.order_id
+  customer: customers.customer_id
+  product: product_master.product_id
+  sku: product_skus.sku_id
+  campaign: campaigns.campaign_id
+  ticket: support_contacts.ticket_id
+  contact: support_contacts.contact_id
+  seller: sellers.seller_id
+  review: product_reviews.review_id
+  shipment: sales.shipment_id
+  session: clickstream.session_id
+  transaction: sales.transaction_id
+  agent: agents.agent_id
+  event: sale_events.event_id

@@ -1,0 +1,311 @@
+# Query library: delivery, RTO, cancellations and returns. Reference queries for retrieval.
+area: delivery
+queries:
+  - id: lib-del-01
+    question: How many days does delivery take in each delivery region with each courier?
+    variants: [delivery time by region and courier, which courier is fastest in each region]
+    difficulty: hard
+    tags: [delivery, geography]
+    metrics: [avg_delivery_days]
+    verify:
+    - metric: avg_delivery_days
+      column: avg_delivery_days
+      by: {region: customer_addresses.region, courier: sales.courier}
+      partial: true
+    sql: |
+      SELECT a.region, s.courier,
+             SUM(date_diff('hour', s.placed_at, s.delivered_at)) / 24.0 / COUNT(s.delivered_at) AS avg_delivery_days,
+             COUNT(s.delivered_at) AS delivered_lines
+      FROM sales s JOIN customer_addresses a ON a.address_id = s.address_id
+      WHERE s.line_type = 'Sale'
+      GROUP BY 1, 2
+      HAVING COUNT(s.delivered_at) >= 100
+      ORDER BY 1, avg_delivery_days
+
+  - id: lib-del-02
+    question: Which couriers have the most parcels returned to origin?
+    variants: [RTO rate by courier, couriers with the most failed deliveries coming back]
+    difficulty: medium
+    tags: [rto, courier]
+    metrics: [rto_rate]
+    verify:
+    - metric: rto_rate
+      column: rto_rate
+      by: {courier: sales.courier}
+    sql: |
+      SELECT s.courier,
+             COUNT(*) FILTER (WHERE s.rto_at IS NOT NULL) * 1.0
+               / COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL) AS rto_rate,
+             COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL) AS shipped_lines
+      FROM sales s
+      WHERE s.line_type = 'Sale'
+      GROUP BY 1
+      ORDER BY rto_rate DESC
+
+  - id: lib-del-03
+    question: Which ten brands have the highest return rate among brands with real volume?
+    variants: [brands returned most often, return rate by brand]
+    difficulty: medium
+    tags: [returns, ranking]
+    metrics: [return_rate]
+    verify:
+    - metric: return_rate
+      column: return_rate
+      by: {brand_name: product_master.brand_name}
+      partial: true
+    sql: |
+      SELECT p.brand_name,
+             COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) * 1.0
+               / COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS return_rate,
+             COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS delivered_lines
+      FROM sales s JOIN product_master p ON p.product_id = s.product_id
+      WHERE s.line_type = 'Sale'
+      GROUP BY 1
+      HAVING COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) >= 300
+      ORDER BY return_rate DESC
+      LIMIT 10
+
+  - id: lib-del-04
+    question: How long does it take from a return request to the refund, for each way a return is settled?
+    variants: [refund turnaround time, days to refund by return type]
+    difficulty: hard
+    tags: [returns, timing, median]
+    metrics: []
+    sql: |
+      SELECT s.return_type,
+             COUNT(*) AS returned_lines,
+             MEDIAN(date_diff('day', s.return_requested_at, s.refunded_at)) AS median_days_to_refund,
+             SUM(s.refund_amount) AS refunded_amount
+      FROM sales s
+      WHERE s.line_type = 'Sale' AND s.return_requested_at IS NOT NULL
+      GROUP BY 1
+      ORDER BY returned_lines DESC
+
+  - id: lib-del-05
+    question: For each return reason, how much of the returned stock passes quality checks and goes back on sale?
+    variants: [return QC results by reason, damaged returns by return reason]
+    difficulty: medium
+    tags: [returns, quality]
+    metrics: []
+    sql: |
+      SELECT s.return_reason,
+             COUNT(*) FILTER (WHERE s.return_qc_result IS NOT NULL) AS inspected_lines,
+             AVG(CASE WHEN s.return_qc_result = 'Restocked' THEN 1.0 ELSE 0 END)
+               FILTER (WHERE s.return_qc_result IS NOT NULL) AS restocked_share
+      FROM sales s
+      WHERE s.line_type = 'Sale' AND s.return_requested_at IS NOT NULL
+      GROUP BY 1
+      ORDER BY inspected_lines DESC
+
+  - id: lib-del-06
+    question: How often are orders cancelled on each device, and who cancels them?
+    variants: [cancellation rate by device, customer versus seller cancellations]
+    difficulty: medium
+    tags: [cancellations, device]
+    metrics: [cancellation_rate]
+    verify:
+    - metric: cancellation_rate
+      column: cancellation_rate
+      by: {device: sales.device}
+    sql: |
+      SELECT s.device,
+             COUNT(*) FILTER (WHERE s.cancelled_at IS NOT NULL) * 1.0 / COUNT(*) AS cancellation_rate,
+             COUNT(*) FILTER (WHERE s.cancelled_by = 'Customer') AS cancelled_by_customer,
+             COUNT(*) FILTER (WHERE s.cancelled_by = 'Seller') AS cancelled_by_seller,
+             COUNT(*) AS lines
+      FROM sales s
+      WHERE s.line_type = 'Sale'
+      GROUP BY 1
+      ORDER BY cancellation_rate DESC
+
+  - id: lib-del-07
+    question: Which delivery pincodes see the most late deliveries, among those with real volume?
+    variants: [late delivery rate by pincode, worst pincodes for on-time delivery]
+    difficulty: medium
+    tags: [delivery, geography]
+    metrics: [late_delivery_rate]
+    verify:
+    - metric: late_delivery_rate
+      column: late_delivery_rate
+      by: {ship_pincode: sales.ship_pincode}
+      partial: true
+    sql: |
+      SELECT s.ship_pincode,
+             COUNT(*) FILTER (WHERE CAST(s.delivered_at AS DATE) > CAST(s.promised_delivery_date AS DATE)) * 1.0
+               / COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS late_delivery_rate,
+             COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS delivered_lines
+      FROM sales s
+      WHERE s.line_type = 'Sale'
+      GROUP BY 1
+      HAVING COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) >= 50
+      ORDER BY late_delivery_rate DESC
+      LIMIT 10
+    notes: A pincode has at most about 145 deliveries, so rates rest on small numbers; 50 deliveries is the floor.
+
+  - id: lib-del-08
+    question: What share of deliveries arrive within 2, 3, 5 and 7 days of the order?
+    variants: [delivery speed distribution, how many orders arrive within three days]
+    difficulty: medium
+    tags: [delivery, bands]
+    metrics: []
+    sql: |
+      SELECT CASE WHEN date_diff('day', s.placed_at, s.delivered_at) <= 2 THEN '1. within 2 days'
+                  WHEN date_diff('day', s.placed_at, s.delivered_at) <= 3 THEN '2. 3 days'
+                  WHEN date_diff('day', s.placed_at, s.delivered_at) <= 5 THEN '3. 4-5 days'
+                  WHEN date_diff('day', s.placed_at, s.delivered_at) <= 7 THEN '4. 6-7 days'
+                  ELSE '5. more than 7 days' END AS delivery_speed,
+             COUNT(*) AS delivered_lines,
+             COUNT(*) * 1.0 / SUM(COUNT(*)) OVER () AS share
+      FROM sales s
+      WHERE s.line_type = 'Sale' AND s.delivered_at IS NOT NULL
+      GROUP BY 1
+      ORDER BY 1
+
+  - id: lib-del-09
+    question: In each category, how are returns settled - refund, exchange or store credit?
+    variants: [exchange versus refund share by category, how customers take their returns]
+    difficulty: medium
+    tags: [returns, share within group]
+    metrics: []
+    sql: |
+      SELECT p.category, s.return_type,
+             COUNT(*) AS returned_lines,
+             COUNT(*) * 1.0 / SUM(COUNT(*)) OVER (PARTITION BY p.category) AS share_of_category_returns
+      FROM sales s JOIN product_master p ON p.product_id = s.product_id
+      WHERE s.line_type = 'Sale' AND s.return_type IS NOT NULL
+      GROUP BY 1, 2
+      ORDER BY 1, returned_lines DESC
+
+  - id: lib-del-10
+    question: How did late deliveries and delivery time move month by month in 2026?
+    variants: [on-time delivery trend this year, monthly delivery performance]
+    difficulty: medium
+    tags: [delivery, trend]
+    metrics: [late_delivery_rate, avg_delivery_days]
+    verify:
+    - metric: late_delivery_rate
+      column: late_delivery_rate
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
+    - metric: avg_delivery_days
+      column: avg_delivery_days
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
+    sql: |
+      SELECT date_trunc('month', s.placed_at) AS month,
+             COUNT(*) FILTER (WHERE CAST(s.delivered_at AS DATE) > CAST(s.promised_delivery_date AS DATE)) * 1.0
+               / COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS late_delivery_rate,
+             SUM(date_diff('hour', s.placed_at, s.delivered_at)) / 24.0 / COUNT(s.delivered_at) AS avg_delivery_days,
+             COUNT(s.delivered_at) AS delivered_lines
+      FROM sales s
+      WHERE s.line_type = 'Sale' AND s.placed_at >= TIMESTAMP '2026-01-01'
+      GROUP BY 1
+      ORDER BY 1
+    notes: The latest weeks still have orders in transit.
+
+  - id: lib-del-11
+    question: How do cancellation, RTO and return rates compare across sale events and normal days?
+    variants: [post-purchase problems during sale events, do sale orders get cancelled or returned more]
+    difficulty: hard
+    tags: [events, returns, comparison]
+    metrics: [cancellation_rate, rto_rate, return_rate]
+    verify:
+    - metric: cancellation_rate
+      column: cancellation_rate
+      by: {price_context: CASE WHEN sale_events.event_id IS NULL THEN 'Normal price' ELSE sale_events.event_type END}
+    - metric: rto_rate
+      column: rto_rate
+      by: {price_context: CASE WHEN sale_events.event_id IS NULL THEN 'Normal price' ELSE sale_events.event_type END}
+    - metric: return_rate
+      column: return_rate
+      by: {price_context: CASE WHEN sale_events.event_id IS NULL THEN 'Normal price' ELSE sale_events.event_type END}
+    sql: |
+      SELECT CASE WHEN e.event_id IS NULL THEN 'Normal price' ELSE e.event_type END AS price_context,
+             COUNT(*) FILTER (WHERE s.cancelled_at IS NOT NULL) * 1.0 / COUNT(*) AS cancellation_rate,
+             COUNT(*) FILTER (WHERE s.rto_at IS NOT NULL) * 1.0
+               / NULLIF(COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL), 0) AS rto_rate,
+             COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) * 1.0
+               / NULLIF(COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL), 0) AS return_rate,
+             COUNT(*) AS lines
+      FROM sales s LEFT JOIN sale_events e ON e.event_id = s.event_id
+      WHERE s.line_type = 'Sale'
+      GROUP BY 1
+      ORDER BY lines DESC
+    notes: sales.event_id says which event's price applied to a line; it is the right link for price-driven
+      behaviour (to measure an event's total sales, use its date window instead).
+
+  - id: lib-del-12
+    question: How long do parcels sit between being confirmed and being shipped, by seller type?
+    variants: [time to ship by seller type, dispatch delay for 1P versus 3P sellers]
+    difficulty: medium
+    tags: [fulfilment, sellers, median]
+    metrics: []
+    sql: |
+      SELECT se.seller_type,
+             COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL) AS shipped_lines,
+             MEDIAN(date_diff('hour', s.confirmed_at, s.shipped_at)) AS median_hours_to_ship
+      FROM sales s JOIN sellers se ON se.seller_id = s.seller_id
+      WHERE s.line_type = 'Sale' AND s.shipped_at IS NOT NULL
+      GROUP BY 1
+      ORDER BY median_hours_to_ship
+
+  - id: lib-del-13
+    question: For cash-on-delivery orders, how long after delivery is the money collected, by courier?
+    variants: [COD collection time by courier, cash collection delay]
+    difficulty: medium
+    tags: [payments, courier, median]
+    metrics: []
+    sql: |
+      SELECT s.courier,
+             COUNT(*) AS cod_delivered_lines,
+             MEDIAN(date_diff('hour', s.delivered_at, s.payment_collected_at)) AS median_hours_to_collect
+      FROM sales s
+      WHERE s.line_type = 'Sale' AND s.payment_method = 'COD' AND s.delivered_at IS NOT NULL
+        AND s.payment_collected_at IS NOT NULL
+      GROUP BY 1
+      ORDER BY median_hours_to_collect
+
+  - id: lib-del-14
+    question: Which delivery cities in the north have the highest return rate?
+    variants: [return rate by city in the north region, northern cities with most returns]
+    difficulty: hard
+    tags: [returns, geography]
+    metrics: [return_rate]
+    verify:
+    - metric: return_rate
+      column: return_rate
+      by: {ship_city: sales.ship_city}
+      where: [customer_addresses.region = 'North']
+    sql: |
+      SELECT s.ship_city,
+             COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) * 1.0
+               / COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS return_rate,
+             COUNT(*) FILTER (WHERE s.delivered_at IS NOT NULL) AS delivered_lines
+      FROM sales s JOIN customer_addresses a ON a.address_id = s.address_id
+      WHERE s.line_type = 'Sale' AND a.region = 'North'
+      GROUP BY 1
+      ORDER BY return_rate DESC
+
+  - id: lib-del-15
+    question: Rank the delivery regions by how often parcels come back undelivered.
+    variants: [RTO ranking by region, which regions have the most returned-to-origin parcels]
+    difficulty: medium
+    tags: [rto, geography, ranking]
+    metrics: [rto_rate]
+    verify:
+    - metric: rto_rate
+      column: rto_rate
+      by: {region: customer_addresses.region}
+    sql: |
+      WITH rto AS (
+        SELECT a.region,
+               COUNT(*) FILTER (WHERE s.rto_at IS NOT NULL) * 1.0
+                 / COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL) AS rto_rate,
+               COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL) AS shipped_lines
+        FROM sales s JOIN customer_addresses a ON a.address_id = s.address_id
+        WHERE s.line_type = 'Sale'
+        GROUP BY 1)
+      SELECT region, rto_rate, shipped_lines,
+             RANK() OVER (ORDER BY rto_rate DESC) AS rto_rank
+      FROM rto
+      ORDER BY rto_rank

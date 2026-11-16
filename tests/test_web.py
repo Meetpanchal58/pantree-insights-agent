@@ -30,11 +30,16 @@ def analysis(user):
             "chart_metric": "realized_revenue", "claims": [claim]}
 
 
+FRAME = {"restated_question": "Realized revenue by category", "subjects": ["orders"], "breakdowns": ["category"]}
+
+
 def responder(agent, schema, system, user):
     PROMPTS.append((agent, user))
+    if agent == "understander":                  # the understanding step asks; the planner no longer does
+        if "clarify me" in user and "answers so far" not in user:
+            return {**FRAME, "open_points": CLARIFY["clarifying_questions"]}
+        return FRAME
     if agent == "planner":
-        if "clarify me" in user and "answers to your clarifying questions" not in user:
-            return CLARIFY
         return PLAN
     return {"sql_writer": {"sql": GOOD_SQL, "explanation": "x"}, "validator": {"ok": True}}.get(agent) or analysis(user)
 
@@ -86,13 +91,21 @@ def sign_in(client, codes, email="ana@example.com"):
     assert client.post("/auth/email/verify", json={"email": email, "code": codes[email]}).status_code == 200
 
 
-def run_to_end(client, run_id, since=0):
+def run_to_end(client, run_id, since=0, confirm=True):
+    """Stream a run; read-backs are confirmed automatically (other clarifying questions are returned)."""
+    from pantree_insights.graph import CONFIRM_QUESTION, CONFIRM_YES
+
     events = []
-    with client.stream("GET", f"/api/runs/{run_id}/stream?since={since}") as r:
-        for line in r.iter_lines():
-            if line.startswith("data: "):
-                events.append(json.loads(line[6:]))
-    return events
+    while True:
+        with client.stream("GET", f"/api/runs/{run_id}/stream?since={since + len(events)}") as r:
+            for line in r.iter_lines():
+                if line.startswith("data: "):
+                    events.append(json.loads(line[6:]))
+        last = events[-1] if events else {}
+        if not (confirm and last.get("type") == "clarify" and last.get("kind") == "confirm"):
+            return events
+        answer = client.post(f"/api/runs/{run_id}/answer", json={"answers": {CONFIRM_QUESTION: CONFIRM_YES}})
+        assert answer.status_code == 200
 
 
 def test_signed_out(app_env):
@@ -196,3 +209,16 @@ def test_demo_replay(app_env):
     with client.stream("GET", "/api/demos/demo-q/stream") as r:
         lines = [json.loads(x[6:]) for x in r.iter_lines() if x.startswith("data: ")]
     assert [e["type"] for e in lines] == ["step", "step", "final"] and all(e["replay"] for e in lines)
+
+
+def test_readback_is_sent_to_the_browser_and_confirming_finishes(app_env):
+    from pantree_insights.graph import CONFIRM_QUESTION, CONFIRM_YES
+
+    client, codes, _ = app_env
+    sign_in(client, codes)
+    chat = client.post("/api/chats", json={}).json()
+    run_id = client.post(f"/api/chats/{chat['id']}/ask", json={"question": "Revenue by category?"}).json()["run_id"]
+    events = run_to_end(client, run_id, confirm=False)
+    assert events[-1]["kind"] == "confirm" and "**Measure:**" in events[-1]["readback"]
+    client.post(f"/api/runs/{run_id}/answer", json={"answers": {CONFIRM_QUESTION: CONFIRM_YES}})
+    assert run_to_end(client, run_id, since=len(events))[-1]["status"] == "done"

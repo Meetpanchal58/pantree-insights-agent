@@ -77,8 +77,8 @@ in the holdout runs verified). The previous regex check accepted 100% of random 
 ratios and 32% of random counts on an 8-row table; the claim check accepts 0.10-0.45%
 (`evals/reports/grounding_2026-11-15_1318.md`).
 
-**Retrieval** (no LLM; `evals/reports/retrieval_2026-11-15_1444.md`): all required tables, metrics, joins
-and values retrieved for 31/31 holdout and 28/28 regression questions, median 53 ms.
+**Retrieval** (no LLM; `evals/reports/retrieval_2026-11-15_1527.md`): all required tables, metrics, joins
+and values retrieved for 31/31 holdout and 28/28 regression questions, median 60 ms.
 
 **After the failure-analysis fixes** (one more run each, k=1; `e2e_holdout_full_r3-3_*`,
 `e2e_regression_full_r1-1_*`). The fixes came from the failures above: glossary phrases that bring their
@@ -126,8 +126,11 @@ other alerts a week. Neither catches small changes well (+25%: 5/26 vs 3/26).
 flowchart LR
     Q[Business question] --> IC[Input check]
     IC --> R[Hybrid retrieval<br/>tables, metrics, joins,<br/>values, examples]
-    R --> P[Planner<br/>intent, tables, join path,<br/>grain - or asks / declines]
-    P -->|unclear| C[Clarifying questions] --> P
+    R --> U[Understanding<br/>subject, measures, mentions,<br/>cuts, period, open points]
+    U --> RS[Resolve in code<br/>concept map, values, IDs,<br/>join path]
+    RS -->|anything unclear| C[Clarifying questions<br/>round after round] --> U
+    RS --> RB[Read-back<br/>'here is what I'll compute'<br/>confirm or correct] -->|correction| U
+    RB -->|confirmed| P[Planner<br/>metrics, grain - or declines]
     P --> W[SQL writer]
     W --> G[SQL guardrails<br/>read-only, approved<br/>tables and joins]
     G --> DB[(DuckDB<br/>read-only views)]
@@ -135,6 +138,10 @@ flowchart LR
     G -.->|error| W
     DB -.->|error / empty| W
     V -.->|wrong query| W
+    DB --> RC[Result checks<br/>filters used, no repeated<br/>rows, rates 0-100%]
+    RC --> NV[Number check<br/>metric recomputed from<br/>its definition]
+    RC -.->|problem| W
+    NV -.->|mismatch| W
     V --> A[Analyst<br/>findings, actions,<br/>caveats]
     A --> N[Claim check] --> CH[Chart] --> OUT[Answer + chart + SQL<br/>+ exports]
     S[(semantic/<br/>metrics, schema,<br/>examples)] -.-> R
@@ -158,14 +165,22 @@ flowchart LR
 |---|---|
 | `semantic/schema.yaml` | The 22 tables the agent may query: grain, keys, column notes, join paths. Blocked tables and columns are listed with the reason. |
 | `semantic/metrics.yaml` | **One definition per business number**: realized revenue, AOV, return rate, RTO rate, conversion, ROAS, CAC and 26 more (33 in total). The agent must use these, so "revenue" always means the same thing. |
-| `semantic/examples.yaml` | 28 verified question → SQL pairs (easy to hard), used as examples and in evals. |
+| `semantic/examples.yaml` | 28 verified question → SQL pairs (easy to hard), used as examples and scored in the regression suite. |
+| `semantic/library/` | **Query library**: 128 reference queries in 7 areas (sales, customers, funnel, marketing, inventory, delivery, support), each with other phrasings and the metrics it computes. Together with the examples they use every table, all 40 approved joins, all 33 metrics, every concept column and 25 SQL patterns (CTEs, top-N per group, cohorts, funnels, period comparisons, running totals, basket pairs, ...). Retrieval only, never scored; tests check each query passes the guardrails, runs, has no duplicate rows, computes the metrics it claims, and does not contain the answer to any scored question. `evals/library_coverage.py` reports coverage. |
+| `semantic/concepts.yaml` | **What a word means depends on what the question is about.** 14 subjects (orders, sign-ups, browsing, ad spend, attribution, support, reviews, stock, ...) with their table and dates, and 33 concepts (city, region, device, channel, category, sale event, ...) mapped per subject to a column: "Mumbai" about orders is `sales.ship_city`, about sign-ups `customers.city`. Plus ID words ("order 12345" → `order_id = 'OD000012345'`). |
 | `semantic/glossary.yaml` | Words people use: "cash on delivery" → `'COD'`, "shoes" → `'Footwear'`; terms such as GMV, RTO, ROAS, CAC; phrases that bring their tables ("delivery region" → `customer_addresses`). |
 | `src/pantree_insights/db.py` | Downloads the shop and exposes it as DuckDB views. After setup the connection cannot read other files, write, install extensions or change settings. |
 | `src/pantree_insights/guardrails.py` | Code checks (no LLM): one read-only SELECT, allowed tables, columns and joins only, no table functions, no `SELECT *` or whole-row arguments, results summarised or limited, identifier grain only as a ranked top-N; a cheap question pre-filter (explicit personal-data requests, prompt injection). |
 | `src/pantree_insights/grounding.py` | Structured claims: the analyst writes `{c1}` placeholders and a claim per number; each is recomputed from the result (value, difference, ratio, share, change, sum, mean) and rendered in the text. |
+| `src/pantree_insights/profile.py` | `pantree-profile`: facts measured from the data: ID formats (18 types), null shares, ranges, date coverage, and each approved join's cardinality and unmatched rows. Found that joining sales to promotions on the coupon code alone inflates coupon revenue by 7% (codes are re-issued), now a join rule the guardrail enforces. |
+| `src/pantree_insights/joins.py` | Join paths built in code from the question's table to the tables it needs (bridge tables added), avoiding joins that repeat rows and flagging them when unavoidable. |
+| `src/pantree_insights/understanding.py` | Turns the understanding agent's reading into exact filters, columns, time column and join path; asks the user when a word fits meanings in different groups ("Mumbai": a customer city, a seller's city, a warehouse or a brand) or a cut does not exist for the subject. |
+| `src/pantree_insights/references.py`, `sqlinfo.py` | After the question is understood, picks the reference queries that use the **same tables, columns and metrics** (parsed with sqlglot), so a question worded unlike any reference still gets the right SQL pattern. |
+| `src/pantree_insights/recompute.py` | **Numbers checked against the data.** Builds each metric's SQL from its `metrics.yaml` definition with code-built LEFT JOINs, independent of the LLM. Build time: 52 library queries (78 result columns) must match it row by row within 1% on the small and the full shop; the rest are marked pattern-only. Runtime: after the agent's query runs, each confirmed metric is recomputed for the confirmed scope; a mismatch goes back to the SQL writer with the recomputed numbers, a match marks the answer "Numbers verified against the data", and what cannot be recomputed is shown as "not independently verified". No false alarm on the 78 verified library columns. |
+| `src/pantree_insights/checks.py` | Result checks in code, before the LLM validator: every filter the understanding resolved must be in the SQL on the right table ("sellers.city", not "customers.city"); no repeated rows; no empty columns; rates within 0-100%. Zero false alarms on the 156 reference queries; on the agent's SQL from earlier paid runs it flags 5 of 38 wrong answers and 1 of 207 correct ones. |
 | `src/pantree_insights/retrieval.py` | Hybrid search (LlamaIndex: BM25 keywords + local `bge-small` embeddings, fused by reciprocal rank) over four indexes: tables, metrics, examples and ~2,000 real filter values. Returns the tables, join paths, metric definitions, exact values and similar examples a question needs, in ~60 ms. With each example held out, it finds every table the example's SQL needs for 28 of 28. |
 | `prompts/agents.yaml` | The agents' instructions, editable without touching code. |
-| `src/pantree_insights/agents.py` | Four agents, each one structured LLM call with a typed result: **planner** (turns the question into an analysis plan, or asks up to 3 clarifying questions with a recommended default, or declines), **SQL writer**, **validator** (does the SQL answer what was asked?) and **analyst** (headline, findings, recommendations, caveats, facts to remember). |
+| `src/pantree_insights/agents.py` | Five agents, each one structured LLM call with a typed result: **understanding** (what exactly is asked, and every open point that would change the numbers: no fixed limit, asked round after round until nothing is unclear; a safety stop after 6 rounds; then the resolved reading is shown back in business words - measure definition, cut, period, filters - and nothing is computed until the user confirms or corrects it), **planner** (turns the understood question into an analysis plan, or declines), **SQL writer**, **validator** (does the SQL answer what was asked?) and **analyst** (headline, findings, recommendations, caveats, facts to remember). |
 | `src/pantree_insights/graph.py` | The LangGraph flow: retries with the exact error when the guardrails, the database or the validator reject a query (max 3 attempts); pauses for clarifying questions and resumes with the answers; verifies every claim against the result (one rewrite, then a warning); picks a chart; saves the insight to memory only if it verified. Streams a progress event per step. |
 | `src/pantree_insights/memory.py` | Saves verified answers as insights (facts with numbers, SQL and data date), finds related insights (up to 30 days old) and open gaps for new questions, and closes gaps an answer explains. |
 | `src/pantree_insights/charts.py` | Picks the chart from the result's shape (line, bar, grouped bars, scatter or KPI cards) and builds Plotly JSON for the browser and exports. |
@@ -260,6 +275,10 @@ uv run python evals/run_eval.py --dry-run                         # free: suites
 
 ```bash
 uv run python evals/retrieval_eval.py                             # free: retrieval recall/precision
+```
+
+```bash
+uv run python evals/library_coverage.py --run                     # free: query-library coverage + run every query
 ```
 
 ```bash

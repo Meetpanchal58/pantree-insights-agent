@@ -1,0 +1,364 @@
+# Query library: customer support and product reviews. Reference queries for retrieval.
+area: support
+queries:
+  - id: lib-sup-01
+    question: How many support tickets do we get per 1,000 orders in each product category?
+    variants: [support contact rate by category, which categories generate the most tickets per order]
+    difficulty: hard
+    tags: [support, rate]
+    metrics: [orders]
+    sql: |
+      WITH tickets AS (
+        SELECT p.category, COUNT(DISTINCT t.ticket_id) AS tickets
+        FROM support_contacts t JOIN product_master p ON p.product_id = t.product_id
+        GROUP BY 1),
+      orders AS (
+        SELECT p.category, COUNT(DISTINCT s.order_id) AS orders
+        FROM sales s JOIN product_master p ON p.product_id = s.product_id
+        WHERE s.line_type = 'Sale'
+        GROUP BY 1)
+      SELECT o.category, o.orders, t.tickets, t.tickets * 1000.0 / o.orders AS tickets_per_1000_orders
+      FROM orders o LEFT JOIN tickets t ON t.category = o.category
+      ORDER BY tickets_per_1000_orders DESC
+    notes: Tickets without a product (account or payment issues) are not in any category.
+
+  - id: lib-sup-02
+    question: Which kinds of issues get resolved most often?
+    variants: [resolution rate by issue category, which problems stay unresolved]
+    difficulty: hard
+    tags: [support, resolution]
+    metrics: [ticket_resolution_rate, support_tickets]
+    sql: |
+      WITH tk AS (
+        SELECT ticket_id, arg_min(issue_category, contact_at) AS issue_category,
+               arg_max(resolution_status, contact_at) AS resolution_status
+        FROM support_contacts
+        GROUP BY ticket_id)
+      SELECT tk.issue_category,
+             COUNT(*) AS support_tickets,
+             COUNT(*) FILTER (WHERE tk.resolution_status = 'Resolved') * 1.0 / COUNT(*) AS ticket_resolution_rate
+      FROM tk
+      GROUP BY 1
+      ORDER BY ticket_resolution_rate
+    notes: A ticket's issue is its first contact's; its status is its latest contact's (metrics.yaml tickets source).
+
+  - id: lib-sup-03
+    question: How satisfied are customers, and how fast is the first reply, for each support team?
+    variants: [CSAT and response time by agent team, which support team performs best]
+    difficulty: medium
+    tags: [support, agents]
+    metrics: [avg_csat, avg_first_response_minutes]
+    verify:
+    - metric: avg_csat
+      column: avg_csat
+      by: {team: agents.team}
+    - metric: avg_first_response_minutes
+      column: avg_first_response_minutes
+      by: {team: agents.team}
+    sql: |
+      SELECT ag.team,
+             COUNT(*) AS contacts,
+             SUM(sc.csat) / COUNT(sc.csat) AS avg_csat,
+             SUM(sc.first_response_minutes) / COUNT(sc.first_response_minutes) AS avg_first_response_minutes
+      FROM support_contacts sc JOIN agents ag ON ag.agent_id = sc.agent_id
+      GROUP BY 1
+      ORDER BY avg_csat DESC
+
+  - id: lib-sup-04
+    question: How many tickets need more than one contact, and does that hurt satisfaction?
+    variants: [repeat contacts per ticket, first contact resolution and CSAT]
+    difficulty: hard
+    tags: [support, repeat contact]
+    metrics: []
+    sql: |
+      WITH per_ticket AS (
+        SELECT sc.ticket_id, COUNT(*) AS contacts, AVG(sc.csat) AS csat
+        FROM support_contacts sc
+        GROUP BY 1)
+      SELECT CASE WHEN contacts = 1 THEN '1 contact' WHEN contacts = 2 THEN '2 contacts' ELSE '3+ contacts' END
+               AS contacts_per_ticket,
+             COUNT(*) AS tickets,
+             COUNT(*) * 1.0 / SUM(COUNT(*)) OVER () AS share_of_tickets,
+             AVG(csat) AS avg_csat
+      FROM per_ticket
+      GROUP BY 1
+      ORDER BY 1
+
+  - id: lib-sup-05
+    question: What do customers in each region contact support about?
+    variants: [support issues by customer region, regional differences in complaints]
+    difficulty: medium
+    tags: [support, geography]
+    metrics: []
+    sql: |
+      SELECT c.region, sc.issue_category,
+             COUNT(DISTINCT sc.ticket_id) AS tickets,
+             COUNT(DISTINCT sc.ticket_id) * 1.0
+               / SUM(COUNT(DISTINCT sc.ticket_id)) OVER (PARTITION BY c.region) AS share_of_region_tickets
+      FROM support_contacts sc JOIN customers c ON c.customer_id = sc.customer_id
+      GROUP BY 1, 2
+      ORDER BY 1, tickets DESC
+
+  - id: lib-sup-06
+    question: Do verified buyers rate products differently from unverified reviewers?
+    variants: [ratings of verified versus unverified purchases, are verified reviews harsher]
+    difficulty: medium
+    tags: [reviews]
+    metrics: [avg_rating, negative_review_share]
+    verify:
+    - metric: avg_rating
+      column: avg_rating
+      by: {verified_purchase: product_reviews.verified_purchase}
+    - metric: negative_review_share
+      column: negative_review_share
+      by: {verified_purchase: product_reviews.verified_purchase}
+    sql: |
+      SELECT r.verified_purchase,
+             COUNT(*) AS reviews,
+             SUM(r.rating) / COUNT(r.rating) AS avg_rating,
+             COUNT(*) FILTER (WHERE r.sentiment = 'Negative') * 1.0 / COUNT(*) AS negative_review_share
+      FROM product_reviews r
+      WHERE r.moderation_status = 'Published'
+      GROUP BY 1
+      ORDER BY 1
+
+  - id: lib-sup-07
+    question: Which ten brands get the most negative reviews, among brands with enough reviews?
+    variants: [brands with the worst sentiment, negative review share by brand]
+    difficulty: medium
+    tags: [reviews, ranking]
+    metrics: [negative_review_share, avg_rating]
+    verify:
+    - metric: negative_review_share
+      column: negative_review_share
+      by: {brand_name: product_master.brand_name}
+      partial: true
+    - metric: avg_rating
+      column: avg_rating
+      by: {brand_name: product_master.brand_name}
+      partial: true
+    sql: |
+      SELECT p.brand_name,
+             COUNT(*) AS reviews,
+             COUNT(*) FILTER (WHERE r.sentiment = 'Negative') * 1.0 / COUNT(*) AS negative_review_share,
+             SUM(r.rating) / COUNT(r.rating) AS avg_rating
+      FROM product_reviews r JOIN product_master p ON p.product_id = r.product_id
+      WHERE r.moderation_status = 'Published'
+      GROUP BY 1
+      HAVING COUNT(*) >= 40
+      ORDER BY negative_review_share DESC
+      LIMIT 10
+
+  - id: lib-sup-08
+    question: Do late deliveries lead to worse product ratings?
+    variants: [rating when delivery was late versus on time, effect of late delivery on reviews]
+    difficulty: hard
+    tags: [reviews, delivery, comparison]
+    metrics: [avg_rating]
+    sql: |
+      SELECT CASE WHEN CAST(s.delivered_at AS DATE) > CAST(s.promised_delivery_date AS DATE) THEN 'Late'
+                  ELSE 'On time' END AS delivery,
+             COUNT(*) AS reviews,
+             SUM(r.rating) / COUNT(r.rating) AS avg_rating,
+             AVG(CASE WHEN r.rating <= 2 THEN 1.0 ELSE 0 END) AS low_rating_share
+      FROM product_reviews r JOIN sales s ON s.transaction_id = r.transaction_id
+      WHERE r.moderation_status = 'Published' AND s.delivered_at IS NOT NULL
+      GROUP BY 1
+      ORDER BY 1
+    notes: An association, not proof of cause; each review belongs to one sale line (1:1).
+
+  - id: lib-sup-09
+    question: For each courier, what share of delivered orders led to a support contact?
+    variants: [support contacts per order by courier, which couriers cause the most tickets]
+    difficulty: hard
+    tags: [support, courier]
+    metrics: []
+    sql: |
+      WITH contacted AS (
+        SELECT sc.transaction_id, COUNT(*) AS contacts
+        FROM support_contacts sc
+        WHERE sc.transaction_id IS NOT NULL
+        GROUP BY 1)
+      SELECT s.courier,
+             COUNT(DISTINCT s.order_id) AS delivered_orders,
+             COUNT(DISTINCT CASE WHEN ct.transaction_id IS NOT NULL THEN s.order_id END) * 1.0
+               / COUNT(DISTINCT s.order_id) AS share_with_contact
+      FROM sales s LEFT JOIN contacted ct ON ct.transaction_id = s.transaction_id
+      WHERE s.line_type = 'Sale' AND s.delivered_at IS NOT NULL
+      GROUP BY 1
+      ORDER BY share_with_contact DESC
+    notes: Contacts are counted per sale line first (a line can have several contacts), so lines are not repeated.
+
+  - id: lib-sup-10
+    question: How do customers in different age brackets rate what they buy?
+    variants: [average rating by customer age, review sentiment by age group]
+    difficulty: medium
+    tags: [reviews, age]
+    metrics: [avg_rating]
+    verify:
+    - metric: avg_rating
+      column: avg_rating
+      by: {age_bracket: customers.age_bracket}
+    sql: |
+      SELECT c.age_bracket,
+             COUNT(*) AS reviews,
+             SUM(r.rating) / COUNT(r.rating) AS avg_rating
+      FROM product_reviews r JOIN customers c ON c.customer_id = r.customer_id
+      WHERE r.moderation_status = 'Published'
+      GROUP BY 1
+      ORDER BY 1
+
+  - id: lib-sup-11
+    question: How has the average product rating moved month by month, with a three-month moving average?
+    variants: [rating trend over time, are reviews getting better or worse]
+    difficulty: hard
+    tags: [reviews, trend, moving average]
+    metrics: [avg_rating]
+    verify:
+    - metric: avg_rating
+      column: avg_rating
+      by: {month: 'date_trunc(''month'', product_reviews.reviewed_at)'}
+    sql: |
+      WITH monthly AS (
+        SELECT date_trunc('month', r.reviewed_at) AS month,
+               SUM(r.rating) / COUNT(r.rating) AS avg_rating,
+               COUNT(*) AS reviews
+        FROM product_reviews r
+        WHERE r.moderation_status = 'Published'
+        GROUP BY 1)
+      SELECT month, avg_rating, reviews,
+             AVG(avg_rating) OVER (ORDER BY month ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS rating_3m_avg
+      FROM monthly
+      ORDER BY month
+
+  - id: lib-sup-12
+    question: Which review aspects are mentioned most for each category, and how negative are they?
+    variants: [what reviews talk about by category, top review topics per category]
+    difficulty: hard
+    tags: [reviews, top n per group]
+    metrics: [negative_review_share]
+    sql: |
+      WITH aspects AS (
+        SELECT p.category, r.aspect, COUNT(*) AS reviews,
+               COUNT(*) FILTER (WHERE r.sentiment = 'Negative') * 1.0 / COUNT(*) AS negative_review_share
+        FROM product_reviews r JOIN product_master p ON p.product_id = r.product_id
+        WHERE r.moderation_status = 'Published'
+        GROUP BY 1, 2)
+      SELECT category, aspect, reviews, negative_review_share,
+             RANK() OVER (PARTITION BY category ORDER BY reviews DESC) AS rank_in_category
+      FROM aspects
+      QUALIFY rank_in_category <= 3
+      ORDER BY category, rank_in_category
+
+  - id: lib-sup-13
+    question: How quickly are tickets resolved, by contact channel and issue?
+    variants: [time to resolve by channel, resolution speed for each issue type]
+    difficulty: hard
+    tags: [support, timing, median]
+    metrics: []
+    sql: |
+      SELECT sc.channel, sc.issue_category,
+             COUNT(*) FILTER (WHERE sc.resolved_at IS NOT NULL) AS resolved_contacts,
+             MEDIAN(date_diff('hour', sc.contact_at, sc.resolved_at)) AS median_hours_to_resolve
+      FROM support_contacts sc
+      WHERE sc.resolved_at IS NOT NULL
+      GROUP BY 1, 2
+      HAVING COUNT(*) >= 30
+      ORDER BY 1, median_hours_to_resolve
+
+  - id: lib-sup-14
+    question: Which support agents handle the most contacts, and what satisfaction do they get?
+    variants: [top agents by volume and CSAT, agent workload]
+    difficulty: medium
+    tags: [support, agents, ranking]
+    metrics: [avg_csat]
+    verify:
+    - metric: avg_csat
+      column: avg_csat
+      by: {agent_id: agents.agent_id, team: agents.team, location: agents.location}
+      partial: true
+    sql: |
+      SELECT ag.agent_id, ag.team, ag.location,
+             COUNT(*) AS contacts,
+             SUM(sc.csat) / COUNT(sc.csat) AS avg_csat
+      FROM support_contacts sc JOIN agents ag ON ag.agent_id = sc.agent_id
+      GROUP BY 1, 2, 3
+      ORDER BY contacts DESC
+      LIMIT 15
+    notes: Agents are identified by ID, not by name.
+
+  - id: lib-sup-15
+    question: Through which channel do tickets start, and how many of them get resolved?
+    variants: [tickets and resolution rate by first contact channel, chat versus email ticket outcomes]
+    difficulty: hard
+    tags: [support, resolution]
+    metrics: [support_tickets, ticket_resolution_rate]
+    sql: |
+      WITH tk AS (
+        SELECT ticket_id, arg_min(channel, contact_at) AS channel,
+               arg_max(resolution_status, contact_at) AS resolution_status
+        FROM support_contacts
+        GROUP BY ticket_id)
+      SELECT tk.channel,
+             COUNT(*) AS support_tickets,
+             COUNT(*) FILTER (WHERE tk.resolution_status = 'Resolved') * 1.0 / COUNT(*) AS ticket_resolution_rate
+      FROM tk
+      GROUP BY 1
+      ORDER BY support_tickets DESC
+
+  - id: lib-sup-16
+    question: How long do customers wait for a first reply for each kind of issue?
+    variants: [first response time by issue category, slowest issues to get a reply]
+    difficulty: medium
+    tags: [support, timing]
+    metrics: [avg_first_response_minutes]
+    verify:
+    - metric: avg_first_response_minutes
+      column: avg_first_response_minutes
+      by: {issue_category: support_contacts.issue_category}
+    sql: |
+      SELECT sc.issue_category,
+             COUNT(*) AS contacts,
+             SUM(sc.first_response_minutes) / COUNT(sc.first_response_minutes) AS avg_first_response_minutes,
+             MEDIAN(sc.first_response_minutes) AS median_first_response_minutes
+      FROM support_contacts sc
+      GROUP BY 1
+      ORDER BY avg_first_response_minutes DESC
+
+  - id: lib-sup-17
+    question: What share of returned items led to a support contact, by return reason?
+    variants: [support contacts on returns, which return reasons make customers call]
+    difficulty: hard
+    tags: [support, returns]
+    metrics: []
+    sql: |
+      SELECT s.return_reason,
+             COUNT(DISTINCT s.transaction_id) AS returned_lines,
+             COUNT(DISTINCT CASE WHEN sc.contact_id IS NOT NULL THEN s.transaction_id END) * 1.0
+               / COUNT(DISTINCT s.transaction_id) AS share_with_contact
+      FROM sales s LEFT JOIN support_contacts sc ON sc.transaction_id = s.transaction_id
+      WHERE s.line_type = 'Sale' AND s.return_requested_at IS NOT NULL
+      GROUP BY 1
+      ORDER BY share_with_contact DESC
+    notes: A sale line can have several contacts (1:N), so lines are counted with DISTINCT.
+
+  - id: lib-sup-18
+    question: How much feedback did customers give each month of 2026, through support contacts and through reviews?
+    variants: [voice of the customer volume by month, support contacts and reviews over time]
+    difficulty: hard
+    tags: [support, reviews, trend]
+    metrics: []
+    sql: |
+      WITH feedback AS (
+        SELECT date_trunc('month', sc.contact_at) AS month, 'support contact' AS source
+        FROM support_contacts sc
+        WHERE sc.contact_at >= TIMESTAMP '2026-01-01'
+        UNION ALL
+        SELECT date_trunc('month', r.reviewed_at), 'review'
+        FROM product_reviews r
+        WHERE r.reviewed_at >= TIMESTAMP '2026-01-01' AND r.moderation_status = 'Published')
+      SELECT month, source, COUNT(*) AS items
+      FROM feedback
+      GROUP BY 1, 2
+      ORDER BY 1, 2
+    notes: The two sources are stacked with UNION ALL first, then counted.

@@ -1,0 +1,298 @@
+# Query library: inventory, catalogue and pricing. Reference queries for retrieval.
+area: inventory
+queries:
+  - id: lib-inv-01
+    question: What share of active product sizes are out of stock today, by category?
+    variants: [stock-out rate by category right now, how much of the range is unavailable]
+    difficulty: medium
+    tags: [stock, availability]
+    metrics: [stockout_share]
+    sql: |
+      SELECT p.category,
+             COUNT(*) AS active_skus,
+             AVG(CASE WHEN il.on_hand_qty <= 0 THEN 1.0 ELSE 0 END) AS stockout_share
+      FROM inventory_live il JOIN product_master p ON p.product_id = il.product_id
+      WHERE p.is_active
+      GROUP BY 1
+      ORDER BY stockout_share DESC
+
+  - id: lib-inv-02
+    question: Which ten brands lose the most units to stock-outs, and how big is that against their demand?
+    variants: [lost sales by brand, brands hurt most by running out of stock]
+    difficulty: medium
+    tags: [stock, ranking]
+    metrics: [lost_sales_units]
+    verify:
+    - metric: lost_sales_units
+      column: lost_sales_units
+      by: {brand_name: product_master.brand_name}
+      partial: true
+    sql: |
+      SELECT p.brand_name,
+             SUM(ih.lost_sales_units) AS lost_sales_units,
+             SUM(ih.demand_units) AS demand_units,
+             SUM(ih.lost_sales_units) * 1.0 / NULLIF(SUM(ih.demand_units), 0) AS lost_share_of_demand
+      FROM inventory_history ih JOIN product_master p ON p.product_id = ih.product_id
+      GROUP BY 1
+      ORDER BY lost_sales_units DESC
+      LIMIT 10
+
+  - id: lib-inv-03
+    question: What was the sell-through of each category in October 2026?
+    variants: [sell through rate by category last month, how much of available stock sold]
+    difficulty: hard
+    tags: [stock, sell-through]
+    metrics: []
+    sql: |
+      WITH month_stock AS (
+        SELECT ih.sku_id, ih.product_id,
+               arg_min(ih.opening_stock, ih.date) AS opening_stock,
+               SUM(ih.received) AS received,
+               SUM(ih.sold) AS sold
+        FROM inventory_history ih
+        WHERE ih.date >= TIMESTAMP '2026-10-01' AND ih.date < TIMESTAMP '2026-11-01'
+        GROUP BY 1, 2)
+      SELECT p.category,
+             SUM(ms.sold) AS units_sold,
+             SUM(ms.opening_stock + ms.received) AS units_available,
+             SUM(ms.sold) * 1.0 / NULLIF(SUM(ms.opening_stock + ms.received), 0) AS sell_through
+      FROM month_stock ms JOIN product_master p ON p.product_id = ms.product_id
+      GROUP BY 1
+      ORDER BY sell_through DESC
+    notes: Opening stock is taken from each SKU's first day in the month with stock movement.
+
+  - id: lib-inv-04
+    question: How many days of stock do we have left in each category at the recent selling pace?
+    variants: [days of cover by category, how long will current stock last]
+    difficulty: hard
+    tags: [stock, cover]
+    metrics: []
+    sql: |
+      WITH on_hand AS (
+        SELECT p.category, SUM(il.on_hand_qty) AS on_hand_units
+        FROM inventory_live il JOIN product_master p ON p.product_id = il.product_id
+        GROUP BY 1),
+      pace AS (
+        SELECT p.category, SUM(ih.sold) / 28.0 AS units_per_day
+        FROM inventory_history ih JOIN product_master p ON p.product_id = ih.product_id
+        WHERE ih.date >= TIMESTAMP '2026-10-18'
+        GROUP BY 1)
+      SELECT o.category, o.on_hand_units, pc.units_per_day,
+             o.on_hand_units / NULLIF(pc.units_per_day, 0) AS days_of_cover
+      FROM on_hand o LEFT JOIN pace pc ON pc.category = o.category
+      ORDER BY days_of_cover
+    notes: Pace = units sold in the last 28 days of data (2026-10-18 to 2026-11-14) divided by 28.
+
+  - id: lib-inv-05
+    question: How many units were damaged and how many returns were put back into stock, in each warehouse?
+    variants: [damaged stock by warehouse, restocked returns per warehouse]
+    difficulty: medium
+    tags: [warehouse, returns]
+    metrics: []
+    sql: |
+      SELECT w.city AS warehouse, w.region,
+             SUM(ih.damaged) AS damaged_units,
+             SUM(ih.returned_restocked) AS restocked_units,
+             SUM(ih.damaged) * 1.0 / NULLIF(SUM(ih.damaged + ih.returned_restocked), 0) AS damaged_share
+      FROM inventory_history ih JOIN warehouses w ON w.warehouse_id = ih.warehouse_id
+      GROUP BY 1, 2
+      ORDER BY damaged_units DESC
+
+  - id: lib-inv-06
+    question: Which sizes are below their reorder point right now, and is more stock on the way?
+    variants: [low stock sizes needing reorder, what needs replenishing by size]
+    difficulty: medium
+    tags: [replenishment, size]
+    metrics: []
+    sql: |
+      SELECT p.category, k.size,
+             COUNT(*) AS skus_below_reorder_point,
+             COUNT(*) FILTER (WHERE il.inbound_qty > 0) AS with_inbound_stock,
+             SUM(il.inbound_qty) AS inbound_units
+      FROM inventory_live il
+      JOIN product_skus k ON k.sku_id = il.sku_id
+      JOIN product_master p ON p.product_id = il.product_id
+      WHERE il.on_hand_qty < il.reorder_point AND p.is_active
+      GROUP BY 1, 2
+      ORDER BY skus_below_reorder_point DESC
+      LIMIT 20
+
+  - id: lib-inv-07
+    question: How has the share of out-of-stock days changed month by month?
+    variants: [stock health trend, monthly out of stock rate over time]
+    difficulty: medium
+    tags: [stock, trend]
+    metrics: []
+    sql: |
+      SELECT date_trunc('month', ih.date) AS month,
+             COUNT(*) AS sku_days,
+             AVG(CASE WHEN ih.stock_status = 'Out of Stock' THEN 1.0 ELSE 0 END) AS out_of_stock_share,
+             AVG(CASE WHEN ih.stock_status = 'Low' THEN 1.0 ELSE 0 END) AS low_stock_share
+      FROM inventory_history ih
+      GROUP BY 1
+      ORDER BY 1
+    notes: Rows exist only for days a SKU's stock moved, so shares are of stock-moving SKU days.
+
+  - id: lib-inv-08
+    question: How many products did we launch each quarter, by category?
+    variants: [new product launches over time, catalogue additions by category]
+    difficulty: easy
+    tags: [catalogue, trend]
+    metrics: []
+    sql: |
+      SELECT date_trunc('quarter', p.launch_date) AS quarter, p.category,
+             COUNT(*) AS products_launched
+      FROM product_master p
+      GROUP BY 1, 2
+      ORDER BY 1, 2
+
+  - id: lib-inv-09
+    question: Why do prices change, and how big is the discount for each reason?
+    variants: [price changes by reason, markdown depth by price change reason]
+    difficulty: medium
+    tags: [pricing]
+    metrics: []
+    sql: |
+      SELECT ph.price_change_reason,
+             COUNT(*) AS price_periods,
+             COUNT(DISTINCT ph.product_id) AS products,
+             AVG(ph.discount_pct) AS avg_discount_pct,
+             MEDIAN(date_diff('day', ph.valid_from, ph.valid_to)) AS median_days_in_force
+      FROM price_history ph
+      GROUP BY 1
+      ORDER BY price_periods DESC
+
+  - id: lib-inv-10
+    question: How deep were the price cuts during each sale event, by category?
+    variants: [sale event discount depth per category, how much prices dropped in each event]
+    difficulty: hard
+    tags: [pricing, events]
+    metrics: []
+    sql: |
+      SELECT e.name AS sale_event, p.category,
+             COUNT(DISTINCT ph.product_id) AS products_on_offer,
+             AVG(1 - ph.selling_price / NULLIF(ph.mrp, 0)) AS avg_discount_off_mrp
+      FROM price_history ph
+      JOIN sale_events e ON e.event_id = ph.event_id
+      JOIN product_master p ON p.product_id = ph.product_id
+      GROUP BY 1, 2
+      ORDER BY 1, 2
+
+  - id: lib-inv-11
+    question: How many active products does each type of seller list, and how well rated are those sellers?
+    variants: [catalogue size by seller type, seller ratings and range]
+    difficulty: medium
+    tags: [sellers, catalogue]
+    metrics: []
+    sql: |
+      SELECT se.seller_type,
+             COUNT(DISTINCT se.seller_id) AS sellers,
+             COUNT(*) FILTER (WHERE p.is_active) AS active_products,
+             AVG(se.rating) AS avg_seller_rating,
+             AVG(se.fulfillment_score) AS avg_fulfillment_score
+      FROM product_master p JOIN sellers se ON se.seller_id = p.seller_id
+      GROUP BY 1
+      ORDER BY active_products DESC
+
+  - id: lib-inv-12
+    question: How does the stock on hand split across warehouses and categories right now?
+    variants: [inventory by warehouse and category, where is our stock held]
+    difficulty: medium
+    tags: [warehouse, stock]
+    metrics: []
+    sql: |
+      SELECT w.city AS warehouse, p.category,
+             SUM(il.on_hand_qty) AS on_hand_units,
+             SUM(il.on_hand_qty) * 1.0 / SUM(SUM(il.on_hand_qty)) OVER (PARTITION BY w.city) AS share_of_warehouse
+      FROM inventory_live il
+      JOIN warehouses w ON w.warehouse_id = il.warehouse_id
+      JOIN product_master p ON p.product_id = il.product_id
+      GROUP BY 1, 2
+      ORDER BY 1, on_hand_units DESC
+
+  - id: lib-inv-13
+    question: Which article types are most often discontinued, and how long were they on sale?
+    variants: [discontinued products by article type, product lifetime before discontinuation]
+    difficulty: medium
+    tags: [catalogue, lifecycle]
+    metrics: []
+    sql: |
+      SELECT p.article_type,
+             COUNT(*) AS products,
+             COUNT(*) FILTER (WHERE p.discontinue_date IS NOT NULL) AS discontinued,
+             MEDIAN(date_diff('day', p.launch_date, p.discontinue_date))
+               FILTER (WHERE p.discontinue_date IS NOT NULL) AS median_days_on_sale
+      FROM product_master p
+      GROUP BY 1
+      HAVING COUNT(*) FILTER (WHERE p.discontinue_date IS NOT NULL) >= 5
+      ORDER BY discontinued DESC
+      LIMIT 15
+
+  - id: lib-inv-14
+    question: How many orders did each warehouse ship, and how long did its shipments take to arrive?
+    variants: [warehouse dispatch volume and transit time, days from shipping to delivery per warehouse]
+    difficulty: medium
+    tags: [warehouse, delivery]
+    metrics: [orders]
+    sql: |
+      SELECT w.city AS warehouse,
+             COUNT(DISTINCT s.order_id) AS orders,
+             COUNT(*) FILTER (WHERE s.shipped_at IS NOT NULL) AS shipped_lines,
+             AVG(CASE WHEN s.delivered_at IS NOT NULL
+                      THEN date_diff('hour', s.shipped_at, s.delivered_at) / 24.0 END) AS avg_days_shipped_to_delivered
+      FROM sales s JOIN warehouses w ON w.warehouse_id = s.warehouse_id
+      WHERE s.line_type = 'Sale'
+      GROUP BY 1
+      ORDER BY orders DESC
+
+  - id: lib-inv-15
+    question: Which ten brands have the largest share of their active sizes out of stock today?
+    variants: [brands with the worst availability, out of stock rate by brand]
+    difficulty: medium
+    tags: [stock, ranking]
+    metrics: [stockout_share]
+    sql: |
+      SELECT p.brand_name,
+             COUNT(*) AS active_skus,
+             AVG(CASE WHEN il.on_hand_qty <= 0 THEN 1.0 ELSE 0 END) AS stockout_share
+      FROM inventory_live il JOIN product_master p ON p.product_id = il.product_id
+      WHERE p.is_active
+      GROUP BY 1
+      HAVING COUNT(*) >= 30
+      ORDER BY stockout_share DESC
+      LIMIT 10
+
+  - id: lib-inv-16
+    question: How many units did we lose to stock-outs each month of 2026?
+    variants: [monthly lost sales from stock-outs, stock-out losses over time]
+    difficulty: medium
+    tags: [stock, trend]
+    metrics: [lost_sales_units]
+    verify:
+    - metric: lost_sales_units
+      column: lost_sales_units
+      by: {month: 'date_trunc(''month'', inventory_history.date)'}
+      where: [inventory_history.date >= TIMESTAMP '2026-01-01']
+    sql: |
+      SELECT date_trunc('month', ih.date) AS month,
+             SUM(ih.lost_sales_units) AS lost_sales_units,
+             SUM(ih.demand_units) AS demand_units,
+             SUM(ih.lost_sales_units) * 1.0 / NULLIF(SUM(ih.demand_units), 0) AS lost_share_of_demand
+      FROM inventory_history ih
+      WHERE ih.date >= TIMESTAMP '2026-01-01'
+      GROUP BY 1
+      ORDER BY 1
+
+  - id: lib-inv-17
+    question: How many sizes does a product come in, by category and size type?
+    variants: [size range per product, number of SKUs per style]
+    difficulty: easy
+    tags: [catalogue, size]
+    metrics: []
+    sql: |
+      SELECT p.category, p.size_type,
+             COUNT(DISTINCT p.product_id) AS products,
+             COUNT(k.sku_id) * 1.0 / COUNT(DISTINCT p.product_id) AS sizes_per_product
+      FROM product_skus k JOIN product_master p ON p.product_id = k.product_id
+      GROUP BY 1, 2
+      ORDER BY 1, 2

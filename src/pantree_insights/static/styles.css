@@ -76,6 +76,8 @@ code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace
 .answer .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
 .tag { font-size: 12px; padding: 2px 9px; border-radius: 99px; background: var(--surface-2); color: var(--muted); }
 .tag.replay { background: var(--accent-soft); color: var(--accent); }
+.tag.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+.tag.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
 .status-line { color: var(--muted); display: flex; align-items: center; gap: 8px; }
 .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -205,3 +207,8 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .messages, .composer-wrap { padding-left: 16px; padding-right: 16px; }
   .bubble { max-width: 92%; }
 }
+
+.clarify .other { width: 100%; margin: 8px 0 4px; padding: 7px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+.clarify .readback { margin: 6px 0 12px; padding: 10px 12px; border-left: 3px solid var(--accent, #6b5cff);
+  background: var(--surface-2); border-radius: 6px; font-size: 13px; line-height: 1.6; }

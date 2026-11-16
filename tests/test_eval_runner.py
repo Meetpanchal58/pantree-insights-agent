@@ -141,3 +141,13 @@ def test_rescore_keeps_provider_errors_unscored(tmp_path, monkeypatch):
     run_eval.rescore(path)
     saved = json.loads(path.read_text())[0]
     assert saved["result_correct"] is None and saved["failure_type"] == "api_error"
+
+
+def test_a_readback_confirmation_is_not_a_clarifying_question():
+    confirm = {"type": "clarify", "kind": "confirm"}
+    vague = run_eval.judge(None, {"set": "clarify"}, confirm, [])
+    assert not vague["passed"] and vague["failure_type"] == "did_not_clarify"
+    clear = run_eval.judge(None, {"set": "overask"}, confirm, [])
+    assert clear["passed"] and clear["failure_type"] is None
+    asked = run_eval.judge(None, {"set": "clarify"}, {"type": "clarify", "kind": "clarify"}, [])
+    assert asked["passed"]

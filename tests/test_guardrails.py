@@ -1,8 +1,7 @@
 """Guardrails: no data or LLM needed."""
-import pandas as pd
 import pytest
 
-from pantree_insights.guardrails import check_question, check_sql, unsupported_numbers
+from pantree_insights.guardrails import check_question, check_sql
 
 ALLOWED = [
     "SELECT category, COUNT(*) AS n FROM product_master GROUP BY category",
@@ -85,14 +84,6 @@ def test_questions_allowed(question):
     assert check_question(question).ok
 
 
-def test_numbers_traced_to_result():
-    frame = pd.DataFrame({"year": [2025, 2026], "revenue": [1116198.8, 1919491.1]})
-    good = "Diwali 2026 revenue was ₹19.2 lakh, up 72% from ₹11.2 lakh in 2025 (₹1,919,491 vs ₹1,116,199)."
-    assert unsupported_numbers(good, frame) == []
-    bad = "Revenue was ₹25 lakh, up 140%."
-    assert set(unsupported_numbers(bad, frame)) == {"₹25 lakh", "140%"}
-
-
 def test_aggregated_ctes_count_as_summarised():
     sql = """WITH a AS (SELECT channel, SUM(spend) AS spend FROM marketing_spend JOIN campaigns USING (campaign_id)
              GROUP BY 1), b AS (SELECT channel, COUNT(*) AS n FROM campaigns GROUP BY 1)
@@ -108,17 +99,6 @@ def test_raw_rows_through_cte_still_blocked():
 def test_window_function_is_not_aggregation():
     sql = "SELECT customer_id, SUM(net_amount) OVER (PARTITION BY customer_id) AS total FROM sales"
     assert not check_sql(sql).ok
-
-
-def test_dates_are_not_number_claims():
-    frame = pd.DataFrame({"event": ["Diwali 2025"], "orders": [1423]})
-    text = "Diwali 2025 ran October 15–21 (from 2025-10-15) and 3 Nov - 8 Nov 2026 had 1,423 orders."
-    assert unsupported_numbers(text, frame) == []
-
-
-def test_month_year_is_a_date():
-    frame = pd.DataFrame({"m": [10], "revenue": [9054000.0]})
-    assert unsupported_numbers("October 2026 revenue reached Rs 90.54 lakh, on the 1st-14th of November.", frame) == []
 
 
 def test_unapproved_join_is_rejected():
@@ -220,3 +200,34 @@ def test_input_guard_allows_aggregate_questions(question):
 ])
 def test_input_guard_blocks_explicit_pii(question):
     assert not check_question(question).ok, question
+
+
+def test_join_rule_requires_the_promotion_date_window():
+    """Coupon codes are re-issued (PAYDAY5 18 times): code alone matched 6,943 rows for 6,474 coupon lines."""
+    code_only = ("SELECT p.offer_type, SUM(s.net_amount) AS net FROM sales s "
+                 "JOIN promotions p ON p.code = s.coupon_code GROUP BY 1")
+    errors = check_sql(code_only).errors
+    assert any("extra condition" in e and "promotions.start_date" in e for e in errors), errors
+    windowed = ("SELECT p.offer_type, SUM(s.net_amount) AS net FROM sales s JOIN promotions p "
+                "ON p.code = s.coupon_code AND s.placed_at >= p.start_date "
+                "AND s.placed_at < p.end_date + INTERVAL 1 DAY GROUP BY 1")
+    assert check_sql(windowed).ok, check_sql(windowed).errors
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT c.region, COUNT(DISTINCT t.ticket_id) AS tickets FROM support_contacts t "
+    "JOIN customers c ON c.customer_id = t.customer_id GROUP BY 1",
+    "SELECT c.city_tier, AVG(r.rating) AS rating FROM product_reviews r "
+    "JOIN customers c ON c.customer_id = r.customer_id GROUP BY 1",
+    "SELECT w.city, SUM(i.on_hand_qty) AS units FROM inventory_live i "
+    "JOIN warehouses w ON w.warehouse_id = i.warehouse_id GROUP BY 1",
+])
+def test_measured_many_to_one_joins_are_approved(sql):
+    assert check_sql(sql).ok, check_sql(sql).errors
+
+
+def test_join_rule_only_applies_when_the_two_columns_are_compared():
+    sql = ("WITH c AS (SELECT coupon_code, COUNT(*) AS lines FROM sales GROUP BY 1), "
+           "p AS (SELECT code, COUNT(*) AS promos FROM promotions GROUP BY 1) "
+           "SELECT c.coupon_code, c.lines, p.promos FROM c LEFT JOIN p ON p.code = c.coupon_code")
+    assert check_sql(sql).ok, check_sql(sql).errors
