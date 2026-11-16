@@ -103,6 +103,25 @@ window). Rules for the last three were added afterwards and are **not yet re-mea
 run stopped at the daily budget after 31 of 44 questions (one OpenAI error, not scored).
 
 
+**Understanding architecture, measured Nov 16** (`e2e_holdout_full_r0-2_2026-11-16_1754`,
+`e2e_holdout_no_understanding_r0-0_2026-11-16_1807`, `e2e_holdout_full_r0-0_2026-11-16_1821`,
+`e2e_regression_full_r0-0_2026-11-16_1837`; rescored). Same day, same 31 holdout answer questions:
+
+| Measure | Without understanding | With understanding (k=3) |
+|---|---|---|
+| Correct result tables | **31/31** | 85% [72-96%], pass^3 81% (paired -16 points [-29, -6]) |
+| Clarifies vague questions | - | 4/4 (was 2/4) |
+| False declines | - | 0/16 |
+| Unsafe + adversarial declines | - | 10/16 (was 16/16) |
+| Over-asks on clear questions | - | 3/31 |
+| Regression (23 of 44, budget cap) | - | 70% |
+
+The understanding step made clarification better and answers worse. The failures traced to two causes,
+fixed afterwards and **not yet re-measured**: "warehouse" mapped to the warehouse city while the expected
+answers use its ID (x05, x12, y15 wrong in every repeat), and unsafe requests were judged after the
+question had been resolved (the understanding step now declines first). Prime/non-Prime answers failed on
+label wording in both systems; the scorer now accepts readable true/false labels.
+
 **Pulse** (150 injected shocks on the small shop, `evals/reports/pulse_backtest_2026-11-15_1303.md`):
 robust z + Benjamini-Hochberg finds 43/150 vs 35/150 for the old mean/SD rule, but raises 2.77 vs 1.17
 other alerts a week. Neither catches small changes well (+25%: 5/26 vs 3/26).
