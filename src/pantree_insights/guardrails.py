@@ -114,6 +114,7 @@ def check_sql(sql: str, schema: Schema | None = None, max_rows: int | None = Non
             errors.append(problem)
         else:
             errors += join_errors(qualified, schema, cte_names)
+            errors += join_rule_errors(qualified, schema, cte_names)
             errors += identifier_grain_errors(qualified, schema, max_rows)
 
     if errors:
@@ -170,6 +171,32 @@ def join_errors(tree: exp.Expression, schema: Schema, cte_names: set[str]) -> li
             if right_table and not any(frozenset({(other, column), (right_table, column)}) in approved
                                        for other in set(alias.values()) if other != right_table):
                 errors.append(f"JOIN {right_table} USING ({column}) is not an approved join path.")
+    return errors
+
+
+def join_rule_errors(tree: exp.Expression, schema: Schema, cte_names: set[str]) -> list[str]:
+    """A join listed under join_rules must also use its extra condition: every column the rule's extra
+    condition names must appear in the query (e.g. the promotion's start_date and end_date)."""
+    alias: dict[str, str] = {}
+    for table in tree.find_all(exp.Table):
+        name = table.name.lower()
+        if name in schema.tables and name not in cte_names:
+            alias[table.alias_or_name.lower()] = name
+    def ref(column: exp.Column) -> tuple[str | None, str]:
+        return alias.get((column.table or "").lower()), column.name.lower()
+
+    used = {ref(c) for c in tree.find_all(exp.Column)}
+    compared = {frozenset({ref(eq.left), ref(eq.right)}) for eq in tree.find_all(exp.EQ)
+                if isinstance(eq.left, exp.Column) and isinstance(eq.right, exp.Column)}
+    errors = []
+    for join, rule in schema.join_rules.items():
+        sides = frozenset(tuple(side.strip().lower().split(".")) for side in join.split("="))
+        if sides not in compared:                        # only when the rule's two columns are joined directly
+            continue
+        needed = {(c.table.lower(), c.name.lower()) for c in sqlglot.parse_one(rule.extra, read="duckdb")
+                  .find_all(exp.Column)}
+        if not needed <= used:
+            errors.append(f"Join {join} needs its extra condition: ON ... AND {rule.extra} ({rule.why}).")
     return errors
 
 

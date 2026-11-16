@@ -487,6 +487,17 @@ joins:
 - support_contacts.agent_id = agents.agent_id
 - customers.customer_id = customer_addresses.customer_id
 - auth_events.customer_id = customers.customer_id
+# Measured N:1 with every row matched (pantree-profile): safe to join, no row multiplication.
+- support_contacts.customer_id = customers.customer_id
+- product_reviews.customer_id = customers.customer_id
+- inventory_history.warehouse_id = warehouses.warehouse_id
+- inventory_live.warehouse_id = warehouses.warehouse_id
+# Joins that need an extra condition to match the right row; the SQL guardrail enforces it.
+join_rules:
+  sales.coupon_code = promotions.code:
+    extra: sales.placed_at >= promotions.start_date AND sales.placed_at < promotions.end_date + INTERVAL 1 DAY
+    why: coupon codes are re-issued (PAYDAY5 runs every month), so the code alone matches several promotions
+      and multiplies sale lines; the promotion live when the order was placed is the right one
 # Row-level identifiers: grouping a final result by one of these returns one row per person/order/visit,
 # so it is allowed only as a ranked top-N (ORDER BY ... LIMIT <= max_rows). Grouping by them inside a
 # CTE/subquery that is aggregated again (e.g. orders per customer -> average) is fine.

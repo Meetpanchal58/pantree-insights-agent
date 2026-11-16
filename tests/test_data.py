@@ -99,3 +99,14 @@ def test_db_layer_whole_row_cannot_leak_blocked_columns(con):
 def test_db_layer_cannot_read_files_outside_the_shop(con):
     with pytest.raises(Exception):  # noqa: B017
         con.execute("SELECT * FROM read_parquet('/etc/passwd')").fetchall()
+
+
+def test_profile_measures_join_rules_with_their_condition(con):
+    """Coupon code alone matches several promotions; with the promotion's date window each sale line matches one."""
+    from pantree_insights.profile import profile_join
+    from pantree_insights.semantic import load_schema
+
+    join = "sales.coupon_code = promotions.code"
+    plain = profile_join(con, join)
+    ruled = profile_join(con, join, load_schema().join_rules[join].extra)
+    assert plain.right_per_key > 1 and ruled.right_per_key == 1

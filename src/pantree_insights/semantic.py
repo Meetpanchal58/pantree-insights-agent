@@ -29,9 +29,15 @@ class Blocked(BaseModel):
         return {key.split(".", 1)[1] for key in self.columns}
 
 
+class JoinRule(BaseModel):
+    extra: str                       # extra ON condition, written with full table names
+    why: str
+
+
 class Schema(BaseModel):
     tables: dict[str, Table]
     joins: list[str]
+    join_rules: dict[str, JoinRule] = {}
     identifier_columns: list[str] = []
     blocked: Blocked
 
@@ -51,6 +57,9 @@ class Schema(BaseModel):
             table, column = key.split(".", 1)
             if column in self.tables.get(table, Table(group="", grain="", description="", columns={})).columns:
                 raise ValueError(f"blocked column {key} is still listed in schema.yaml")
+        for join in self.join_rules:
+            if join not in self.joins:
+                raise ValueError(f"join rule for {join}, which is not an approved join")
         for join in self.joins:
             for side in join.split("="):
                 table, column = side.strip().split(".")
@@ -188,9 +197,57 @@ def _mentions(phrase: str, text: str) -> bool:
     return re.search(rf"(?<![\w-]){re.escape(phrase)}s?(?![\w-])", text, re.I) is not None
 
 
+# ----------------------------------------------------------------------------- concepts.yaml
+class Subject(BaseModel):
+    table: str
+    about: str
+    time: str                                    # default time column ("table.column")
+    where: str | None = None                     # filter that always applies (e.g. sale lines only)
+    time_meanings: dict[str, str] = {}           # "delivered" -> sales.delivered_at
+
+
+class ConceptEntry(BaseModel):
+    column: str                                  # "table.column"
+    note: str | None = None
+
+
+class Concepts(BaseModel):
+    subjects: dict[str, Subject]
+    concepts: dict[str, dict[str, ConceptEntry]]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _short_form(cls, data: dict) -> dict:
+        """`city: {orders: sales.ship_city}` is short for {orders: {column: sales.ship_city}}."""
+        concepts = {name: {subject: {"column": v} if isinstance(v, str) else v for subject, v in entries.items()}
+                    for name, entries in (data.get("concepts") or {}).items()}
+        return {**data, "concepts": concepts}
+
+    @model_validator(mode="after")
+    def _check(self) -> Concepts:
+        for name, entries in self.concepts.items():
+            unknown = set(entries) - set(self.subjects)
+            if unknown:
+                raise ValueError(f"concept {name}: unknown subjects {sorted(unknown)}")
+        return self
+
+    def column(self, concept: str, subject: str) -> ConceptEntry | None:
+        """The column a concept means for a subject, or None if that cut does not exist for it."""
+        return self.concepts.get(concept, {}).get(subject)
+
+    def concepts_of_column(self, qualified: str) -> set[str]:
+        """'customers.city' -> {'city'}: which concepts a column can stand for (any subject)."""
+        return {name for name, entries in self.concepts.items() if any(e.column == qualified for e in entries.values())}
+
+
 # ----------------------------------------------------------------------------- loading
 def _read(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+@lru_cache
+def load_concepts(folder: Path | None = None) -> Concepts:
+    return Concepts.model_validate(_read((folder or get_settings().semantic_dir) / "concepts.yaml"))
 
 
 @lru_cache
