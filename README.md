@@ -11,7 +11,7 @@ nightly. Sister project: [pantree-recommendation-system](https://github.com/Meet
 ### [▶ Live demo](https://pantree-insights-um7bylhdra-uc.a.run.app/)
 
 Hosted on Google Cloud Run (scales to zero, so the first visit after a quiet period takes about 30 seconds).
-Visitors can replay recorded demo runs without signing in; sign in with Google for 10 live questions a day.
+Visitors can view recorded demo answers immediately without signing in; sign in with Google for 10 live questions a day.
 
 > **Accuracy:** 28 of 31 unseen business questions answered correctly in each of 3 repeated runs
 > (90%, 95% CI 77-100%), scored against independently written SQL. Without retrieval, the semantic layer,
@@ -328,3 +328,18 @@ the daily LLM budget is reached and never scores a budget refusal or a provider 
 ## License
 
 [MIT](LICENSE)
+
+### Frontend regression checks
+
+The browser checks use intercepted API responses and do not require sign-in, shop data or API keys.
+They cover out-of-order chat requests, navigating away from streams, busy cleanup, cached revisits,
+metadata caching, sidebar request counts, dismissing loading dialogs and lazy chart navigation.
+
+```sh
+npm install --no-save --package-lock=false playwright@1.62.1
+npx playwright install chromium
+node tests/frontend.cjs
+```
+
+Recorded answers use `/api/demos/{name}/stream?instant=true` to skip replay pauses.
+The existing stream endpoint without that parameter retains animated timing.

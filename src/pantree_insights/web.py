@@ -353,14 +353,14 @@ def create_app() -> FastAPI:
         return demo_runs.demos()
 
     @app.get("/api/demos/{name}/stream")
-    async def replay(name: str, request: Request):
+    async def replay(name: str, request: Request, instant: bool = False):
         demo = demo_runs.load(name)
         if not demo:
             raise HTTPException(404, "Demo not found")
 
         async def events():
             for delay, event in demo_runs.replay(demo):
-                if delay:
+                if delay and not instant:
                     await asyncio.sleep(delay)
                 if await request.is_disconnected():
                     return
