@@ -1,0 +1,305 @@
+# Query library: marketing (spend, plan, attribution, acquisition). Reference queries for retrieval.
+area: marketing
+queries:
+  - id: lib-mkt-01
+    question: How did actual ad spend compare with the plan for each channel group, month by month in 2026?
+    variants: [spend versus budget by channel, planned against actual marketing spend]
+    difficulty: hard
+    tags: [budget, comparison, plan]
+    metrics: [marketing_spend]
+    sql: |
+      WITH actual AS (
+        SELECT date_trunc('month', m.date_hour) AS month, cp.channel_group, SUM(m.spend) AS spend
+        FROM marketing_spend m JOIN campaigns cp ON cp.campaign_id = m.campaign_id
+        WHERE m.date_hour >= TIMESTAMP '2026-01-01'
+        GROUP BY 1, 2),
+      planned AS (
+        SELECT date_trunc('month', mp.date) AS month, cp.channel_group, SUM(mp.planned_spend) AS planned_spend
+        FROM marketing_plan mp JOIN campaigns cp ON cp.campaign_id = mp.campaign_id
+        WHERE mp.date >= TIMESTAMP '2026-01-01' AND mp.date < TIMESTAMP '2026-11-15'
+        GROUP BY 1, 2)
+      SELECT p.month, p.channel_group, p.planned_spend, a.spend,
+             a.spend / NULLIF(p.planned_spend, 0) - 1 AS over_or_under_plan
+      FROM planned p LEFT JOIN actual a ON a.month = p.month AND a.channel_group = p.channel_group
+      ORDER BY p.month, p.channel_group
+    notes: The plan covers paid campaigns only and runs past the data's last day, so it is cut at the same date.
+
+  - id: lib-mkt-02
+    question: Do sale-event campaigns earn more per rupee than always-on campaigns, using our own attribution?
+    variants: [event campaigns versus regular campaigns ROAS, return on festival campaign spend]
+    difficulty: hard
+    tags: [roas, events, comparison]
+    metrics: [roas_last_click, marketing_spend, last_click_revenue]
+    sql: |
+      WITH revenue AS (
+        SELECT CASE WHEN c.event_id IS NULL THEN 'Always-on' ELSE 'Sale event' END AS campaign_kind,
+               SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue
+        FROM marketing_attribution a JOIN campaigns c ON c.campaign_id = a.campaign_id
+        GROUP BY 1),
+      spend AS (
+        SELECT CASE WHEN c.event_id IS NULL THEN 'Always-on' ELSE 'Sale event' END AS campaign_kind,
+               SUM(m.spend) AS spend
+        FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id
+        GROUP BY 1)
+      SELECT s.campaign_kind, r.attributed_revenue, s.spend,
+             r.attributed_revenue / NULLIF(s.spend, 0) AS roas
+      FROM spend s LEFT JOIN revenue r ON r.campaign_kind = s.campaign_kind
+      ORDER BY roas DESC
+
+  - id: lib-mkt-03
+    question: How has the cost per click on paid social moved month by month in 2026?
+    variants: [paid social CPC trend, is social advertising getting more expensive]
+    difficulty: medium
+    tags: [cpc, trend]
+    metrics: [cpc]
+    sql: |
+      SELECT date_trunc('month', m.date_hour) AS month,
+             SUM(m.spend) FILTER (WHERE cp.channel_group IN ('Paid Search', 'Paid Social', 'Display'))
+               / NULLIF(SUM(m.clicks) FILTER (WHERE cp.channel_group IN ('Paid Search', 'Paid Social', 'Display')), 0)
+               AS cpc,
+             SUM(m.clicks) AS clicks
+      FROM marketing_spend m JOIN campaigns cp ON cp.campaign_id = m.campaign_id
+      WHERE cp.channel_group = 'Paid Social' AND m.date_hour >= TIMESTAMP '2026-01-01'
+      GROUP BY 1
+      ORDER BY 1
+
+  - id: lib-mkt-04
+    question: How far apart are what ad platforms claim and what our own attribution says, channel by channel?
+    variants: [platform ROAS versus our ROAS, how much do platforms over-report revenue]
+    difficulty: hard
+    tags: [roas, attribution, platforms]
+    metrics: [platform_roas, roas_last_click, last_click_revenue]
+    sql: |
+      WITH platform AS (
+        SELECT cp.channel,
+               SUM(m.platform_revenue) FILTER (WHERE cp.channel_group <> 'CRM')
+                 / NULLIF(SUM(m.spend) FILTER (WHERE cp.channel_group <> 'CRM'), 0) AS platform_roas,
+               SUM(m.spend) AS spend
+        FROM marketing_spend m JOIN campaigns cp ON cp.campaign_id = m.campaign_id
+        WHERE cp.channel_group <> 'CRM'
+        GROUP BY 1),
+      own AS (
+        SELECT c.channel, SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue
+        FROM marketing_attribution a JOIN campaigns c ON c.campaign_id = a.campaign_id
+        GROUP BY 1)
+      SELECT p.channel, p.spend, p.platform_roas,
+             o.attributed_revenue / NULLIF(p.spend, 0) AS roas_last_click,
+             p.platform_roas / NULLIF(o.attributed_revenue / NULLIF(p.spend, 0), 0) AS platform_to_own_ratio
+      FROM platform p LEFT JOIN own o ON o.channel = p.channel
+      ORDER BY platform_to_own_ratio DESC
+    notes: A ratio above 1 means the platform claims more than our attribution credits it; below 1, less.
+
+  - id: lib-mkt-05
+    question: What did it cost to acquire a new customer each month of 2026?
+    variants: [CAC by month, acquisition cost trend]
+    difficulty: hard
+    tags: [cac, trend]
+    metrics: [customer_acquisition_cost]
+    sql: |
+      WITH spend AS (
+        SELECT date_trunc('month', m.date_hour) AS month, SUM(m.spend) AS spend
+        FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id
+        WHERE c.channel_group <> 'CRM' AND m.date_hour >= TIMESTAMP '2026-01-01'
+        GROUP BY 1),
+      new_customers AS (
+        SELECT date_trunc('month', s.placed_at) AS month, COUNT(DISTINCT s.customer_id) AS new_customers
+        FROM sales s
+        WHERE s.line_type = 'Sale' AND s.is_first_order AND s.placed_at >= TIMESTAMP '2026-01-01'
+        GROUP BY 1)
+      SELECT sp.month, sp.spend, n.new_customers, sp.spend / NULLIF(n.new_customers, 0) AS cac
+      FROM spend sp LEFT JOIN new_customers n ON n.month = sp.month
+      ORDER BY sp.month
+
+  - id: lib-mkt-06
+    question: How many orders does each channel group get credit for under first-click, last-click and linear attribution?
+    variants: [attribution model comparison, first touch versus last touch credit by channel]
+    difficulty: hard
+    tags: [attribution, models]
+    metrics: []
+    sql: |
+      SELECT a.channel_group,
+             SUM(a.credit_first_click) AS first_click_orders,
+             SUM(a.credit_last_click) AS last_click_orders,
+             SUM(a.credit_linear) AS linear_orders,
+             SUM(a.credit_time_decay) AS time_decay_orders
+      FROM marketing_attribution a
+      GROUP BY 1
+      ORDER BY last_click_orders DESC
+    notes: Credits of each model add up to 1 per order, so summing them counts orders without double counting.
+
+  - id: lib-mkt-07
+    question: How many marketing touchpoints does an order usually have before it is placed?
+    variants: [touchpoints per order, length of the path to purchase]
+    difficulty: medium
+    tags: [attribution, journey]
+    metrics: []
+    sql: |
+      WITH per_order AS (
+        SELECT a.order_id, MAX(a.touch_number) AS touches
+        FROM marketing_attribution a
+        GROUP BY 1)
+      SELECT CASE WHEN touches >= 5 THEN '5+' ELSE CAST(touches AS VARCHAR) END AS touchpoints,
+             COUNT(*) AS orders,
+             COUNT(*) * 1.0 / SUM(COUNT(*)) OVER () AS share_of_orders
+      FROM per_order
+      GROUP BY 1
+      ORDER BY 1
+
+  - id: lib-mkt-08
+    question: How does paid-media spend split across regions, and what click-through rate do the ads get there?
+    variants: [ad spend by region, regional ad CTR]
+    difficulty: medium
+    tags: [geography, spend]
+    metrics: [marketing_spend]
+    sql: |
+      SELECT m.region,
+             SUM(m.spend) AS spend,
+             SUM(m.clicks) * 1.0 / NULLIF(SUM(m.impressions), 0) AS ad_ctr,
+             SUM(m.spend) / NULLIF(SUM(m.clicks), 0) AS cost_per_click
+      FROM marketing_spend m
+      WHERE m.region <> 'All'
+      GROUP BY 1
+      ORDER BY spend DESC
+    notes: Region 'All' marks spend that is not split by region (CRM and affiliates); it is left out here.
+
+  - id: lib-mkt-09
+    question: Which ten campaigns have used the largest share of their budget so far?
+    variants: [campaign budget utilisation, campaigns closest to their budget]
+    difficulty: medium
+    tags: [budget, ranking]
+    metrics: [marketing_spend]
+    sql: |
+      SELECT cp.campaign_name, cp.channel_group, cp.total_budget,
+             SUM(m.spend) AS spend,
+             SUM(m.spend) / NULLIF(cp.total_budget, 0) AS budget_used
+      FROM marketing_spend m JOIN campaigns cp ON cp.campaign_id = m.campaign_id
+      WHERE cp.total_budget > 0
+      GROUP BY 1, 2, 3
+      ORDER BY budget_used DESC
+      LIMIT 10
+
+  - id: lib-mkt-10
+    question: How much was spent on marketing around each sale event, and which channels got it?
+    variants: [ad spend per sale event, festival campaign spend by channel]
+    difficulty: hard
+    tags: [events, spend]
+    metrics: [marketing_spend]
+    sql: |
+      SELECT e.name AS sale_event, cp.channel_group,
+             SUM(m.spend) AS spend,
+             SUM(m.spend) / SUM(SUM(m.spend)) OVER (PARTITION BY e.name) AS share_of_event_spend
+      FROM marketing_spend m
+      JOIN campaigns cp ON cp.campaign_id = m.campaign_id
+      JOIN sale_events e ON e.event_id = cp.event_id
+      GROUP BY 1, 2
+      ORDER BY 1, spend DESC
+    notes: Spend is linked to an event through the campaign that was run for it.
+
+  - id: lib-mkt-11
+    question: Which campaign types and objectives earn the most last-click revenue?
+    variants: [credited revenue by campaign type, retargeting versus prospecting revenue]
+    difficulty: medium
+    tags: [attribution, campaigns]
+    metrics: [last_click_revenue]
+    sql: |
+      SELECT c.campaign_type, c.objective,
+             SUM(a.credit_last_click * a.order_revenue) AS last_click_revenue,
+             SUM(a.credit_last_click) AS credited_orders
+      FROM marketing_attribution a JOIN campaigns c ON c.campaign_id = a.campaign_id
+      GROUP BY 1, 2
+      ORDER BY last_click_revenue DESC
+
+  - id: lib-mkt-12
+    question: Did campaigns hit their planned click and order targets?
+    variants: [target achievement by campaign type, actual versus target clicks and orders]
+    difficulty: hard
+    tags: [plan, targets]
+    metrics: []
+    sql: |
+      WITH targets AS (
+        SELECT cp.campaign_type, SUM(mp.target_clicks) AS target_clicks, SUM(mp.target_orders) AS target_orders
+        FROM marketing_plan mp JOIN campaigns cp ON cp.campaign_id = mp.campaign_id
+        WHERE mp.date < TIMESTAMP '2026-11-15'
+        GROUP BY 1),
+      actuals AS (
+        SELECT cp.campaign_type, SUM(m.clicks) AS clicks, SUM(m.platform_conversions) AS platform_orders
+        FROM marketing_spend m JOIN campaigns cp ON cp.campaign_id = m.campaign_id
+        GROUP BY 1)
+      SELECT t.campaign_type, t.target_clicks, a.clicks, a.clicks / NULLIF(t.target_clicks, 0) AS clicks_vs_target,
+             t.target_orders, a.platform_orders, a.platform_orders / NULLIF(t.target_orders, 0) AS orders_vs_target
+      FROM targets t LEFT JOIN actuals a ON a.campaign_type = t.campaign_type
+      ORDER BY t.campaign_type
+    notes: Orders here are what platforms report (platform_conversions), the same basis as the plan's targets.
+
+  - id: lib-mkt-13
+    question: Which campaigns brought orders that came with a coupon, and how much discount did those orders get?
+    variants: [coupon orders by campaign, campaign promo code usage]
+    difficulty: medium
+    tags: [campaigns, coupons]
+    metrics: [orders]
+    sql: |
+      SELECT cp.campaign_name, cp.channel,
+             COUNT(DISTINCT s.order_id) AS orders,
+             SUM(s.coupon_discount) AS coupon_discount
+      FROM sales s JOIN campaigns cp ON cp.campaign_id = s.campaign_id
+      WHERE s.line_type = 'Sale' AND s.coupon_code IS NOT NULL
+      GROUP BY 1, 2
+      ORDER BY orders DESC
+      LIMIT 15
+
+  - id: lib-mkt-14
+    question: Which campaign types buy the cheapest clicks, and what return do the platforms report for them?
+    variants: [CPC and platform ROAS by campaign type, cost efficiency by campaign type]
+    difficulty: medium
+    tags: [cpc, roas, campaigns]
+    metrics: [cpc, platform_roas]
+    sql: |
+      SELECT cp.campaign_type,
+             SUM(m.spend) FILTER (WHERE cp.channel_group IN ('Paid Search', 'Paid Social', 'Display'))
+               / NULLIF(SUM(m.clicks) FILTER (WHERE cp.channel_group IN ('Paid Search', 'Paid Social', 'Display')), 0)
+               AS cpc,
+             SUM(m.platform_revenue) FILTER (WHERE cp.channel_group <> 'CRM')
+               / NULLIF(SUM(m.spend) FILTER (WHERE cp.channel_group <> 'CRM'), 0) AS platform_roas,
+             SUM(m.spend) AS spend
+      FROM marketing_spend m JOIN campaigns cp ON cp.campaign_id = m.campaign_id
+      GROUP BY 1
+      ORDER BY cpc
+
+  - id: lib-mkt-15
+    question: What does a new customer cost in each paid channel group?
+    variants: [acquisition cost by channel group, CAC for paid search versus paid social]
+    difficulty: hard
+    tags: [cac, channels]
+    metrics: [customer_acquisition_cost]
+    sql: |
+      WITH spend AS (
+        SELECT c.channel_group, SUM(m.spend) AS spend
+        FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id
+        WHERE c.channel_group <> 'CRM'
+        GROUP BY 1),
+      new_customers AS (
+        SELECT c.channel_group, COUNT(DISTINCT s.customer_id) AS new_customers
+        FROM sales s JOIN campaigns c ON c.campaign_id = s.campaign_id
+        WHERE s.line_type = 'Sale' AND s.is_first_order
+        GROUP BY 1)
+      SELECT sp.channel_group, sp.spend, n.new_customers, sp.spend / NULLIF(n.new_customers, 0) AS cac
+      FROM spend sp LEFT JOIN new_customers n ON n.channel_group = sp.channel_group
+      ORDER BY cac
+    notes: A new customer is credited to the campaign recorded on their first order; customers whose first order had
+      no campaign are not in any group, so this CAC is higher than the shop-wide one.
+
+  - id: lib-mkt-16
+    question: How many coupons were offered for each sale event, and how generous were they?
+    variants: [promotions per sale event, coupon offers and maximum discounts by event]
+    difficulty: medium
+    tags: [promotions, events]
+    metrics: []
+    sql: |
+      SELECT e.name AS sale_event, pr.offer_type,
+             COUNT(*) AS coupons,
+             AVG(pr.value) AS avg_offer_value,
+             MAX(pr.max_discount) AS largest_max_discount,
+             AVG(pr.min_order_value) AS avg_min_order_value
+      FROM promotions pr JOIN sale_events e ON e.event_id = pr.event_id
+      GROUP BY 1, 2
+      ORDER BY 1, coupons DESC

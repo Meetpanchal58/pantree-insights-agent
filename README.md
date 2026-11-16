@@ -160,7 +160,8 @@ flowchart LR
 |---|---|
 | `semantic/schema.yaml` | The 22 tables the agent may query: grain, keys, column notes, join paths. Blocked tables and columns are listed with the reason. |
 | `semantic/metrics.yaml` | **One definition per business number**: realized revenue, AOV, return rate, RTO rate, conversion, ROAS, CAC and 26 more (33 in total). The agent must use these, so "revenue" always means the same thing. |
-| `semantic/examples.yaml` | 28 verified question → SQL pairs (easy to hard), used as examples and in evals. |
+| `semantic/examples.yaml` | 28 verified question → SQL pairs (easy to hard), used as examples and scored in the regression suite. |
+| `semantic/library/` | **Query library**: 128 reference queries in 7 areas (sales, customers, funnel, marketing, inventory, delivery, support), each with other phrasings and the metrics it computes. Together with the examples they use every table, all 40 approved joins, all 33 metrics, every concept column and 25 SQL patterns (CTEs, top-N per group, cohorts, funnels, period comparisons, running totals, basket pairs, ...). Retrieval only, never scored; tests check each query passes the guardrails, runs, has no duplicate rows, computes the metrics it claims, and does not contain the answer to any scored question. `evals/library_coverage.py` reports coverage. |
 | `semantic/concepts.yaml` | **What a word means depends on what the question is about.** 14 subjects (orders, sign-ups, browsing, ad spend, attribution, support, reviews, stock, ...) with their table and dates, and 33 concepts (city, region, device, channel, category, sale event, ...) mapped per subject to a column: "Mumbai" about orders is `sales.ship_city`, about sign-ups `customers.city`. Plus ID words ("order 12345" → `order_id = 'OD000012345'`). |
 | `semantic/glossary.yaml` | Words people use: "cash on delivery" → `'COD'`, "shoes" → `'Footwear'`; terms such as GMV, RTO, ROAS, CAC; phrases that bring their tables ("delivery region" → `customer_addresses`). |
 | `src/pantree_insights/db.py` | Downloads the shop and exposes it as DuckDB views. After setup the connection cannot read other files, write, install extensions or change settings. |
@@ -266,6 +267,10 @@ uv run python evals/run_eval.py --dry-run                         # free: suites
 
 ```bash
 uv run python evals/retrieval_eval.py                             # free: retrieval recall/precision
+```
+
+```bash
+uv run python evals/library_coverage.py --run                     # free: query-library coverage + run every query
 ```
 
 ```bash
