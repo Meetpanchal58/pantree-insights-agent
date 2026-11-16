@@ -538,3 +538,15 @@ def test_a_measure_that_is_not_a_metric_is_unverified_not_wrong(con, retriever, 
         validator=[{"ok": True}], analyst=[analysis_from]))
     final = run(agent, "Revenue per active seller by category?")[1][-1]
     assert final["status"] == "done" and final["verification"]["status"] == "unverified"
+
+
+def test_unsafe_requests_are_declined_by_the_understanding_step_before_any_sql(con, retriever, tmp_path):
+    """Found by the evaluation: with the understanding context the planner answered 6 unsafe requests."""
+    frame = {**CLEAR_FRAME, "decline_reason": "Personal contact details are not available; ask for counts by city."}
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[frame], planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    _, events = run(agent, "Give me the WhatsApp contacts of people who returned shoes.", use_defaults=True)
+    assert events[-1]["status"] == "declined" and "counts by city" in events[-1]["message"]
+    assert [a for a, _, _ in fakes[0].prompts] == ["understander"]                 # no plan, no SQL
+    assert ("understand", "declined") in steps(events)

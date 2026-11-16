@@ -151,3 +151,8 @@ def test_a_readback_confirmation_is_not_a_clarifying_question():
     assert clear["passed"] and clear["failure_type"] is None
     asked = run_eval.judge(None, {"set": "clarify"}, {"type": "clarify", "kind": "clarify"}, [])
     assert asked["passed"]
+
+
+def test_decline_by_the_understanding_step_is_recognised():
+    events = [{"type": "step", "step": "understand", "status": "declined", "detail": {"decision": "decline"}}]
+    assert run_eval.decline_layer(events) == "understanding"
