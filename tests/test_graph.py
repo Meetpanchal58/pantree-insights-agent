@@ -397,3 +397,37 @@ def test_order_number_is_resolved_to_its_id(con, retriever, tmp_path):
     run(agent, "What was in order 12?")
     writer = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][0]
     assert "Filter: order_id = 'OD000000012'" in writer
+
+
+# ----------------------------------------------------------------------------- step 4: references and result checks
+MUMBAI_SELLERS = {**CLEAR_FRAME, "restated_question": "Orders from Mumbai sellers", "breakdowns": [],
+                  "mentions": [{"text": "Mumbai", "concept": "seller_city"}]}
+WITH_FILTER = ("SELECT se.city, COUNT(DISTINCT s.order_id) AS orders FROM sales s JOIN sellers se "
+               "ON se.seller_id = s.seller_id WHERE s.line_type = 'Sale' AND se.city = 'Mumbai' GROUP BY 1")
+
+
+def test_sql_that_ignores_a_resolved_filter_is_sent_back(con, retriever, tmp_path):
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[MUMBAI_SELLERS], planner=[PLAN],
+        sql_writer=[{"sql": GOOD_SQL, "explanation": "forgot the filter"}, {"sql": WITH_FILTER, "explanation": "ok"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    _, events = run(agent, "How many orders came from sellers in Mumbai?")
+    assert events[-1]["status"] == "done" and events[-1]["attempts"] == 2
+    retry = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][1]
+    assert "resolved to the filter sellers.city = 'Mumbai'" in retry
+
+
+def test_structural_references_reach_the_writer_and_respect_hidden_examples(con, retriever, tmp_path):
+    frame = {**CLEAR_FRAME, "measures": ["rto_rate"], "breakdowns": ["courier"]}
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[frame], planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    run(agent, "How often do parcels bounce back, per courier?")
+    writer = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][0]
+    assert "Reference queries with the same tables, columns and metrics" in writer and "rto_at" in writer
+    agent2, fakes2, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[frame], planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    run(agent2, "How often do parcels bounce back, per courier?", exclude_examples=["lib-del-02", "h06", "m06"])
+    writer2 = [u for a, _, u in fakes2[0].prompts if a == "sql_writer"][0]
+    assert "Which couriers have the most parcels returned to origin?" not in writer2

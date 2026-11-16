@@ -27,6 +27,7 @@ from langgraph.types import Command, interrupt
 
 from . import agents
 from .charts import build_chart
+from .checks import result_problems
 from .config import get_settings
 from .db import QueryTimeout, connect, manifest, run_query
 from .grounding import verify
@@ -35,6 +36,7 @@ from .joins import JoinGraph
 from .llm import LLM, BudgetExceeded, ChatLLM
 from .memory import Memory
 from .profile import profile_for
+from .references import ReferenceIndex
 from .retrieval import Retriever, get_retriever
 from .semantic import load_concepts, load_metrics, tables_in
 from .understanding import IdResolver, OpenPoint, resolve
@@ -82,6 +84,8 @@ class State(TypedDict, total=False):
     frame: dict                  # the understanding agent's question frame
     understanding: str           # resolved subjects, filters, columns and join paths (prompt text)
     understood_tables: list[str] # tables the resolved understanding needs (kept in the narrowed context)
+    resolved_filters: list[list[str]]  # [column, value] the SQL must use (checked after the query runs)
+    references: str              # reference queries with the same structure (tables, columns, metrics)
     open_points: list[dict]      # questions waiting for the user (with their internal meaning)
     choices: dict[str, str]      # answers code can act on: "mention:Mumbai" -> "city"
     clarify_rounds: int
@@ -163,6 +167,7 @@ class Agent:
             self.ids = IdResolver(profile.id_formats(), self.concepts.id_entities, self.con)
             self.aliases = {alias.lower(): value for value, names in self.retriever.glossary.value_aliases.items()
                             for alias in names}
+            self.references = ReferenceIndex(list(self.retriever.examples.values()))
         self._llms: dict[str, LLM] = {}
         self._memories: dict[str, Any] = {}          # run_id -> memory scope for that question
         self.graph = self._build().compile(checkpointer=InMemorySaver())
@@ -243,12 +248,21 @@ class Agent:
                                 + "; ".join(f"{p.question} -> {p.default}" for p in pending))
             res = resolve(frame, self.concepts, self.joins, self.retriever.value_columns, ids, choices, self.aliases)
         text = res.to_prompt()
+        filters = [[f.column, f.value] for v in res.subjects for f in v.filters] + \
+                  [[i.column, i.value] for v in res.subjects for i in v.id_filters]
+        columns = {c for v in res.subjects for c in [v.time_column, *(c for _, c in v.breakdowns),
+                                                    *(f.column for f in v.filters)]}
+        wanted = set(frame.measures) | set(state.get("metric_names") or [])
+        shown = set((state.get("retrieved") or {}).get("examples") or [])
+        refs = self.references.pick(set(res.tables()), columns, wanted,
+                                    exclude=set(state.get("exclude_examples") or []) | shown)
         return {"frame": frame.model_dump(), "understanding": text, "understood_tables": res.tables(),
+                "resolved_filters": filters, "references": self.references.render(refs),
                 "answers": answers, "choices": choices,
                 "open_points": [], "warnings": warnings, "route": "plan",
                 "_detail": {"understood": frame.restated_question, "rounds": rounds,
                             "subjects": [v.name for v in res.subjects], "notes": res.notes,
-                            "resolved": text}}
+                            "resolved": text, "references": [e.id for e in refs]}}
 
     @step("plan")
     def plan(self, state: State) -> dict:
@@ -314,7 +328,8 @@ class Agent:
         context, tables = self.narrowed_context(state, plan) if first else (
             state["context"], list((state.get("retrieved") or {}).get("tables", [])))
         draft = agents.write_sql(self.llm(state), state["question"], plan, context,
-                                 state.get("feedback") or None, state.get("sql"), state.get("understanding", ""))
+                                 state.get("feedback") or None, state.get("sql"), state.get("understanding", ""),
+                                 state.get("references", ""))
         attempt = state.get("attempts", 0) + 1
         return {"sql": draft.sql.strip().rstrip(";"), "explanation": draft.explanation, "attempts": attempt,
                 "feedback": [], "_detail": {"attempt": attempt, "sql": draft.sql.strip(),
@@ -348,8 +363,16 @@ class Agent:
             return self._retry_or_fail(state, [f"{error}. Simplify the query or aggregate earlier."], "database")
         except Exception as error:                                          # DuckDB error: let the writer fix it
             return self._retry_or_fail(state, [f"Database error: {str(error).splitlines()[0][:300]}"], "database")
-        # 0 rows is not automatically wrong (e.g. no orders before launch): the validator decides
-        return {"result": _result(result.frame, result.truncated),
+        # code checks first (filters used, no repeated rows, no empty columns, rates within 0-100%); 0 rows is not
+        # automatically wrong (e.g. no orders before launch): the validator decides
+        problems = result_problems(result.frame, state["sql"], [tuple(f) for f in state.get("resolved_filters") or []])
+        if problems:
+            if state.get("attempts", 0) < get_settings().max_sql_attempts:
+                return self._retry_or_fail(state, problems, "result checks")
+            state_warnings = state.get("warnings", []) + [f"Result check: {p}" for p in problems]
+        else:
+            state_warnings = state.get("warnings", [])
+        return {"result": _result(result.frame, result.truncated), "warnings": state_warnings,
                 "route": "validate" if self.features.validator else "analyse",
                 "_detail": {"rows": len(result.frame), "columns": list(result.frame.columns),
                             "query_seconds": round(result.seconds, 2), "truncated": result.truncated}}

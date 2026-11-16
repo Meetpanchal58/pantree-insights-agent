@@ -203,7 +203,7 @@ def plan(llm: LLM, question: str, context: str, memory: str, data: dict, history
 
 def write_sql(llm: LLM, question: str, the_plan: AnalysisPlan, context: str,
               feedback: list[str] | None = None, previous_sql: str | None = None,
-              understanding: str = "") -> SQLDraft:
+              understanding: str = "", references: str = "") -> SQLDraft:
     settings = get_settings()
     system = system_prompt("sql_writer", max_rows=settings.max_rows)
     retry = ""
@@ -216,6 +216,8 @@ def write_sql(llm: LLM, question: str, the_plan: AnalysisPlan, context: str,
                  understanding),
         _section("Fix the previous attempt", retry),
         _section("Context (tables, joins, metrics, values, examples)", context),
+        _section("Reference queries with the same tables, columns and metrics (verified patterns to adapt)",
+                 references),
     )
     return llm.ask("sql_writer", SQLDraft, system, user, effort=settings.sql_reasoning_effort)
 

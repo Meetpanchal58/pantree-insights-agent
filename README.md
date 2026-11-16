@@ -137,6 +137,8 @@ flowchart LR
     G -.->|error| W
     DB -.->|error / empty| W
     V -.->|wrong query| W
+    DB --> RC[Result checks<br/>filters used, no repeated<br/>rows, rates 0-100%]
+    RC -.->|problem| W
     V --> A[Analyst<br/>findings, actions,<br/>caveats]
     A --> N[Claim check] --> CH[Chart] --> OUT[Answer + chart + SQL<br/>+ exports]
     S[(semantic/<br/>metrics, schema,<br/>examples)] -.-> R
@@ -170,6 +172,8 @@ flowchart LR
 | `src/pantree_insights/profile.py` | `pantree-profile`: facts measured from the data: ID formats (18 types), null shares, ranges, date coverage, and each approved join's cardinality and unmatched rows. Found that joining sales to promotions on the coupon code alone inflates coupon revenue by 7% (codes are re-issued), now a join rule the guardrail enforces. |
 | `src/pantree_insights/joins.py` | Join paths built in code from the question's table to the tables it needs (bridge tables added), avoiding joins that repeat rows and flagging them when unavoidable. |
 | `src/pantree_insights/understanding.py` | Turns the understanding agent's reading into exact filters, columns, time column and join path; asks the user when a word fits meanings in different groups ("Mumbai": a customer city, a seller's city, a warehouse or a brand) or a cut does not exist for the subject. |
+| `src/pantree_insights/references.py`, `sqlinfo.py` | After the question is understood, picks the reference queries that use the **same tables, columns and metrics** (parsed with sqlglot), so a question worded unlike any reference still gets the right SQL pattern. |
+| `src/pantree_insights/checks.py` | Result checks in code, before the LLM validator: every filter the understanding resolved must be in the SQL on the right table ("sellers.city", not "customers.city"); no repeated rows; no empty columns; rates within 0-100%. Zero false alarms on the 156 reference queries; on the agent's SQL from earlier paid runs it flags 5 of 38 wrong answers and 1 of 207 correct ones. |
 | `src/pantree_insights/retrieval.py` | Hybrid search (LlamaIndex: BM25 keywords + local `bge-small` embeddings, fused by reciprocal rank) over four indexes: tables, metrics, examples and ~2,000 real filter values. Returns the tables, join paths, metric definitions, exact values and similar examples a question needs, in ~60 ms. With each example held out, it finds every table the example's SQL needs for 28 of 28. |
 | `prompts/agents.yaml` | The agents' instructions, editable without touching code. |
 | `src/pantree_insights/agents.py` | Five agents, each one structured LLM call with a typed result: **understanding** (what exactly is asked, and every open point that would change the numbers: no fixed limit, asked round after round until nothing is unclear; a safety stop after 6 rounds), **planner** (turns the understood question into an analysis plan, or declines), **SQL writer**, **validator** (does the SQL answer what was asked?) and **analyst** (headline, findings, recommendations, caveats, facts to remember). |
