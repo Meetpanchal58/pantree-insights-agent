@@ -32,7 +32,7 @@ from llama_index.embeddings.fastembed import FastEmbedEmbedding
 from llama_index.retrievers.bm25 import BM25Retriever
 
 from .config import ROOT, get_settings
-from .db import connect, manifest
+from .db import connect
 from .semantic import (
     Example,
     Glossary,
@@ -238,15 +238,6 @@ def get_retriever() -> Retriever:
     """One shared retriever per process (indexes are built once, in a few seconds)."""
     settings = get_settings()
     return Retriever(connect(settings.shop_dir))
-
-
-def fingerprint() -> str:
-    """Changes whenever the data or the semantic files change (for callers that cache contexts)."""
-    settings = get_settings()
-    h = hashlib.sha256(str(manifest(settings.shop_dir)).encode())
-    for path in sorted(settings.semantic_dir.glob("*.yaml")):
-        h.update(path.read_bytes())
-    return h.hexdigest()[:16]
 
 
 def main() -> None:

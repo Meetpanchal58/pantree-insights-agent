@@ -8,7 +8,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-import pandas as pd
 import sqlglot
 from sqlglot import exp
 
@@ -295,68 +294,3 @@ def check_question(question: str) -> QuestionCheck:
         return QuestionCheck(False, "Personal customer data (names, emails, phone numbers, addresses) is not "
                                     "available. Ask about customers in aggregate instead, e.g. by city or segment.")
     return QuestionCheck(True)
-
-
-# ----------------------------------------------------------------------------- numbers in answers
-NUMBER = re.compile(r"(?<![\w.])[-+]?(?:₹|rs\.?\s*)?\d[\d,]*(?:\.\d+)?\s*(?:%|[kKmM]\b|lakh|crore|cr\b|l\b)?",
-                    re.I)
-SCALE = {"k": 1e3, "m": 1e6, "lakh": 1e5, "l": 1e5, "crore": 1e7, "cr": 1e7}
-
-
-def _parse(token: str) -> tuple[float, bool] | None:
-    """'₹19.2L' -> (1920000.0, False); '72%' -> (72.0, True)."""
-    t = token.strip().lower().replace("₹", "").replace("rs.", "").replace("rs", "").replace(",", "").strip()
-    pct = t.endswith("%")
-    t = t.rstrip("%").strip()
-    m = re.match(r"([-+]?\d+(?:\.\d+)?)\s*([a-z]*)$", t)
-    if not m:
-        return None
-    value = float(m.group(1)) * SCALE.get(m.group(2), 1)
-    return value, pct
-
-
-MONTHS = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
-DATES = re.compile(rf"\b\d{{4}}-\d{{2}}-\d{{2}}\b|\b{MONTHS}\s+\d{{4}}\b"
-                   rf"|\b{MONTHS}\s+\d{{1,2}}(?!\d)(?:\s*[-–]\s*\d{{1,2}}(?!\d))?(?:,?\s+\d{{4}})?"
-                   rf"|\b\d{{1,2}}(?:st|nd|rd|th)?(?:\s*[-–]\s*\d{{1,2}}(?:st|nd|rd|th)?)?\s+(?:of\s+)?{MONTHS}(?:\s+\d{{4}})?"
-                   rf"|\b\d{{1,2}}(?:st|nd|rd|th)\b|\bq[1-4]\b", re.I)
-
-
-def unsupported_numbers(text: str, frame: pd.DataFrame, rel_tol: float = 0.015) -> list[str]:
-    """DEPRECATED (kept to document the old behaviour in tests/test_grounding.py): this regex check accepted
-    most random numbers. Answers are now verified as structured claims by grounding.verify."""
-    return _old_unsupported_numbers(text, frame, rel_tol)
-
-
-def _old_unsupported_numbers(text: str, frame: pd.DataFrame, rel_tol: float = 0.015) -> list[str]:
-    """Numbers in an answer that cannot be traced to the result table (directly or as a simple derivation).
-
-    Allowed: values in the table (any rounding / % form), differences and ratios of two values
-    (growth %, shares), years, small counts (<= 12) and ranks.
-    """
-    values = [float(v) for v in frame.select_dtypes("number").to_numpy().ravel() if pd.notna(v)]
-    # Year-like and small integers are context ("top 5", "2026"), not claims.
-    derived = set()
-    for a in values[:200]:
-        for b in values[:200]:
-            if b:
-                derived.add(a / b)
-                derived.add((a - b) / b)
-    candidates = values + list(derived)
-
-    def matches(x: float) -> bool:
-        return any(abs(x - c) <= rel_tol * max(abs(c), 1e-9) or abs(x - c) < 0.051 for c in candidates)
-
-    bad = []
-    text = DATES.sub(" ", text)                  # dates ("October 15-21", "2026-11-03") are not claims
-    for token in NUMBER.findall(text):
-        parsed = _parse(token)
-        if parsed is None:
-            continue
-        value, pct = parsed
-        if not pct and float(value).is_integer() and (abs(value) <= 12 or 1990 <= value <= 2100):
-            continue
-        options = [value / 100, value] if pct else [value]
-        if not any(matches(v) for v in options):
-            bad.append(token.strip())
-    return bad

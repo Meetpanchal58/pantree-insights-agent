@@ -186,7 +186,7 @@ def test_planner_decline(con, retriever, tmp_path):
     assert events[-1]["status"] == "declined" and events[-1]["message"] == "Not about the shop."
 
 
-def test_unsupported_numbers_trigger_a_rewrite(con, retriever, tmp_path):
+def test_unverified_claims_trigger_a_rewrite(con, retriever, tmp_path):
     answers = [lambda u: analysis_from(u, wrong=True), analysis_from]
     agent, _, _ = make_agent(con, retriever, tmp_path, Script(
         planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}], validator=[{"ok": True}],

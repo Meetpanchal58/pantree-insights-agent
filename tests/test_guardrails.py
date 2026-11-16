@@ -1,8 +1,7 @@
 """Guardrails: no data or LLM needed."""
-import pandas as pd
 import pytest
 
-from pantree_insights.guardrails import check_question, check_sql, unsupported_numbers
+from pantree_insights.guardrails import check_question, check_sql
 
 ALLOWED = [
     "SELECT category, COUNT(*) AS n FROM product_master GROUP BY category",
@@ -85,14 +84,6 @@ def test_questions_allowed(question):
     assert check_question(question).ok
 
 
-def test_numbers_traced_to_result():
-    frame = pd.DataFrame({"year": [2025, 2026], "revenue": [1116198.8, 1919491.1]})
-    good = "Diwali 2026 revenue was ₹19.2 lakh, up 72% from ₹11.2 lakh in 2025 (₹1,919,491 vs ₹1,116,199)."
-    assert unsupported_numbers(good, frame) == []
-    bad = "Revenue was ₹25 lakh, up 140%."
-    assert set(unsupported_numbers(bad, frame)) == {"₹25 lakh", "140%"}
-
-
 def test_aggregated_ctes_count_as_summarised():
     sql = """WITH a AS (SELECT channel, SUM(spend) AS spend FROM marketing_spend JOIN campaigns USING (campaign_id)
              GROUP BY 1), b AS (SELECT channel, COUNT(*) AS n FROM campaigns GROUP BY 1)
@@ -108,17 +99,6 @@ def test_raw_rows_through_cte_still_blocked():
 def test_window_function_is_not_aggregation():
     sql = "SELECT customer_id, SUM(net_amount) OVER (PARTITION BY customer_id) AS total FROM sales"
     assert not check_sql(sql).ok
-
-
-def test_dates_are_not_number_claims():
-    frame = pd.DataFrame({"event": ["Diwali 2025"], "orders": [1423]})
-    text = "Diwali 2025 ran October 15–21 (from 2025-10-15) and 3 Nov - 8 Nov 2026 had 1,423 orders."
-    assert unsupported_numbers(text, frame) == []
-
-
-def test_month_year_is_a_date():
-    frame = pd.DataFrame({"m": [10], "revenue": [9054000.0]})
-    assert unsupported_numbers("October 2026 revenue reached Rs 90.54 lakh, on the 1st-14th of November.", frame) == []
 
 
 def test_unapproved_join_is_rejected():

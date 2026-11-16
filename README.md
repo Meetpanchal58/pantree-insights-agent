@@ -77,8 +77,8 @@ in the holdout runs verified). The previous regex check accepted 100% of random 
 ratios and 32% of random counts on an 8-row table; the claim check accepts 0.10-0.45%
 (`evals/reports/grounding_2026-11-15_1318.md`).
 
-**Retrieval** (no LLM; `evals/reports/retrieval_2026-11-15_1444.md`): all required tables, metrics, joins
-and values retrieved for 31/31 holdout and 28/28 regression questions, median 53 ms.
+**Retrieval** (no LLM; `evals/reports/retrieval_2026-11-15_1527.md`): all required tables, metrics, joins
+and values retrieved for 31/31 holdout and 28/28 regression questions, median 60 ms.
 
 **After the failure-analysis fixes** (one more run each, k=1; `e2e_holdout_full_r3-3_*`,
 `e2e_regression_full_r1-1_*`). The fixes came from the failures above: glossary phrases that bring their
