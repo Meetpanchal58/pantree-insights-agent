@@ -248,13 +248,15 @@ const clean = (o) => String(o).replace(/\s*\((recommended|default)\)\s*/gi, " ")
 function clarifyCard(e) {
   const el = document.createElement("div"); el.className = "msg";
   const qs = e.questions || [];
-  const title = (e.round || 1) > 1 ? `A few more questions (round ${e.round})` : "A few questions so I get this exactly right";
-  el.innerHTML = `<div class="clarify"><h4>${esc(title)}</h4>
+  const confirm = e.kind === "confirm";
+  const title = confirm ? "Here's what I'll compute" : (e.round || 1) > 1 ? `A few more questions (round ${e.round})` : "A few questions so I get this exactly right";
+  const readback = confirm && e.readback ? `<div class="readback">${e.readback.split("\n").map((l) => esc(l).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")).join("<br>")}</div>` : "";
+  el.innerHTML = `<div class="clarify"><h4>${esc(title)}</h4>${readback}
     ${qs.map((q, i) => `<div class="q">${esc(q.question)}</div><div class="why">${esc(q.why || "")}</div>
       <div class="chips" data-q="${i}">${q.options.map((o) => { const rec = clean(o) === clean(q.default); return `<button class="chip ${rec ? "selected" : ""}" data-opt="${esc(o)}">${esc(clean(o))}${rec ? '<span class="rec">recommended</span>' : ""}</button>`; }).join("")}</div>
-      <input class="other" data-q="${i}" maxlength="200" placeholder="Or type your own answer">`).join("")}
+      <input class="other" data-q="${i}" maxlength="300" placeholder="${confirm ? "Or tell me what to change" : "Or type your own answer"}">`).join("")}
     <div class="row" style="margin-top:14px"><button class="btn primary small" data-go>Continue</button>
-    <button class="btn small" data-defaults>Use recommended</button></div></div>`;
+    ${confirm ? "" : '<button class="btn small" data-defaults>Use recommended</button>'}</div></div>`;
   el.querySelectorAll(".chips").forEach((group) => group.addEventListener("click", (ev) => {
     const chip = ev.target.closest(".chip"); if (!chip) return;
     group.querySelectorAll(".chip").forEach((c) => c.classList.remove("selected")); chip.classList.add("selected");
@@ -275,7 +277,8 @@ function clarifyCard(e) {
     catch (err) { toast(err.message); status.remove(); S.busy = false; $(".send").disabled = false; }
   };
   el.querySelector("[data-go]").addEventListener("click", () => submit(false));
-  el.querySelector("[data-defaults]").addEventListener("click", () => submit(true));
+  const defaults = el.querySelector("[data-defaults]");
+  if (defaults) defaults.addEventListener("click", () => submit(true));
   return el;
 }
 

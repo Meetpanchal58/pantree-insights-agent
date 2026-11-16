@@ -26,7 +26,7 @@ VALUES = {"Mumbai": ["sales.ship_city", "customers.city", "customer_addresses.ci
 
 
 def frame(**kw) -> QuestionFrame:
-    return QuestionFrame(restated_question="q", **kw)
+    return QuestionFrame(**{"restated_question": "q", **kw})
 
 
 def run(f, choices=None, ids=None):
@@ -131,3 +131,28 @@ def test_no_subject_asks_what_to_measure():
 def test_prompt_renders_for_every_subject(subject):
     text = run(frame(subjects=[subject])).to_prompt()
     assert f"Subject: {subject}" in text and "FROM " in text
+
+
+# ----------------------------------------------------------------------------- read-back for confirmation
+def test_readback_states_definitions_columns_period_and_filters():
+    from pantree_insights.semantic import load_metrics
+    from pantree_insights.understanding import readback
+
+    f = frame(subjects=["orders"], measures=["late_delivery_rate"], breakdowns=["region"],
+              mentions=[Mention(text="Mumbai", concept="seller_city")], period="2026-01-01 to 2026-11-14",
+              restated_question="Late delivery rate by delivery region for Mumbai sellers in 2026")
+    r = run(f)
+    text = readback(f, r, CONCEPTS, load_metrics())
+    assert "Late deliveries: Share of delivered lines that arrived after the promised date" in text
+    assert "customers' / delivery region" in text                       # what 'region' means for orders
+    assert "seller's city = Mumbai" in text
+    assert "2026-01-01 to 2026-11-14" in text
+    assert "by the date they were ordered" in text
+
+
+def test_readback_for_an_unknown_measure_shows_the_words_used():
+    from pantree_insights.semantic import load_metrics
+    from pantree_insights.understanding import readback
+
+    f = frame(subjects=["browsing"], measures=["average pages per visit"])
+    assert "average pages per visit" in readback(f, run(f), CONCEPTS, load_metrics())

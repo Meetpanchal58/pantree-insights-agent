@@ -39,9 +39,12 @@ from .profile import profile_for
 from .references import ReferenceIndex
 from .retrieval import Retriever, get_retriever
 from .semantic import load_concepts, load_metrics, tables_in
-from .understanding import IdResolver, OpenPoint, resolve
+from .understanding import IdResolver, OpenPoint, readback, resolve
 
 MAX_CLARIFY_ROUNDS = 6        # safety stop for a model that keeps asking; the user can always use defaults
+CONFIRM_QUESTION = "Is this what you want me to compute?"
+CONFIRM_YES, CONFIRM_NO = "Yes, go ahead", "No, change something"
+CORRECTION = "Correction to your reading of the question"
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,8 @@ class State(TypedDict, total=False):
     open_points: list[dict]      # questions waiting for the user (with their internal meaning)
     choices: dict[str, str]      # answers code can act on: "mention:Mumbai" -> "city"
     clarify_rounds: int
+    confirmed: bool              # the user confirmed the read-back of the understood question
+    readback: str
     context: str
     retrieved: dict              # the retrieved context's parts, for narrowing it after planning
     metric_names: list[str]
@@ -256,13 +261,21 @@ class Agent:
         shown = set((state.get("retrieved") or {}).get("examples") or [])
         refs = self.references.pick(set(res.tables()), columns, wanted,
                                     exclude=set(state.get("exclude_examples") or []) | shown)
-        return {"frame": frame.model_dump(), "understanding": text, "understood_tables": res.tables(),
-                "resolved_filters": filters, "references": self.references.render(refs),
-                "answers": answers, "choices": choices,
-                "open_points": [], "warnings": warnings, "route": "plan",
-                "_detail": {"understood": frame.restated_question, "rounds": rounds,
-                            "subjects": [v.name for v in res.subjects], "notes": res.notes,
-                            "resolved": text, "references": [e.id for e in refs]}}
+        out = {"frame": frame.model_dump(), "understanding": text, "understood_tables": res.tables(),
+               "resolved_filters": filters, "references": self.references.render(refs),
+               "answers": answers, "choices": choices, "open_points": [], "warnings": warnings, "route": "plan"}
+        detail = {"understood": frame.restated_question, "rounds": rounds, "subjects": [v.name for v in res.subjects],
+                  "notes": res.notes, "resolved": text, "references": [e.id for e in refs]}
+        # read back what will be computed and wait for the user's confirmation (defaults: confirmed automatically)
+        if not state.get("use_defaults") and not state.get("confirmed") and res.subjects:
+            if rounds < MAX_CLARIFY_ROUNDS:
+                point = OpenPoint("confirm", CONFIRM_QUESTION, [CONFIRM_YES, CONFIRM_NO], CONFIRM_YES,
+                                  "nothing is computed until you confirm", {CONFIRM_YES: "yes"})
+                summary = readback(frame, res, self.concepts, self.metrics)
+                return {**out, "open_points": [point.__dict__], "readback": summary, "route": "clarify",
+                        "_status": "needs_input", "_detail": {**detail, "round": rounds + 1, "readback": summary}}
+            out["warnings"] = warnings + [f"Went ahead without your confirmation after {rounds} rounds of questions."]
+        return {**out, "_detail": detail}
 
     @step("plan")
     def plan(self, state: State) -> dict:
@@ -288,9 +301,24 @@ class Agent:
         else:                                                               # planner (understanding disabled)
             points, questions = [], state["plan"]["clarifying_questions"]
         rounds = state.get("clarify_rounds", 0) + 1
-        given = interrupt({"type": "clarify", "questions": questions, "round": rounds})   # pauses the run here
+        confirming = any(p.key == "confirm" for p in points)
+        payload = {"type": "clarify", "kind": "confirm" if confirming else "clarify", "questions": questions,
+                   "round": rounds}
+        if confirming:
+            payload["readback"] = state.get("readback", "")
+        given = interrupt(payload)                                          # pauses the run here
         if not isinstance(given, dict) or not given:                        # "just use defaults"
             given = {q["question"]: q["default"] for q in questions}
+        if confirming:
+            answer = (given.get(CONFIRM_QUESTION) or CONFIRM_YES).strip()
+            if answer == CONFIRM_YES:                                       # confirmed: plan with what was resolved
+                return {"confirmed": True, "clarify_rounds": rounds, "open_points": [], "status": "running",
+                        "route": "plan"}
+            correction = "The user wants something changed but did not say what: ask what to change" \
+                if answer == CONFIRM_NO else answer
+            answers = {**(state.get("answers") or {}), CORRECTION: correction}
+            return {"answers": answers, "confirmed": False, "clarify_rounds": rounds, "open_points": [],
+                    "status": "running", "route": "understand"}
         answers = {**(state.get("answers") or {}), **given}
         choices = dict(state.get("choices") or {})
         for p in points:
@@ -554,6 +582,8 @@ def main() -> None:
                 final = event
         if final and final["type"] == "clarify":
             answers = {}
+            if final.get("readback"):
+                print("\nHere's what I'll compute:\n  " + final["readback"].replace("**", "").replace("\n", "\n  "))
             print(f"\nQuestions, round {final.get('round', 1)} (press Enter for the default, or type your own answer):")
             for q in final["questions"]:
                 options = " / ".join(q["options"])

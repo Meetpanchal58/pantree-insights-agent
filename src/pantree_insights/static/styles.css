@@ -208,3 +208,5 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .clarify .other { width: 100%; margin: 8px 0 4px; padding: 7px 10px; border: 1px solid var(--border);
   border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+.clarify .readback { margin: 6px 0 12px; padding: 10px 12px; border-left: 3px solid var(--accent, #6b5cff);
+  background: var(--surface-2); border-radius: 6px; font-size: 13px; line-height: 1.6; }

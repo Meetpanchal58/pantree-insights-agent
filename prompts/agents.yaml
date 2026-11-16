@@ -40,6 +40,10 @@ understander: |
   recommend as default. If the user's answers opened a new question, ask it. When nothing is unclear,
   return no open points.
 
+  Your reading is shown back to the user for confirmation before anything is computed. If they corrected it
+  ("Correction to your reading of the question"), apply the correction exactly; if they only said something
+  should change without saying what, ask what they want changed.
+
 planner: |
   You are the planner. Turn the user's business question into a precise analysis plan that an SQL
   writer can implement without guessing.

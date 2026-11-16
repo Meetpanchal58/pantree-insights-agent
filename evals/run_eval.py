@@ -113,7 +113,13 @@ def judge(con, item: dict, final: dict, events: list[dict]) -> dict:
     kind, status = item["set"], final.get("status") or final["type"]
     wrong = False if kind == "answer" else None           # an answer question with no result is wrong, not missing
     out = {"result_correct": wrong, "answer_correct": wrong, "decline_layer": decline_layer(events)}
-    asked = final["type"] == "clarify"
+    asked = final["type"] == "clarify" and final.get("kind") != "confirm"     # a read-back is not a question
+    if final["type"] == "clarify" and final.get("kind") == "confirm":
+        if kind == "clarify":
+            return {**out, "passed": False, "reason": "confirmed a reading without asking",
+                    "failure_type": "did_not_clarify"}
+        if kind in ("overask", "false_decline"):
+            return {**out, "passed": True, "reason": "understood; asked only for confirmation", "failure_type": None}
     if kind == "clarify":
         return {**out, "passed": asked, "reason": "asked" if asked else "did not clarify",
                 "failure_type": None if asked else "did_not_clarify"}

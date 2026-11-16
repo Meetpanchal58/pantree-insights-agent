@@ -129,7 +129,8 @@ flowchart LR
     R --> U[Understanding<br/>subject, measures, mentions,<br/>cuts, period, open points]
     U --> RS[Resolve in code<br/>concept map, values, IDs,<br/>join path]
     RS -->|anything unclear| C[Clarifying questions<br/>round after round] --> U
-    RS --> P[Planner<br/>metrics, grain - or declines]
+    RS --> RB[Read-back<br/>'here is what I'll compute'<br/>confirm or correct] -->|correction| U
+    RB -->|confirmed| P[Planner<br/>metrics, grain - or declines]
     P --> W[SQL writer]
     W --> G[SQL guardrails<br/>read-only, approved<br/>tables and joins]
     G --> DB[(DuckDB<br/>read-only views)]
@@ -176,7 +177,7 @@ flowchart LR
 | `src/pantree_insights/checks.py` | Result checks in code, before the LLM validator: every filter the understanding resolved must be in the SQL on the right table ("sellers.city", not "customers.city"); no repeated rows; no empty columns; rates within 0-100%. Zero false alarms on the 156 reference queries; on the agent's SQL from earlier paid runs it flags 5 of 38 wrong answers and 1 of 207 correct ones. |
 | `src/pantree_insights/retrieval.py` | Hybrid search (LlamaIndex: BM25 keywords + local `bge-small` embeddings, fused by reciprocal rank) over four indexes: tables, metrics, examples and ~2,000 real filter values. Returns the tables, join paths, metric definitions, exact values and similar examples a question needs, in ~60 ms. With each example held out, it finds every table the example's SQL needs for 28 of 28. |
 | `prompts/agents.yaml` | The agents' instructions, editable without touching code. |
-| `src/pantree_insights/agents.py` | Five agents, each one structured LLM call with a typed result: **understanding** (what exactly is asked, and every open point that would change the numbers: no fixed limit, asked round after round until nothing is unclear; a safety stop after 6 rounds), **planner** (turns the understood question into an analysis plan, or declines), **SQL writer**, **validator** (does the SQL answer what was asked?) and **analyst** (headline, findings, recommendations, caveats, facts to remember). |
+| `src/pantree_insights/agents.py` | Five agents, each one structured LLM call with a typed result: **understanding** (what exactly is asked, and every open point that would change the numbers: no fixed limit, asked round after round until nothing is unclear; a safety stop after 6 rounds; then the resolved reading is shown back in business words - measure definition, cut, period, filters - and nothing is computed until the user confirms or corrects it), **planner** (turns the understood question into an analysis plan, or declines), **SQL writer**, **validator** (does the SQL answer what was asked?) and **analyst** (headline, findings, recommendations, caveats, facts to remember). |
 | `src/pantree_insights/graph.py` | The LangGraph flow: retries with the exact error when the guardrails, the database or the validator reject a query (max 3 attempts); pauses for clarifying questions and resumes with the answers; verifies every claim against the result (one rewrite, then a warning); picks a chart; saves the insight to memory only if it verified. Streams a progress event per step. |
 | `src/pantree_insights/memory.py` | Saves verified answers as insights (facts with numbers, SQL and data date), finds related insights (up to 30 days old) and open gaps for new questions, and closes gaps an answer explains. |
 | `src/pantree_insights/charts.py` | Picks the chart from the result's shape (line, bar, grouped bars, scatter or KPI cards) and builds Plotly JSON for the browser and exports. |

@@ -239,3 +239,32 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
         view.joins = graph.render(subj.table, [t for t in dict.fromkeys(tables) if t != subj.table])
         views.append(view)
     return Resolution(views, open_points, notes)
+
+
+# ----------------------------------------------------------------------------- read-back for confirmation
+def readback(frame, res: Resolution, concepts: Concepts, metrics) -> str:
+    """What will be computed, in business words, built from the resolved understanding (not from the model's own
+    summary), so what the user confirms is exactly what the SQL must follow."""
+    lines = [f"**Question:** {frame.restated_question}"]
+    measures = []
+    for m in frame.measures or ["(not stated)"]:
+        if m in metrics.metrics:
+            measures.append(f"{metrics.metrics[m].label}: {metrics.metrics[m].description}")
+        elif m in metrics.custom_metrics:
+            measures.append(f"{metrics.custom_metrics[m].label}: {metrics.custom_metrics[m].description}")
+        else:
+            measures.append(m)
+    lines.append("**Measure:** " + "; ".join(measures))
+    for v in res.subjects:
+        about = concepts.subjects[v.name].about.split(",")[0]
+        cuts = [concepts.label(c) for c, _ in v.breakdowns]
+        lines.append(f"**About:** {about}" + (f", split by {', '.join(cuts)}" if cuts else ""))
+        lines.append(f"**Period:** {frame.period or 'all data'}, {v.time_label}")
+        filters = [f"{concepts.label(f.concept)} = {f.value}" for f in v.filters] + \
+                  [f"{i.column.split('.')[1]} = {i.value}" for i in v.id_filters]
+        lines.append("**Filters:** " + ("; ".join(filters) if filters else "none"))
+    if frame.comparison:
+        lines.append(f"**Compared with:** {frame.comparison}")
+    if res.notes:
+        lines.append("**Note:** " + " ".join(res.notes))
+    return "\n".join(lines)

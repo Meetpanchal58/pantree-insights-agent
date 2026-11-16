@@ -80,9 +80,24 @@ def retriever_shop(con):
     return ROOT / "data" / "small"
 
 
-def run(agent, question, **kw):
+def _auto_confirm(agent, run_id, events):
+    """Most tests are about other steps: confirm the read-back whenever it is shown."""
+    from pantree_insights.graph import CONFIRM_QUESTION, CONFIRM_YES
+
+    while events and events[-1].get("type") == "clarify" and events[-1].get("kind") == "confirm":
+        events = events + list(agent.resume(run_id, {CONFIRM_QUESTION: CONFIRM_YES}))
+    return events
+
+
+def run(agent, question, confirm=True, **kw):
     run_id, events = agent.start(question, **kw)
-    return run_id, list(events)
+    events = list(events)
+    return run_id, _auto_confirm(agent, run_id, events) if confirm else events
+
+
+def resume(agent, run_id, answers, confirm=True):
+    events = list(agent.resume(run_id, answers))
+    return _auto_confirm(agent, run_id, events) if confirm else events
 
 
 def steps(events):
@@ -97,8 +112,9 @@ def test_happy_path(con, retriever, tmp_path):
     final = events[-1]
     assert final["status"] == "done", final
     assert [s for s, st in steps(events) if st == "done"] == [
-        "check_input", "retrieve", "understand", "plan", "write_sql", "check_sql", "run_query", "validate",
+        "check_input", "retrieve", "plan", "write_sql", "check_sql", "run_query", "validate",
         "analyse", "chart", "remember"]
+    assert ("understand", "needs_input") in steps(events)          # paused for the read-back, then confirmed
     assert final["chart"]["kind"] in ("bar", "bar_h")
     assert final["result"]["columns"] == ["category", "realized_revenue", "orders"]
     assert final["warnings"] == []
@@ -164,7 +180,7 @@ def test_planner_clarifies_when_understanding_is_disabled(con, retriever, tmp_pa
         validator=[{"ok": True}], analyst=[analysis_from]), features=VARIANTS["no_understanding"])
     run_id, events = run(agent, "How are sales by category?")
     assert events[-1]["type"] == "clarify" and events[-1]["questions"][0]["default"] == "Realized revenue"
-    resumed = list(agent.resume(run_id, {"Which sales measure?": "Realized revenue"}))
+    resumed = resume(agent, run_id, {"Which sales measure?": "Realized revenue"})
     assert resumed[-1]["status"] == "done"
     planner_prompts = [u for a, _, u in fakes[0].prompts if a == "planner"]
     assert "Which sales measure?: Realized revenue" in planner_prompts[-1]
@@ -337,11 +353,11 @@ def test_keeps_asking_round_after_round_until_clear(con, retriever, tmp_path):
         validator=[{"ok": True}], analyst=[analysis_from]))
     run_id, events = run(agent, "What is our best channel?")
     assert events[-1]["type"] == "clarify" and len(events[-1]["questions"]) == 4 and events[-1]["round"] == 1
-    second = list(agent.resume(run_id, {"Which metric?": "A", "Which period?": "B", "Which baseline?": "A",
-                                        "What does best mean?": "A"}))
+    second = resume(agent, run_id, {"Which metric?": "A", "Which period?": "B", "Which baseline?": "A",
+                                        "What does best mean?": "A"})
     assert second[-1]["type"] == "clarify" and [q["question"] for q in second[-1]["questions"]] == ["Which channel?"]
     assert second[-1]["round"] == 2
-    final = list(agent.resume(run_id, {"Which channel?": "B"}))[-1]
+    final = resume(agent, run_id, {"Which channel?": "B"})[-1]
     assert final["status"] == "done"
     planner_prompt = [u for a, _, u in fakes[0].prompts if a == "planner"][-1]
     assert "Which period?: B" in planner_prompt and "Which channel?: B" in planner_prompt   # answers accumulate
@@ -369,7 +385,7 @@ def test_safety_stop_after_max_rounds_uses_defaults_and_warns(con, retriever, tm
     rounds = 0
     while events[-1]["type"] == "clarify":
         rounds += 1
-        events = list(agent.resume(run_id, {events[-1]["questions"][0]["question"]: "A"}))
+        events = resume(agent, run_id, {events[-1]["questions"][0]["question"]: "A"})
     assert rounds == MAX_CLARIFY_ROUNDS and events[-1]["status"] == "done"
     assert any("Still unclear" in w for w in events[-1]["warnings"])
 
@@ -384,7 +400,7 @@ def test_which_mumbai_is_asked_and_the_answer_reaches_the_sql_writer(con, retrie
     question = events[-1]["questions"][0]
     assert "Mumbai" in question["question"] and len(question["options"]) == 4     # city, seller, warehouse, brand
     seller = next(o for o in question["options"] if "seller" in o)
-    assert list(agent.resume(run_id, {question["question"]: seller}))[-1]["status"] == "done"
+    assert resume(agent, run_id, {question["question"]: seller})[-1]["status"] == "done"
     writer = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][0]
     assert "Filter: sellers.city = 'Mumbai'" in writer
     assert "JOIN sellers ON sales.seller_id = sellers.seller_id" in writer
@@ -431,3 +447,58 @@ def test_structural_references_reach_the_writer_and_respect_hidden_examples(con,
     run(agent2, "How often do parcels bounce back, per courier?", exclude_examples=["lib-del-02", "h06", "m06"])
     writer2 = [u for a, _, u in fakes2[0].prompts if a == "sql_writer"][0]
     assert "Which couriers have the most parcels returned to origin?" not in writer2
+
+
+# ----------------------------------------------------------------------------- read-back confirmation
+def test_readback_is_confirmed_before_any_sql_and_yes_costs_no_extra_call(con, retriever, tmp_path):
+    from pantree_insights.graph import CONFIRM_QUESTION, CONFIRM_YES
+
+    frame = {**MUMBAI_SELLERS, "measures": ["orders"]}
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[frame], planner=[PLAN], sql_writer=[{"sql": WITH_FILTER, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    run_id, events = run(agent, "How many orders came from sellers in Mumbai?", confirm=False)
+    pause = events[-1]
+    assert pause["type"] == "clarify" and pause["kind"] == "confirm"
+    assert "seller's city = Mumbai" in pause["readback"] and "Orders" in pause["readback"]
+    assert not any(a == "sql_writer" for a, _, _ in fakes[0].prompts)          # nothing computed yet
+    final = resume(agent, run_id, {CONFIRM_QUESTION: CONFIRM_YES}, confirm=False)[-1]
+    assert final["status"] == "done"
+    assert [a for a, _, _ in fakes[0].prompts].count("understander") == 1       # confirming needs no new reading
+
+
+def test_a_correction_is_read_again_and_shown_back_again(con, retriever, tmp_path):
+    from pantree_insights.graph import CONFIRM_QUESTION, CONFIRM_YES
+
+    def understander(user):
+        if "Correction to your reading of the question: I meant the customers' city" in user:
+            return {**MUMBAI_SELLERS, "mentions": [{"text": "Mumbai", "concept": "city"}]}
+        return MUMBAI_SELLERS
+
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[understander], planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    run_id, events = run(agent, "How many orders in Mumbai?", confirm=False)
+    assert "seller's city = Mumbai" in events[-1]["readback"]
+    again = resume(agent, run_id, {CONFIRM_QUESTION: "I meant the customers' city"}, confirm=False)
+    assert again[-1]["kind"] == "confirm" and "customers' / delivery city = Mumbai" in again[-1]["readback"]
+    resume(agent, run_id, {CONFIRM_QUESTION: CONFIRM_YES}, confirm=False)
+    writer = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][0]
+    assert "Filter: sales.ship_city = 'Mumbai'" in writer
+
+
+def test_no_without_details_makes_the_model_ask_what_to_change(con, retriever, tmp_path):
+    from pantree_insights.graph import CONFIRM_NO, CONFIRM_QUESTION
+
+    def understander(user):
+        if "did not say what" in user:
+            return ask("What would you like me to change?")
+        return MUMBAI_SELLERS
+
+    agent, _, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[understander], planner=[PLAN], sql_writer=[{"sql": WITH_FILTER, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    run_id, _ = run(agent, "How many orders in Mumbai?", confirm=False)
+    events = resume(agent, run_id, {CONFIRM_QUESTION: CONFIRM_NO}, confirm=False)
+    assert events[-1]["kind"] == "clarify"
+    assert events[-1]["questions"][0]["question"] == "What would you like me to change?"
