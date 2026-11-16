@@ -2,7 +2,8 @@
 /* Pantree Insights front end: no framework, no build step. */
 
 const STEP_LABELS = {
-  check_input: "Checking the question", retrieve: "Finding relevant data", plan: "Planning the analysis",
+  check_input: "Checking the question", retrieve: "Finding relevant data", understand: "Understanding the question",
+  plan: "Planning the analysis",
   write_sql: "Writing SQL", check_sql: "Safety checks", run_query: "Running the query",
   validate: "Reviewing the query", analyse: "Analysing the result", chart: "Building the chart",
   remember: "Saving to memory",
@@ -247,9 +248,11 @@ const clean = (o) => String(o).replace(/\s*\((recommended|default)\)\s*/gi, " ")
 function clarifyCard(e) {
   const el = document.createElement("div"); el.className = "msg";
   const qs = e.questions || [];
-  el.innerHTML = `<div class="clarify"><h4>A few quick questions before I write the query</h4>
+  const title = (e.round || 1) > 1 ? `A few more questions (round ${e.round})` : "A few questions so I get this exactly right";
+  el.innerHTML = `<div class="clarify"><h4>${esc(title)}</h4>
     ${qs.map((q, i) => `<div class="q">${esc(q.question)}</div><div class="why">${esc(q.why || "")}</div>
-      <div class="chips" data-q="${i}">${q.options.map((o) => { const rec = clean(o) === clean(q.default); return `<button class="chip ${rec ? "selected" : ""}" data-opt="${esc(o)}">${esc(clean(o))}${rec ? '<span class="rec">recommended</span>' : ""}</button>`; }).join("")}</div>`).join("")}
+      <div class="chips" data-q="${i}">${q.options.map((o) => { const rec = clean(o) === clean(q.default); return `<button class="chip ${rec ? "selected" : ""}" data-opt="${esc(o)}">${esc(clean(o))}${rec ? '<span class="rec">recommended</span>' : ""}</button>`; }).join("")}</div>
+      <input class="other" data-q="${i}" maxlength="200" placeholder="Or type your own answer">`).join("")}
     <div class="row" style="margin-top:14px"><button class="btn primary small" data-go>Continue</button>
     <button class="btn small" data-defaults>Use recommended</button></div></div>`;
   el.querySelectorAll(".chips").forEach((group) => group.addEventListener("click", (ev) => {
@@ -260,7 +263,8 @@ function clarifyCard(e) {
     const answers = {};
     qs.forEach((q, i) => {
       const sel = el.querySelector(`.chips[data-q="${i}"] .chip.selected`);
-      answers[q.question] = clean(useDefaults || !sel ? q.default : sel.dataset.opt);
+      const own = el.querySelector(`.other[data-q="${i}"]`).value.trim();
+      answers[q.question] = useDefaults ? clean(q.default) : own || clean(!sel ? q.default : sel.dataset.opt);
     });
     el.querySelectorAll("button").forEach((b) => (b.disabled = true));
     const summary = Object.entries(answers).map(([k, v]) => `${k} → ${v}`).join("\n");
@@ -296,6 +300,9 @@ function stepDetail(s) {
   const parts = [];
   if (d.tables) parts.push(`Tables: ${d.tables.map(esc).join(", ")}`);
   if (d.values && d.values.length) parts.push(`Values found: ${d.values.map((v) => `<code>${esc(v)}</code>`).join(", ")}`);
+  if (d.understood) parts.push(`Understood: ${esc(d.understood)}`);
+  if (d.questions && d.questions.length) parts.push(`Asking (round ${esc(d.round)}): ${d.questions.map(esc).join(" · ")}`);
+  if (d.resolved) parts.push(`<div class="plan">${esc(d.resolved)}</div>`);
   if (d.plan) parts.push(`<div class="plan">${esc(d.plan)}</div>`);
   if (d.sql) parts.push(`${d.attempt > 1 ? `Attempt ${d.attempt}. ` : ""}${esc(d.explanation || "")}<pre>${esc(d.sql)}</pre>`);
   if (d.problems) parts.push(d.problems.map((p) => `<div class="problem">⚠ ${esc(p)}</div>`).join(""));

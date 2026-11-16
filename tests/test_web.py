@@ -30,11 +30,16 @@ def analysis(user):
             "chart_metric": "realized_revenue", "claims": [claim]}
 
 
+FRAME = {"restated_question": "Realized revenue by category", "subjects": ["orders"], "breakdowns": ["category"]}
+
+
 def responder(agent, schema, system, user):
     PROMPTS.append((agent, user))
+    if agent == "understander":                  # the understanding step asks; the planner no longer does
+        if "clarify me" in user and "answers so far" not in user:
+            return {**FRAME, "open_points": CLARIFY["clarifying_questions"]}
+        return FRAME
     if agent == "planner":
-        if "clarify me" in user and "answers to your clarifying questions" not in user:
-            return CLARIFY
         return PLAN
     return {"sql_writer": {"sql": GOOD_SQL, "explanation": "x"}, "validator": {"ok": True}}.get(agent) or analysis(user)
 

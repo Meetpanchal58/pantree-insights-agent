@@ -1,7 +1,7 @@
 """The agent flow, as a LangGraph state machine.
 
-    check_input -> retrieve -> plan --(clarify: pause for the user's answers)--> plan
-                                    \\-(decline)-> finish
+    check_input -> retrieve -> understand --(open points: pause for the user's answers)--> understand ...
+                               understand -> plan --(decline)-> finish
                                plan -> write_sql -> check_sql -> run_query -> validate -> analyse
                                           ^________|___________|____________|   (feedback, max 3 tries)
                                analyse -> (number check, one rewrite) -> chart -> remember -> finish
@@ -31,10 +31,15 @@ from .config import get_settings
 from .db import QueryTimeout, connect, manifest, run_query
 from .grounding import verify
 from .guardrails import check_question, check_sql
+from .joins import JoinGraph
 from .llm import LLM, BudgetExceeded, ChatLLM
 from .memory import Memory
+from .profile import profile_for
 from .retrieval import Retriever, get_retriever
-from .semantic import load_metrics, tables_in
+from .semantic import load_concepts, load_metrics, tables_in
+from .understanding import IdResolver, OpenPoint, resolve
+
+MAX_CLARIFY_ROUNDS = 6        # safety stop for a model that keeps asking; the user can always use defaults
 
 
 @dataclass(frozen=True)
@@ -46,14 +51,21 @@ class Features:
     validator: bool = True        # validator retry loop
     narrow: bool = True           # SQL writer's first attempt sees only the plan's tables
     memory: bool = True           # memory in prompts and saving insights
+    understand: bool = True       # question understanding + clarifying loop + code-resolved columns and joins
 
 
 VARIANTS = {
-    "baseline": Features(retrieval=False, semantic=False, planner=False, validator=False, narrow=False, memory=False),
-    "semantic": Features(retrieval=False, semantic=True, planner=False, validator=False, narrow=False, memory=False),
-    "retrieval": Features(retrieval=True, semantic=True, planner=False, validator=False, narrow=False, memory=False),
-    "planner": Features(retrieval=True, semantic=True, planner=True, validator=False, narrow=False, memory=False),
-    "validator": Features(retrieval=True, semantic=True, planner=True, validator=True, narrow=False, memory=False),
+    "baseline": Features(retrieval=False, semantic=False, planner=False, validator=False, narrow=False, memory=False,
+                         understand=False),
+    "semantic": Features(retrieval=False, semantic=True, planner=False, validator=False, narrow=False, memory=False,
+                         understand=False),
+    "retrieval": Features(retrieval=True, semantic=True, planner=False, validator=False, narrow=False, memory=False,
+                          understand=False),
+    "planner": Features(retrieval=True, semantic=True, planner=True, validator=False, narrow=False, memory=False,
+                        understand=False),
+    "validator": Features(retrieval=True, semantic=True, planner=True, validator=True, narrow=False, memory=False,
+                          understand=False),
+    "no_understanding": Features(understand=False),      # the system before the understanding step
     "full": Features(),
     "full_no_memory": Features(memory=False),
 }
@@ -67,6 +79,12 @@ class State(TypedDict, total=False):
     use_defaults: bool
     exclude_examples: list[str]  # evaluation: hide these example ids from retrieval (no leakage)
     answers: dict[str, str]
+    frame: dict                  # the understanding agent's question frame
+    understanding: str           # resolved subjects, filters, columns and join paths (prompt text)
+    understood_tables: list[str] # tables the resolved understanding needs (kept in the narrowed context)
+    open_points: list[dict]      # questions waiting for the user (with their internal meaning)
+    choices: dict[str, str]      # answers code can act on: "mention:Mumbai" -> "city"
+    clarify_rounds: int
     context: str
     retrieved: dict              # the retrieved context's parts, for narrowing it after planning
     metric_names: list[str]
@@ -138,6 +156,13 @@ class Agent:
         self.metrics = load_metrics()
         info = data or manifest(settings.shop_dir)
         self.data = {"first_day": info["first_day"], "last_day": info["last_day"], "size": info["size"]}
+        self.concepts = load_concepts()
+        if self.features.understand:
+            profile = profile_for(self.con, info)
+            self.joins = JoinGraph(self.retriever.schema, profile)
+            self.ids = IdResolver(profile.id_formats(), self.concepts.id_entities, self.con)
+            self.aliases = {alias.lower(): value for value, names in self.retriever.glossary.value_aliases.items()
+                            for alias in names}
         self._llms: dict[str, LLM] = {}
         self._memories: dict[str, Any] = {}          # run_id -> memory scope for that question
         self.graph = self._build().compile(checkpointer=InMemorySaver())
@@ -185,13 +210,54 @@ class Agent:
                             "values": [v.value for v in context.values[:6]],
                             "examples": [e.question for e in context.examples[:3]]}}
 
+    @step("understand")
+    def understand(self, state: State) -> dict:
+        """What exactly is asked? The LLM reads the question (with every answer so far); code resolves the words
+        to columns and joins and adds what the LLM missed. Anything unclear goes to the user, round after round,
+        until nothing is left (or the safety stop is reached, or the user asked for defaults)."""
+        if not self.features.understand:
+            return {"route": "plan", "_status": "skipped", "_detail": {"reason": "understanding disabled"}}
+        answers, choices = dict(state.get("answers") or {}), dict(state.get("choices") or {})
+        rounds = state.get("clarify_rounds", 0)
+        frame = agents.understand(self.llm(state), state["question"], state["context"], self.data, self.concepts,
+                                  state.get("history", ""), answers)
+        ids = self.ids.find(state["question"])
+        res = resolve(frame, self.concepts, self.joins, self.retriever.value_columns, ids, choices, self.aliases)
+        asked = {q.strip().lower() for q in answers}
+        pending = [OpenPoint(f"llm:{q.question}", q.question, q.options, q.default, q.why)
+                   for q in frame.open_points if q.question.strip().lower() not in asked] + \
+                  [p for p in res.open_points if p.key not in choices]
+        warnings = list(state.get("warnings", []))
+        if pending and not state.get("use_defaults") and rounds < MAX_CLARIFY_ROUNDS:
+            return {"frame": frame.model_dump(), "open_points": [p.__dict__ for p in pending], "route": "clarify",
+                    "_status": "needs_input",
+                    "_detail": {"round": rounds + 1, "questions": [p.question for p in pending],
+                                "understood": frame.restated_question}}
+        if pending:                                        # defaults: the user asked for them, or the safety stop
+            for p in pending:
+                answers[p.question] = p.default
+                if p.meaning:
+                    choices[p.key] = p.meaning.get(p.default, p.default)
+            if rounds >= MAX_CLARIFY_ROUNDS:
+                warnings.append(f"Still unclear after {rounds} rounds of questions; assumed: "
+                                + "; ".join(f"{p.question} -> {p.default}" for p in pending))
+            res = resolve(frame, self.concepts, self.joins, self.retriever.value_columns, ids, choices, self.aliases)
+        text = res.to_prompt()
+        return {"frame": frame.model_dump(), "understanding": text, "understood_tables": res.tables(),
+                "answers": answers, "choices": choices,
+                "open_points": [], "warnings": warnings, "route": "plan",
+                "_detail": {"understood": frame.restated_question, "rounds": rounds,
+                            "subjects": [v.name for v in res.subjects], "notes": res.notes,
+                            "resolved": text}}
+
     @step("plan")
     def plan(self, state: State) -> dict:
         if not self.features.planner:                      # ablation: no planning, question goes to the writer
             plan = agents.AnalysisPlan(decision="proceed", restated_question=state["question"])
             return {"plan": plan.model_dump(), "route": "write_sql", "_detail": {"decision": "skipped"}}
         result = agents.plan(self.llm(state), state["question"], state["context"], state["memory"], self.data,
-                             state.get("history", ""), state.get("answers"), state.get("use_defaults", False))
+                             state.get("history", ""), state.get("answers"), state.get("use_defaults", False),
+                             state.get("understanding", ""))
         detail = {"decision": result.decision, "plan": agents.plan_text(result)}
         if result.decision == "decline":
             return {"plan": result.model_dump(), "status": "declined", "route": "finish", "_detail": detail,
@@ -201,11 +267,24 @@ class Agent:
         return {"plan": result.model_dump(), "route": "write_sql", "_detail": detail}
 
     def clarify(self, state: State) -> dict:
-        questions = state["plan"]["clarifying_questions"]
-        answers = interrupt({"type": "clarify", "questions": questions})     # pauses the run here
-        if not isinstance(answers, dict) or not answers:                    # "just use defaults"
-            answers = {q["question"]: q["default"] for q in questions}
-        return {"answers": answers, "status": "running"}
+        """Pause for the user's answers, then go back to wherever the questions came from."""
+        if state.get("open_points"):                                        # from the understanding step
+            points = [OpenPoint(**p) for p in state["open_points"]]
+            questions = [p.public() for p in points]
+        else:                                                               # planner (understanding disabled)
+            points, questions = [], state["plan"]["clarifying_questions"]
+        rounds = state.get("clarify_rounds", 0) + 1
+        given = interrupt({"type": "clarify", "questions": questions, "round": rounds})   # pauses the run here
+        if not isinstance(given, dict) or not given:                        # "just use defaults"
+            given = {q["question"]: q["default"] for q in questions}
+        answers = {**(state.get("answers") or {}), **given}
+        choices = dict(state.get("choices") or {})
+        for p in points:
+            answer = given.get(p.question, p.default)
+            if p.meaning and answer in p.meaning:                           # a choice code can act on
+                choices[p.key] = p.meaning[answer]
+        return {"answers": answers, "choices": choices, "clarify_rounds": rounds, "open_points": [],
+                "status": "running", "route": "understand" if points else "plan"}
 
     def narrowed_context(self, state: State, plan: agents.AnalysisPlan) -> tuple[str, list[str]]:
         """Context limited to the plan's source tables (less distraction for the SQL writer).
@@ -213,7 +292,8 @@ class Agent:
         from .retrieval import Context, Value
 
         r = state.get("retrieved") or {}
-        tables = [t for t in dict.fromkeys(plan.source_tables) if t in self.retriever.schema.tables]
+        tables = [t for t in dict.fromkeys(plan.source_tables + list(state.get("understood_tables") or []))
+                  if t in self.retriever.schema.tables]
         if not r or not tables:
             return state["context"], list(r.get("tables", []))
         keep = set(tables)
@@ -234,7 +314,7 @@ class Agent:
         context, tables = self.narrowed_context(state, plan) if first else (
             state["context"], list((state.get("retrieved") or {}).get("tables", [])))
         draft = agents.write_sql(self.llm(state), state["question"], plan, context,
-                                 state.get("feedback") or None, state.get("sql"))
+                                 state.get("feedback") or None, state.get("sql"), state.get("understanding", ""))
         attempt = state.get("attempts", 0) + 1
         return {"sql": draft.sql.strip().rstrip(";"), "explanation": draft.explanation, "attempts": attempt,
                 "feedback": [], "_detail": {"attempt": attempt, "sql": draft.sql.strip(),
@@ -278,7 +358,8 @@ class Agent:
     def validate(self, state: State) -> dict:
         plan = agents.AnalysisPlan.model_validate(state["plan"])
         verdict = agents.validate(self.llm(state), state["question"], plan, state["sql"], _frame(state["result"]),
-                                  self.metrics.describe(state.get("metric_names") or None))
+                                  self.metrics.describe(state.get("metric_names") or None),
+                                  state.get("understanding", ""))
         if verdict.ok:
             return {"route": "analyse", "_detail": {"ok": True}}
         if state.get("attempts", 0) < get_settings().max_sql_attempts:
@@ -341,15 +422,16 @@ class Agent:
     # ------------------------------------------------------------------ graph
     def _build(self) -> StateGraph:
         g = StateGraph(State)
-        for name in ["check_input", "retrieve", "plan", "clarify", "write_sql", "check_sql", "run_query",
+        for name in ["check_input", "retrieve", "understand", "plan", "clarify", "write_sql", "check_sql", "run_query",
                      "validate", "analyse", "chart", "remember", "finish"]:
             g.add_node(name, getattr(self, name))
         g.add_edge(START, "check_input")
         route = lambda s: s["route"]                                       # noqa: E731
         g.add_conditional_edges("check_input", route, ["retrieve", "finish"])
-        g.add_edge("retrieve", "plan")
+        g.add_edge("retrieve", "understand")
+        g.add_conditional_edges("understand", route, ["clarify", "plan"])
         g.add_conditional_edges("plan", route, ["clarify", "write_sql", "finish"])
-        g.add_edge("clarify", "plan")
+        g.add_conditional_edges("clarify", route, ["understand", "plan"])
         g.add_edge("write_sql", "check_sql")
         for name in ["check_sql", "run_query"]:
             g.add_conditional_edges(name, route, ["write_sql", "run_query", "validate", "analyse", "finish"])
@@ -415,6 +497,9 @@ def _print_event(event: dict) -> None:
     extra = ""
     if event["step"] == "retrieve":
         extra = f" tables={detail.get('tables')} values={detail.get('values')}"
+    elif event["step"] == "understand":
+        extra = f" {detail.get('understood', '')}" + (f"\n    asking: {detail['questions']}" if detail.get("questions")
+                                                     else "")
     elif event["step"] == "plan":
         extra = "\n    " + detail.get("plan", "").replace("\n", "\n    ")
     elif event["step"] == "write_sql":
@@ -446,7 +531,7 @@ def main() -> None:
                 final = event
         if final and final["type"] == "clarify":
             answers = {}
-            print("\nThe planner has questions (press Enter for the default):")
+            print(f"\nQuestions, round {final.get('round', 1)} (press Enter for the default, or type your own answer):")
             for q in final["questions"]:
                 options = " / ".join(q["options"])
                 answer = input(f"  {q['question']} [{options}] (default: {q['default']}): ").strip()

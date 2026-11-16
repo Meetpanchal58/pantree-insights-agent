@@ -113,3 +113,34 @@ week.
 **Known weakness.** On a backtest with 150 injected shocks (`evals/reports/pulse_backtest_2026-11-15_1303.md`),
 robust_bh found more shocks (43/150 vs 35/150) but raised more other alerts (2.77 vs 1.17 a week). Neither
 method is good at small changes (+25%: 5/26 vs 3/26). Which default to keep is an open decision.
+
+## 8. Understand the question before planning, and ask until it is clear
+
+**Decision.** A dedicated understanding step reads the question (with every answer so far) into a frame:
+subjects, measures, mentions, cuts, period and open points. Code then resolves the words to columns with the
+concept map, the value index and measured ID formats, and adds open points the model missed. Anything unclear
+goes back to the user, round after round, with no fixed number of questions; the planner no longer asks.
+
+**Alternatives.** The planner asks at most 3 questions once (the previous design); never ask, always assume.
+
+**Why.** The same word means different columns for different subjects ("Mumbai" is a delivery city for orders,
+the customer's city for sign-ups, and also a seller city, a warehouse and a brand). Deciding the subject is
+easier for a model than choosing columns, and the rest can be done in code and checked by tests.
+
+**Known weakness.** Each question costs one more LLM call, and one per extra round. A model that keeps asking is
+stopped after 6 rounds (defaults are used and a warning is shown). Whether the model asks the right questions,
+and not too many, has not yet been measured end to end (the over-asking suite will show it).
+
+## 9. Join paths and join rules in code, from measured cardinality
+
+**Decision.** The data profile measures every approved join (1:1, N:1, 1:N, N:N and unmatched rows). Join paths
+from the question's table are built in code (cheapest route; joins that repeat rows cost more; ties go to the
+root table's own join), and joins that need an extra condition carry it as a join rule the guardrail enforces.
+
+**Alternatives.** Let the SQL writer pick joins from the approved list (the previous design).
+
+**Why.** Join mistakes were the main source of wrong totals, and some are invisible without measuring: the
+coupon-code join to promotions looked fine but matched several promotions per line (+7% coupon revenue).
+
+**Known weakness.** The profile is measured once per data snapshot (about 5 s at start-up); a join whose
+cardinality changes in later data is only re-checked when the snapshot changes.

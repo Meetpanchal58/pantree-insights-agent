@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stats import fmt, paired_difference, summarize  # noqa: E402
 
-ORDER = ["baseline", "semantic", "retrieval", "planner", "validator", "full", "full_no_memory"]
+ORDER = ["baseline", "semantic", "retrieval", "planner", "validator", "no_understanding", "full", "full_no_memory"]
 
 
 def build(paths: list[Path]) -> str:

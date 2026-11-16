@@ -21,6 +21,10 @@ PLAN = {"decision": "proceed", "restated_question": "Realized revenue by categor
         "output_shape": "one row per category"}
 
 
+CLEAR_FRAME = {"restated_question": "Realized revenue by category, all data", "subjects": ["orders"],
+               "measures": ["realized_revenue"], "breakdowns": ["category"], "open_points": []}
+
+
 def analysis_from(user_prompt: str, wrong: bool = False) -> dict:
     """An analyst answer with one claim about the first result row (or a made-up value)."""
     table = user_prompt.split("## Result table\n", 1)[1].split("\n\n", 1)[0].splitlines()
@@ -41,6 +45,8 @@ class Script:
         self.answers = {k: list(v) for k, v in answers.items()}
 
     def __call__(self, agent, schema, system, user):
+        if agent == "understander" and agent not in self.answers:
+            return CLEAR_FRAME                       # most tests are about later steps: a clear question
         queue = self.answers[agent]
         item = queue.pop(0) if len(queue) > 1 else queue[0]
         return item(user) if callable(item) else item
@@ -53,7 +59,7 @@ def retriever(con):
     return Retriever(con)
 
 
-def make_agent(con, retriever, tmp_path, script):
+def make_agent(con, retriever, tmp_path, script, features=None):
     from pantree_insights.db import manifest
     from pantree_insights.graph import Agent
 
@@ -65,7 +71,7 @@ def make_agent(con, retriever, tmp_path, script):
 
     memory = Memory(tmp_path / "memory", data_size="small")
     agent = Agent(llm_factory=factory, retriever=retriever, memory=memory, con=con,
-                  data=manifest(retriever_shop(con)))
+                  data=manifest(retriever_shop(con)), features=features)
     return agent, fakes, memory
 
 
@@ -91,18 +97,20 @@ def test_happy_path(con, retriever, tmp_path):
     final = events[-1]
     assert final["status"] == "done", final
     assert [s for s, st in steps(events) if st == "done"] == [
-        "check_input", "retrieve", "plan", "write_sql", "check_sql", "run_query", "validate", "analyse",
-        "chart", "remember"]
+        "check_input", "retrieve", "understand", "plan", "write_sql", "check_sql", "run_query", "validate",
+        "analyse", "chart", "remember"]
     assert final["chart"]["kind"] in ("bar", "bar_h")
     assert final["result"]["columns"] == ["category", "realized_revenue", "orders"]
     assert final["warnings"] == []
-    assert final["cost"]["calls"] == 4
+    assert final["cost"]["calls"] == 5
     saved = memory.insights()
     assert len(saved) == 1 and saved[0]["sql"].startswith("SELECT")
     # the planner saw the retrieved context; the writer saw the plan
     agents_called = [a for a, _, _ in fakes[0].prompts]
-    assert agents_called == ["planner", "sql_writer", "validator", "analyst"]
-    assert "## Tables" in fakes[0].prompts[0][2] and "Realized revenue by category" in fakes[0].prompts[1][2]
+    assert agents_called == ["understander", "planner", "sql_writer", "validator", "analyst"]
+    assert "## Tables" in fakes[0].prompts[1][2] and "Realized revenue by category" in fakes[0].prompts[2][2]
+    # the resolved understanding reaches the planner and the writer, with the code-built join path
+    assert "JOIN product_master ON sales.product_id = product_master.product_id" in fakes[0].prompts[2][2]
     json.dumps(final)                                                  # everything is JSON for the web app
 
 
@@ -141,17 +149,19 @@ def test_gives_up_after_max_attempts(con, retriever, tmp_path):
     assert memory.insights() == []
 
 
-def test_clarifying_questions_pause_and_resume(con, retriever, tmp_path):
+def test_planner_clarifies_when_understanding_is_disabled(con, retriever, tmp_path):
+    from pantree_insights.graph import VARIANTS
+
     clarify = {"decision": "clarify", "restated_question": "Sales by category",
                "clarifying_questions": [{"question": "Which sales measure?", "options": ["Realized revenue", "Orders"],
                                          "default": "Realized revenue", "why": "changes the ranking"}]}
 
     def planner(user):
-        return PLAN if "answers to your clarifying questions" in user else clarify
+        return PLAN if "answers to clarifying questions" in user else clarify
 
     agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
         planner=[planner], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
-        validator=[{"ok": True}], analyst=[analysis_from]))
+        validator=[{"ok": True}], analyst=[analysis_from]), features=VARIANTS["no_understanding"])
     run_id, events = run(agent, "How are sales by category?")
     assert events[-1]["type"] == "clarify" and events[-1]["questions"][0]["default"] == "Realized revenue"
     resumed = list(agent.resume(run_id, {"Which sales measure?": "Realized revenue"}))
@@ -264,7 +274,8 @@ def test_old_insights_are_left_out_of_memory_context(tmp_path):
     ("baseline", ["sql_writer", "analyst"]),
     ("retrieval", ["sql_writer", "analyst"]),
     ("validator", ["planner", "sql_writer", "validator", "analyst"]),
-    ("full", ["planner", "sql_writer", "validator", "analyst"]),
+    ("no_understanding", ["planner", "sql_writer", "validator", "analyst"]),
+    ("full", ["understander", "planner", "sql_writer", "validator", "analyst"]),
 ])
 def test_variants_switch_agents(con, retriever, tmp_path, variant, expected):
     from pantree_insights.db import manifest
@@ -304,3 +315,85 @@ def test_empty_sql_gets_specific_feedback_and_the_writers_reason_is_kept(con, re
         validator=[{"ok": True}], analyst=[analysis_from]))
     _, events = run(agent, "What is revenue by category?")
     assert events[-1]["status"] == "failed" and "cannot answer this" in events[-1]["message"]
+
+
+# ----------------------------------------------------------------------------- understanding + clarifying loop
+def ask(*questions):
+    return {**CLEAR_FRAME, "open_points": [{"question": q, "options": ["A", "B"], "default": "A", "why": "w"}
+                                           for q in questions]}
+
+
+def test_keeps_asking_round_after_round_until_clear(con, retriever, tmp_path):
+    """No fixed limit: 4 questions in round 1, a follow-up in round 2 opened by an answer, then clear."""
+    def understander(user):
+        if "Which channel?: B" in user:
+            return CLEAR_FRAME
+        if "Which metric?: A" in user:
+            return ask("Which channel?")
+        return ask("Which metric?", "Which period?", "Which baseline?", "What does best mean?")
+
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[understander], planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    run_id, events = run(agent, "What is our best channel?")
+    assert events[-1]["type"] == "clarify" and len(events[-1]["questions"]) == 4 and events[-1]["round"] == 1
+    second = list(agent.resume(run_id, {"Which metric?": "A", "Which period?": "B", "Which baseline?": "A",
+                                        "What does best mean?": "A"}))
+    assert second[-1]["type"] == "clarify" and [q["question"] for q in second[-1]["questions"]] == ["Which channel?"]
+    assert second[-1]["round"] == 2
+    final = list(agent.resume(run_id, {"Which channel?": "B"}))[-1]
+    assert final["status"] == "done"
+    planner_prompt = [u for a, _, u in fakes[0].prompts if a == "planner"][-1]
+    assert "Which period?: B" in planner_prompt and "Which channel?: B" in planner_prompt   # answers accumulate
+
+
+def test_use_defaults_answers_every_open_point_without_pausing(con, retriever, tmp_path):
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[ask("Which metric?", "Which period?")], planner=[PLAN],
+        sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}], validator=[{"ok": True}], analyst=[analysis_from]))
+    _, events = run(agent, "What is our best channel?", use_defaults=True)
+    assert events[-1]["status"] == "done" and not any(e["type"] == "clarify" for e in events)
+    assert "Which metric?: A" in [u for a, _, u in fakes[0].prompts if a == "planner"][-1]
+
+
+def test_safety_stop_after_max_rounds_uses_defaults_and_warns(con, retriever, tmp_path):
+    from pantree_insights.graph import MAX_CLARIFY_ROUNDS
+
+    def understander(user):                                  # a confused model: always a new question
+        return ask(f"Question {user.count(': A')}?")
+
+    agent, _, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[understander], planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    run_id, events = run(agent, "Something vague")
+    rounds = 0
+    while events[-1]["type"] == "clarify":
+        rounds += 1
+        events = list(agent.resume(run_id, {events[-1]["questions"][0]["question"]: "A"}))
+    assert rounds == MAX_CLARIFY_ROUNDS and events[-1]["status"] == "done"
+    assert any("Still unclear" in w for w in events[-1]["warnings"])
+
+
+def test_which_mumbai_is_asked_and_the_answer_reaches_the_sql_writer(con, retriever, tmp_path):
+    frame = {**CLEAR_FRAME, "restated_question": "Orders in Mumbai", "breakdowns": [],
+             "mentions": [{"text": "Mumbai", "concept": "other"}]}
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[frame], planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    run_id, events = run(agent, "How many orders in Mumbai?")
+    question = events[-1]["questions"][0]
+    assert "Mumbai" in question["question"] and len(question["options"]) == 4     # city, seller, warehouse, brand
+    seller = next(o for o in question["options"] if "seller" in o)
+    assert list(agent.resume(run_id, {question["question"]: seller}))[-1]["status"] == "done"
+    writer = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][0]
+    assert "Filter: sellers.city = 'Mumbai'" in writer
+    assert "JOIN sellers ON sales.seller_id = sellers.seller_id" in writer
+
+
+def test_order_number_is_resolved_to_its_id(con, retriever, tmp_path):
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}], validator=[{"ok": True}],
+        analyst=[analysis_from]))
+    run(agent, "What was in order 12?")
+    writer = [u for a, _, u in fakes[0].prompts if a == "sql_writer"][0]
+    assert "Filter: order_id = 'OD000000012'" in writer

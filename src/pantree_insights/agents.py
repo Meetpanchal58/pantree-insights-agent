@@ -1,4 +1,4 @@
-"""The four agents: planner, SQL writer, validator and analyst.
+"""The agents: question understanding, planner, SQL writer, validator and analyst.
 
 Each agent is one structured LLM call: a fixed system prompt (prompts/agents.yaml) plus the question's
 context, returning a typed pydantic object. Orchestration (retries, clarifying questions, memory)
@@ -26,11 +26,32 @@ class ClarifyingQuestion(BaseModel):
     why: str = Field(description="Why the answer changes the analysis, in a few words")
 
 
+class Mention(BaseModel):
+    text: str = Field(description="The word or phrase exactly as the user wrote it, e.g. 'Mumbai', 'footwear'")
+    concept: str = Field(description="A concept name from the list (city, category, brand, ...), or one of: "
+                         "id, metric, period, other")
+
+
+class QuestionFrame(BaseModel):
+    restated_question: str = Field(description="The question as you understand it, precise and self-contained")
+    subjects: list[str] = Field(default_factory=list, description="Subject names from the list: usually one; two "
+                                "when the question compares them (e.g. sign-ups vs orders)")
+    measures: list[str] = Field(default_factory=list, description="What to measure: metric names or exact words")
+    mentions: list[Mention] = Field(default_factory=list, description="Every value-like word in the question")
+    breakdowns: list[str] = Field(default_factory=list, description="Concept names to split the result by")
+    period: str = Field("all data", description="Explicit dates (YYYY-MM-DD to YYYY-MM-DD) or 'all data'")
+    time_meaning: str | None = Field(None, description="Which date of the subject, from its time meanings "
+                                     "(e.g. 'delivered'); empty = the subject's default date")
+    comparison: str | None = Field(None, description="Baseline to compare with, if any")
+    open_points: list[ClarifyingQuestion] = Field(default_factory=list, description="Everything still unclear "
+                                                  "that changes the numbers; empty when the question is clear")
+
+
 class AnalysisPlan(BaseModel):
     decision: Literal["proceed", "clarify", "decline"]
     decline_reason: str | None = Field(None, description="Only for decline: why, plus an aggregated alternative")
     clarifying_questions: list[ClarifyingQuestion] = Field(default_factory=list,
-                                                           description="Only for clarify; max 3")
+                                                           description="Only for clarify")
     restated_question: str = Field(description="The question as you will answer it, precise and self-contained")
     intent: str = Field("", description="What the stakeholder wants to learn, in one short phrase")
     source_tables: list[str] = Field(default_factory=list, description="Tables the SQL must use (from the context)")
@@ -134,14 +155,37 @@ def table_text(frame: pd.DataFrame, max_rows: int = 50) -> str:
 
 
 # ----------------------------------------------------------------------------- the agents
+def understand(llm: LLM, question: str, context: str, data: dict, concepts, history: str = "",
+               answers: dict[str, str] | None = None, notes: list[str] | None = None) -> QuestionFrame:
+    """What exactly is being asked: subjects, measures, mentions, cuts, period, and what is still unclear."""
+    subjects = "\n".join(f"- {n} ({s.table}): {s.about}" + (f"; dates: {', '.join(s.time_meanings)}"
+                                                             if s.time_meanings else "")
+                         for n, s in concepts.subjects.items())
+    cuts = "\n".join(f"- {c}: {concepts.label(c)} (for: {', '.join(e)})" for c, e in concepts.concepts.items())
+    answered = "\n".join(f"- {q}: {a}" for q, a in (answers or {}).items())
+    user = _join(
+        _section("Earlier in this chat", history),
+        _section("Question", question),
+        _section("The user's answers so far", answered),
+        _section("Problems found in your last reading (resolve them or ask)", "\n".join(f"- {n}" for n in notes or [])),
+        _section("Data", f"Shop data from {data['first_day']} to {data['last_day']} ({data['size']} shop)."),
+        _section("Subjects (what a question can be about)", subjects),
+        _section("Concepts (cuts and filters, and the subjects they exist for)", cuts),
+        _section("Context (tables, metrics, values, examples)", context),
+    )
+    system = system_prompt("understander", data_last_day=data["last_day"], data_first_day=data["first_day"])
+    return llm.ask("understander", QuestionFrame, system, user)
+
+
 def plan(llm: LLM, question: str, context: str, memory: str, data: dict, history: str = "",
-         answers: dict[str, str] | None = None, use_defaults: bool = False) -> AnalysisPlan:
+         answers: dict[str, str] | None = None, use_defaults: bool = False, understanding: str = "") -> AnalysisPlan:
     system = system_prompt("planner", data_last_day=data["last_day"], data_first_day=data["first_day"])
     answered = "\n".join(f"- {q}: {a}" for q, a in (answers or {}).items())
     user = _join(
         _section("Earlier in this chat", history),
         _section("Question", question),
-        _section("The user's answers to your clarifying questions", answered),
+        _section("The user's answers to clarifying questions", answered),
+        _section("Question understanding", understanding),
         _section("Instruction", "The user asked you to use sensible defaults: proceed without asking."
                  if use_defaults else ""),
         _section("Data", f"Shop data from {data['first_day']} to {data['last_day']} ({data['size']} shop)."),
@@ -149,8 +193,7 @@ def plan(llm: LLM, question: str, context: str, memory: str, data: dict, history
         _section("Context (tables, metrics, values, examples)", context),
     )
     result = llm.ask("planner", AnalysisPlan, system, user)
-    result.clarifying_questions = result.clarifying_questions[:3]
-    if answers or use_defaults:
+    if answers or use_defaults or understanding:   # the understanding step already asked everything needed
         if result.decision == "clarify":           # never ask twice
             result.decision = "proceed"
             result.assumptions += [f"Assumed '{q.default}' for: {q.question}" for q in result.clarifying_questions]
@@ -159,7 +202,8 @@ def plan(llm: LLM, question: str, context: str, memory: str, data: dict, history
 
 
 def write_sql(llm: LLM, question: str, the_plan: AnalysisPlan, context: str,
-              feedback: list[str] | None = None, previous_sql: str | None = None) -> SQLDraft:
+              feedback: list[str] | None = None, previous_sql: str | None = None,
+              understanding: str = "") -> SQLDraft:
     settings = get_settings()
     system = system_prompt("sql_writer", max_rows=settings.max_rows)
     retry = ""
@@ -168,6 +212,8 @@ def write_sql(llm: LLM, question: str, the_plan: AnalysisPlan, context: str,
     user = _join(
         _section("Analysis plan", plan_text(the_plan)),
         _section("Original question", question),
+        _section("Question understanding (filters, columns and joins resolved in code: follow exactly)",
+                 understanding),
         _section("Fix the previous attempt", retry),
         _section("Context (tables, joins, metrics, values, examples)", context),
     )
@@ -175,9 +221,10 @@ def write_sql(llm: LLM, question: str, the_plan: AnalysisPlan, context: str,
 
 
 def validate(llm: LLM, question: str, the_plan: AnalysisPlan, sql: str, preview: pd.DataFrame,
-             metric_defs: str) -> Verdict:
+             metric_defs: str, understanding: str = "") -> Verdict:
     user = _join(
         _section("Question", question),
+        _section("Question understanding (resolved in code)", understanding),
         _section("Analysis plan", plan_text(the_plan)),
         _section("SQL", sql),
         _section("Result preview", table_text(preview, 15) + f"\n(total rows: {len(preview)})"),

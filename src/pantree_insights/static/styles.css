@@ -205,3 +205,6 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .messages, .composer-wrap { padding-left: 16px; padding-right: 16px; }
   .bubble { max-width: 92%; }
 }
+
+.clarify .other { width: 100%; margin: 8px 0 4px; padding: 7px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }

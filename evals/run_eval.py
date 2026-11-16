@@ -310,8 +310,8 @@ def rescore(report: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--suite", choices=["holdout", "regression", "all"], default="holdout")
-    parser.add_argument("--variant", default="full", help="full, full_no_memory, validator, planner, retrieval, "
-                                                          "semantic or baseline")
+    parser.add_argument("--variant", default="full", help="full, no_understanding, full_no_memory, validator, "
+                                                          "planner, retrieval, semantic or baseline")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--repeat-offset", type=int, default=0, help="number the repeats from here (combine runs)")
     parser.add_argument("--sets", help="only these sets, e.g. answer,overask")
