@@ -7,6 +7,19 @@ queries:
     difficulty: hard
     tags: [trend, growth]
     metrics: [net_sales, orders, aov]
+    verify:
+    - metric: net_sales
+      column: net_sales
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
+    - metric: orders
+      column: orders
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
+    - metric: aov
+      column: aov
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
     sql: |
       WITH monthly AS (
         SELECT date_trunc('month', s.placed_at) AS month,
@@ -29,6 +42,11 @@ queries:
     difficulty: medium
     tags: [trend, running total]
     metrics: [realized_revenue]
+    verify:
+    - metric: realized_revenue
+      column: realized_revenue
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
     sql: |
       WITH monthly AS (
         SELECT date_trunc('month', s.placed_at) AS month,
@@ -48,6 +66,13 @@ queries:
     difficulty: medium
     tags: [mix, share of total]
     metrics: [net_sales, units_sold]
+    verify:
+    - metric: net_sales
+      column: net_sales
+      by: {category: product_master.category}
+    - metric: units_sold
+      column: units_sold
+      by: {category: product_master.category}
     sql: |
       SELECT p.category,
              SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) AS net_sales,
@@ -65,6 +90,11 @@ queries:
     difficulty: hard
     tags: [ranking, top n per group]
     metrics: [units_sold]
+    verify:
+    - metric: units_sold
+      column: units_sold
+      by: {category: product_master.category, sub_category: product_master.sub_category}
+      partial: true
     sql: |
       WITH units AS (
         SELECT p.category, p.sub_category,
@@ -109,6 +139,15 @@ queries:
     difficulty: hard
     tags: [comparison, seasonality, period_comparison]
     metrics: [net_sales, orders]
+    verify:
+    - metric: net_sales
+      column: net_sales
+      by: {year: EXTRACT(year FROM sales.placed_at)}
+      where: [((sales.placed_at >= TIMESTAMP '2025-09-01' AND sales.placed_at < TIMESTAMP '2025-11-15') OR (sales.placed_at >= TIMESTAMP '2026-09-01' AND sales.placed_at < TIMESTAMP '2026-11-15'))]
+    - metric: orders
+      column: orders
+      by: {year: EXTRACT(year FROM sales.placed_at)}
+      where: [((sales.placed_at >= TIMESTAMP '2025-09-01' AND sales.placed_at < TIMESTAMP '2025-11-15') OR (sales.placed_at >= TIMESTAMP '2026-09-01' AND sales.placed_at < TIMESTAMP '2026-11-15'))]
     sql: |
       SELECT EXTRACT(year FROM s.placed_at) AS year,
              SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) AS net_sales,
@@ -128,6 +167,13 @@ queries:
     difficulty: medium
     tags: [comparison]
     metrics: [aov, orders]
+    verify:
+    - metric: aov
+      column: aov
+      by: {day_type: 'CASE WHEN dayofweek(sales.placed_at) IN (0, 6) THEN ''Weekend'' ELSE ''Weekday'' END'}
+    - metric: orders
+      column: orders
+      by: {day_type: 'CASE WHEN dayofweek(sales.placed_at) IN (0, 6) THEN ''Weekend'' ELSE ''Weekday'' END'}
     sql: |
       SELECT CASE WHEN dayofweek(s.placed_at) IN (0, 6) THEN 'Weekend' ELSE 'Weekday' END AS day_type,
              COUNT(DISTINCT s.order_id) AS orders,
@@ -144,6 +190,11 @@ queries:
     difficulty: hard
     tags: [profitability, ranking]
     metrics: [gross_margin_pct]
+    verify:
+    - metric: gross_margin_pct
+      column: gross_margin_pct
+      by: {brand_name: product_master.brand_name}
+      partial: true
     sql: |
       SELECT p.brand_name,
              SUM(CASE WHEN s.delivered_at IS NOT NULL AND s.refunded_at IS NULL
@@ -164,6 +215,15 @@ queries:
     difficulty: medium
     tags: [sellers, geography]
     metrics: [net_sales, orders]
+    verify:
+    - metric: net_sales
+      column: net_sales
+      by: {seller_city: sellers.city, seller_type: sellers.seller_type}
+      partial: true
+    - metric: orders
+      column: orders
+      by: {seller_city: sellers.city, seller_type: sellers.seller_type}
+      partial: true
     sql: |
       SELECT se.city AS seller_city, se.seller_type,
              SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) AS net_sales,
@@ -181,6 +241,13 @@ queries:
     difficulty: hard
     tags: [coupons, promotions]
     metrics: [net_sales, orders]
+    verify:
+    - metric: net_sales
+      column: net_sales
+      by: {offer_type: promotions.offer_type}
+    - metric: orders
+      column: orders
+      by: {offer_type: promotions.offer_type}
     sql: |
       SELECT pr.offer_type,
              COUNT(DISTINCT s.order_id) AS orders,
@@ -201,6 +268,10 @@ queries:
     difficulty: hard
     tags: [payments, geography, share within group]
     metrics: [orders]
+    verify:
+    - metric: orders
+      column: orders
+      by: {city_tier: customer_addresses.city_tier, payment_method: sales.payment_method}
     sql: |
       SELECT a.city_tier, s.payment_method,
              COUNT(DISTINCT s.order_id) AS orders,
@@ -217,6 +288,15 @@ queries:
     difficulty: medium
     tags: [pricing, bands]
     metrics: [avg_discount_pct, units_sold]
+    verify:
+    - metric: avg_discount_pct
+      column: avg_discount_pct
+      by: {price_band: CASE WHEN sales.mrp < 500 THEN '1. under 500' WHEN sales.mrp < 1000 THEN '2. 500-999' WHEN sales.mrp < 2000 THEN '3. 1000-1999' WHEN sales.mrp < 4000 THEN '4. 2000-3999' ELSE '5. 4000
+          and above' END}
+    - metric: units_sold
+      column: units_sold
+      by: {price_band: CASE WHEN sales.mrp < 500 THEN '1. under 500' WHEN sales.mrp < 1000 THEN '2. 500-999' WHEN sales.mrp < 2000 THEN '3. 1000-1999' WHEN sales.mrp < 4000 THEN '4. 2000-3999' ELSE '5. 4000
+          and above' END}
     sql: |
       SELECT CASE WHEN s.mrp < 500 THEN '1. under 500'
                   WHEN s.mrp < 1000 THEN '2. 500-999'
@@ -252,6 +332,11 @@ queries:
     difficulty: medium
     tags: [size, share of total]
     metrics: [units_sold]
+    verify:
+    - metric: units_sold
+      column: units_sold
+      by: {size: product_skus.size}
+      where: [product_master.category = 'Footwear']
     sql: |
       SELECT k.size,
              SUM(CASE WHEN s.cancelled_at IS NULL THEN s.quantity ELSE 0 END) AS units_sold,
@@ -270,6 +355,11 @@ queries:
     difficulty: medium
     tags: [trend, per_day_rate]
     metrics: [orders]
+    verify:
+    - metric: orders
+      column: orders
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
     sql: |
       SELECT date_trunc('month', s.placed_at) AS month,
              COUNT(DISTINCT s.order_id) AS orders,
@@ -287,6 +377,15 @@ queries:
     difficulty: medium
     tags: [affiliates, marketing]
     metrics: [net_sales, orders]
+    verify:
+    - metric: net_sales
+      column: net_sales
+      by: {affiliate_partner: sales.affiliate_partner}
+      where: [sales.affiliate_partner IS NOT NULL]
+    - metric: orders
+      column: orders
+      by: {affiliate_partner: sales.affiliate_partner}
+      where: [sales.affiliate_partner IS NOT NULL]
     sql: |
       SELECT s.affiliate_partner,
              COUNT(DISTINCT s.order_id) AS orders,
@@ -305,6 +404,10 @@ queries:
     difficulty: hard
     tags: [customers, product gender, customer gender]
     metrics: [net_sales]
+    verify:
+    - metric: net_sales
+      column: net_sales
+      by: {customer_gender: customers.gender, product_gender: product_master.gender}
     sql: |
       SELECT c.gender AS customer_gender, p.gender AS product_gender,
              SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) AS net_sales,
@@ -325,6 +428,15 @@ queries:
     difficulty: medium
     tags: [trend, bridge]
     metrics: [gross_sales, net_sales]
+    verify:
+    - metric: gross_sales
+      column: gross_sales
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
+    - metric: net_sales
+      column: net_sales
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
     sql: |
       SELECT date_trunc('month', s.placed_at) AS month,
              SUM(s.gross_amount) AS gross_sales,
@@ -342,6 +454,15 @@ queries:
     difficulty: hard
     tags: [sellers, ranking, profitability]
     metrics: [net_sales, gross_margin_pct]
+    verify:
+    - metric: net_sales
+      column: net_sales
+      by: {seller_name: sellers.seller_name, seller_type: sellers.seller_type}
+      partial: true
+    - metric: gross_margin_pct
+      column: gross_margin_pct
+      by: {seller_name: sellers.seller_name, seller_type: sellers.seller_type}
+      partial: true
     sql: |
       SELECT se.seller_name, se.seller_type,
              SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) AS net_sales,
@@ -361,6 +482,13 @@ queries:
     difficulty: medium
     tags: [traffic, orders]
     metrics: [orders, aov]
+    verify:
+    - metric: orders
+      column: orders
+      by: {traffic_source: sales.traffic_source}
+    - metric: aov
+      column: aov
+      by: {traffic_source: sales.traffic_source}
     sql: |
       SELECT s.traffic_source,
              COUNT(DISTINCT s.order_id) AS orders,
@@ -377,6 +505,11 @@ queries:
     difficulty: medium
     tags: [pricing, ranking]
     metrics: [avg_discount_pct]
+    verify:
+    - metric: avg_discount_pct
+      column: avg_discount_pct
+      by: {sub_category: product_master.sub_category}
+      partial: true
     sql: |
       WITH disc AS (
         SELECT p.sub_category,
@@ -505,6 +638,11 @@ queries:
     difficulty: hard
     tags: [growth, period_comparison]
     metrics: [net_sales]
+    verify:
+    - metric: net_sales
+      column: net_sales
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      partial: true
     sql: |
       WITH monthly AS (
         SELECT date_trunc('month', s.placed_at) AS month,

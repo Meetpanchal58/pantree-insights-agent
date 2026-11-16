@@ -48,6 +48,13 @@ queries:
     difficulty: medium
     tags: [support, agents]
     metrics: [avg_csat, avg_first_response_minutes]
+    verify:
+    - metric: avg_csat
+      column: avg_csat
+      by: {team: agents.team}
+    - metric: avg_first_response_minutes
+      column: avg_first_response_minutes
+      by: {team: agents.team}
     sql: |
       SELECT ag.team,
              COUNT(*) AS contacts,
@@ -98,6 +105,13 @@ queries:
     difficulty: medium
     tags: [reviews]
     metrics: [avg_rating, negative_review_share]
+    verify:
+    - metric: avg_rating
+      column: avg_rating
+      by: {verified_purchase: product_reviews.verified_purchase}
+    - metric: negative_review_share
+      column: negative_review_share
+      by: {verified_purchase: product_reviews.verified_purchase}
     sql: |
       SELECT r.verified_purchase,
              COUNT(*) AS reviews,
@@ -114,6 +128,15 @@ queries:
     difficulty: medium
     tags: [reviews, ranking]
     metrics: [negative_review_share, avg_rating]
+    verify:
+    - metric: negative_review_share
+      column: negative_review_share
+      by: {brand_name: product_master.brand_name}
+      partial: true
+    - metric: avg_rating
+      column: avg_rating
+      by: {brand_name: product_master.brand_name}
+      partial: true
     sql: |
       SELECT p.brand_name,
              COUNT(*) AS reviews,
@@ -172,6 +195,10 @@ queries:
     difficulty: medium
     tags: [reviews, age]
     metrics: [avg_rating]
+    verify:
+    - metric: avg_rating
+      column: avg_rating
+      by: {age_bracket: customers.age_bracket}
     sql: |
       SELECT c.age_bracket,
              COUNT(*) AS reviews,
@@ -187,6 +214,10 @@ queries:
     difficulty: hard
     tags: [reviews, trend, moving average]
     metrics: [avg_rating]
+    verify:
+    - metric: avg_rating
+      column: avg_rating
+      by: {month: 'date_trunc(''month'', product_reviews.reviewed_at)'}
     sql: |
       WITH monthly AS (
         SELECT date_trunc('month', r.reviewed_at) AS month,
@@ -241,6 +272,11 @@ queries:
     difficulty: medium
     tags: [support, agents, ranking]
     metrics: [avg_csat]
+    verify:
+    - metric: avg_csat
+      column: avg_csat
+      by: {agent_id: agents.agent_id, team: agents.team, location: agents.location}
+      partial: true
     sql: |
       SELECT ag.agent_id, ag.team, ag.location,
              COUNT(*) AS contacts,
@@ -276,6 +312,10 @@ queries:
     difficulty: medium
     tags: [support, timing]
     metrics: [avg_first_response_minutes]
+    verify:
+    - metric: avg_first_response_minutes
+      column: avg_first_response_minutes
+      by: {issue_category: support_contacts.issue_category}
     sql: |
       SELECT sc.issue_category,
              COUNT(*) AS contacts,

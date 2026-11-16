@@ -73,9 +73,22 @@ def run_checks(library: list[Example]) -> list[str]:
              {e.id: e.sql for e in load_examples().examples}
     gold = {k: rows(sql) for k, sql in scored.items()}
     gold = {k: fp for k, fp in gold.items() if not (len(fp) == 1 and next(iter(fp)) <= {0, "0", "none", "nan"})}
+    from pantree_insights.joins import JoinGraph
+    from pantree_insights.profile import get_profile
+    from pantree_insights.recompute import canonical_sql, compare
+
+    graph = JoinGraph(load_schema(), get_profile())
     problems = []
     for e in library:
         frame = run_query(con, check_sql(e.sql).sql).frame
+        for spec in e.verify:                         # numbers must match an independent recomputation
+            sql = canonical_sql(spec.metric, graph, by=spec.by, conditions=spec.where, time_column=spec.time)
+            if sql is None:
+                problems.append(f"{e.id}: {spec.metric} cannot be recomputed")
+                continue
+            canonical = run_query(con, sql, max_rows=1_000_000).frame
+            problems += [f"{e.id} {spec.column}: {p}" for p in
+                         compare(frame, canonical, list(spec.by), spec.column, spec.partial)]
         if frame.empty or frame.duplicated().any():
             problems.append(f"{e.id}: {'no rows' if frame.empty else 'duplicate rows'}")
         mine = rows(e.sql)
@@ -98,6 +111,10 @@ def main() -> None:
     if "--run" in sys.argv:
         problems += run_checks(library)
         print(f"ran {len(library)} queries on the configured shop")
+    verified = [e for e in library if e.verify]
+    print(f"numbers verified by recomputation: {len(verified)}/{len(library)} library queries "
+          f"({sum(len(e.verify) for e in verified)} result columns); the rest are pattern-only "
+          "(cohorts, funnels, per-session or cross-source calculations)")
     for p in problems:
         print("PROBLEM", p)
     sys.exit(1 if any(gaps.values()) or problems else 0)

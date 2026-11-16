@@ -53,6 +53,13 @@ queries:
     difficulty: medium
     tags: [marketing, traffic]
     metrics: [sessions, conversion_rate]
+    verify:
+    - metric: sessions
+      column: sessions
+      by: {channel: campaigns.channel}
+    - metric: conversion_rate
+      column: conversion_rate
+      by: {channel: campaigns.channel}
     sql: |
       SELECT cp.channel,
              COUNT(DISTINCT c.session_id) AS sessions,
@@ -90,6 +97,10 @@ queries:
     difficulty: medium
     tags: [listings, ctr]
     metrics: [ctr]
+    verify:
+    - metric: ctr
+      column: ctr
+      by: {category: product_master.category}
     sql: |
       SELECT p.category,
              COUNT(*) AS impressions,
@@ -136,6 +147,13 @@ queries:
     difficulty: medium
     tags: [traffic, geography]
     metrics: [sessions, conversion_rate]
+    verify:
+    - metric: sessions
+      column: sessions
+      by: {city_tier: customers.city_tier}
+    - metric: conversion_rate
+      column: conversion_rate
+      by: {city_tier: customers.city_tier}
     sql: |
       SELECT cu.city_tier,
              COUNT(DISTINCT c.session_id) AS sessions,
@@ -199,6 +217,11 @@ queries:
     difficulty: hard
     tags: [trend, moving average]
     metrics: [sessions]
+    verify:
+    - metric: sessions
+      column: sessions
+      by: {week: 'date_trunc(''week'', clickstream.event_at)'}
+      where: [clickstream.event_at >= TIMESTAMP '2026-08-17']
     sql: |
       WITH weekly AS (
         SELECT date_trunc('week', c.event_at) AS week, COUNT(DISTINCT c.session_id) AS sessions
@@ -253,6 +276,10 @@ queries:
     difficulty: medium
     tags: [listings, ctr, device]
     metrics: [ctr]
+    verify:
+    - metric: ctr
+      column: ctr
+      by: {device: clickstream.device}
     sql: |
       SELECT c.device,
              COUNT(*) AS impressions,

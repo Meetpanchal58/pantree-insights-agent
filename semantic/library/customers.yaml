@@ -73,6 +73,13 @@ queries:
     difficulty: medium
     tags: [segments, age]
     metrics: [aov, orders]
+    verify:
+    - metric: aov
+      column: aov
+      by: {age_bracket: customers.age_bracket}
+    - metric: orders
+      column: orders
+      by: {age_bracket: customers.age_bracket}
     sql: |
       SELECT c.age_bracket,
              COUNT(DISTINCT s.customer_id) AS buyers,
@@ -91,6 +98,15 @@ queries:
     difficulty: medium
     tags: [new customers, geography]
     metrics: [new_customer_order_share, orders]
+    verify:
+    - metric: new_customer_order_share
+      column: new_customer_order_share
+      by: {state: customer_addresses.state}
+      partial: true
+    - metric: orders
+      column: orders
+      by: {state: customer_addresses.state}
+      partial: true
     sql: |
       SELECT a.state,
              COUNT(DISTINCT s.order_id) AS orders,
@@ -171,6 +187,15 @@ queries:
     difficulty: medium
     tags: [ranking, customers]
     metrics: [realized_revenue, orders]
+    verify:
+    - metric: realized_revenue
+      column: realized_revenue
+      by: {customer_id: sales.customer_id}
+      partial: true
+    - metric: orders
+      column: orders
+      by: {customer_id: sales.customer_id}
+      partial: true
     sql: |
       SELECT s.customer_id,
              COUNT(DISTINCT s.order_id) AS orders,
@@ -360,6 +385,13 @@ queries:
     difficulty: medium
     tags: [new customers, device]
     metrics: [new_customer_order_share, orders]
+    verify:
+    - metric: new_customer_order_share
+      column: new_customer_order_share
+      by: {device: sales.device}
+    - metric: orders
+      column: orders
+      by: {device: sales.device}
     sql: |
       SELECT s.device,
              COUNT(DISTINCT s.order_id) AS orders,

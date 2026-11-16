@@ -45,11 +45,18 @@ def _end_exclusive(end: str) -> str:
     return (date.fromisoformat(end[:10]) + timedelta(days=1)).isoformat()
 
 
-def canonical_sql(metric: str, graph: JoinGraph, by: list[str] | None = None,
+def _tables_of(expression: str) -> list[str]:
+    tree = sqlglot.parse_one(f"SELECT {expression}", read="duckdb")
+    return [c.table.lower() for c in tree.find_all(exp.Column) if c.table]
+
+
+def canonical_sql(metric: str, graph: JoinGraph, by: list[str] | dict[str, str] | None = None,
                   filters: list[tuple[str, str]] | None = None, period: tuple[str, str] | None = None,
-                  time_column: str | None = None) -> str | None:
+                  time_column: str | None = None, conditions: list[str] | None = None) -> str | None:
     """SQL returning one row per breakdown combination with the metric in column `value`; None if the metric
-    cannot be recomputed safely. `by` and filter columns are 'table.column'; `period` is inclusive dates."""
+    cannot be recomputed safely. `by`: 'table.column' list, or {result name: SQL expression with full table
+    names} (e.g. {"month": "date_trunc('month', sales.placed_at)"}); filters are 'table.column' = value;
+    `conditions` are extra SQL conditions with full table names; `period` is inclusive dates."""
     metrics = load_metrics()
     if metric not in metrics.metrics:
         return None
@@ -65,15 +72,18 @@ def canonical_sql(metric: str, graph: JoinGraph, by: list[str] | None = None,
         clause, more = _full_names(source.where, aliases)
         where.append(clause)
         used |= more
-    by, filters = list(by or []), list(filters or [])
+    dims_map = dict(by) if isinstance(by, dict) else {c.split(".")[1]: c for c in (by or [])}
+    filters, conditions = list(filters or []), list(conditions or [])
+    where += conditions
     for column, val in filters:
         where.append(f"{column} = '{str(val).replace(chr(39), chr(39) * 2)}'")
     time = time_column or _full_names(source.time_column, aliases)[0]
     if period:
         start, end = period
         where += [f"{time} >= TIMESTAMP '{start[:10]}'", f"{time} < TIMESTAMP '{_end_exclusive(end)}'"]
-    tables = [t for t in dict.fromkeys([*used, *(c.split(".")[0] for c in by), *(c.split(".")[0] for c, _ in filters),
-                                        time.split(".")[0]]) if t != root]
+    needed = [*used, *(t for e in dims_map.values() for t in _tables_of(e)), *(c.split(".")[0] for c, _ in filters),
+              *(t for c in conditions for t in _tables_of(c)), time.split(".")[0]]
+    tables = [t for t in dict.fromkeys(needed) if t != root]
     try:
         steps = graph.path(root, tables)
     except KeyError:
@@ -81,11 +91,57 @@ def canonical_sql(metric: str, graph: JoinGraph, by: list[str] | None = None,
     if any(step.fans_out for step in steps):
         return None
     joins = "\n".join(f"LEFT JOIN {s.right} ON {s.on}" for s in steps)
-    dims = [f"{c} AS {c.split('.')[1]}" for c in by]
+    dims = [f"{e} AS {name}" for name, e in dims_map.items()]
     select = ", ".join([*dims, f"{value} AS value"])
     sql = f"SELECT {select}\nFROM {root}" + (f"\n{joins}" if joins else "")
     if where:
         sql += "\nWHERE " + " AND ".join(where)
-    if by:
-        sql += "\nGROUP BY " + ", ".join(str(i + 1) for i in range(len(by)))
+    if dims_map:
+        sql += "\nGROUP BY " + ", ".join(str(i + 1) for i in range(len(dims_map)))
     return sql
+
+
+# ----------------------------------------------------------------------------- comparing numbers
+def _key(value) -> str:
+    if value is None or (isinstance(value, float) and value != value):
+        return "∅"
+    text = str(value).strip()                     # case kept: 'ADIDAS' and 'Adidas' are different stored values
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    if text.lower() in ("true", "false"):
+        return text.lower()
+    try:
+        number = float(text)
+        return str(int(number)) if number.is_integer() else f"{number:.6g}"
+    except ValueError:
+        return text
+
+
+def compare(result, canonical, keys: list[str], column: str, partial: bool = False,
+            tolerance: float = 0.01) -> list[str]:
+    """Problems where `result[column]` disagrees with the recomputed `canonical['value']`, row by row on `keys`.
+    Canonical rows with an empty key (rows a LEFT JOIN could not place) are ignored unless the result has them;
+    `partial`: the result may hold only some of the rows (top-N, HAVING)."""
+    import pandas as pd
+
+    def table(frame, col):
+        return {tuple(_key(v) for v in row[:-1]): row[-1] for row in frame[[*keys, col]].itertuples(index=False)}
+
+    mine, ref = table(result, column), table(canonical, "value")
+    if not any("∅" in k for k in mine):
+        ref = {k: v for k, v in ref.items() if "∅" not in k}
+    problems = []
+    for k, got in mine.items():
+        if k not in ref:
+            problems.append(f"row {k}: not in the recomputed result")
+            continue
+        want = ref[k]
+        if pd.isna(got) and pd.isna(want):
+            continue
+        if pd.isna(got) or pd.isna(want) or abs(float(got) - float(want)) > max(tolerance * abs(float(want)), 1e-6):
+            problems.append(f"row {k}: {column} = {got} but recomputed {want}")
+    if not partial:
+        missing = set(ref) - set(mine)
+        if missing:
+            problems.append(f"{len(missing)} recomputed rows missing, e.g. {sorted(missing)[:3]}")
+    return problems

@@ -55,3 +55,30 @@ def test_reproduces_verified_examples(con, example, metric, by):
     keys = [c.split(".")[1] for c in by]
     ok, reason, _ = align(mine, gold, keys, ["value"])
     assert ok, reason
+
+
+@pytest.mark.data
+def test_a_subtly_wrong_query_is_caught(con):
+    """Net sales that forgets to exclude cancelled lines (a typical LLM slip) disagrees with the definition."""
+    from pantree_insights.recompute import compare
+
+    wrong = ("SELECT p.category, SUM(s.net_amount) AS net_sales FROM sales s "
+             "JOIN product_master p ON p.product_id = s.product_id WHERE s.line_type = 'Sale' GROUP BY 1")
+    canonical = run_query(con, canonical_sql("net_sales", GRAPH, by=["product_master.category"])).frame
+    problems = compare(run_query(con, wrong).frame, canonical, ["category"], "net_sales")
+    assert problems and "recomputed" in problems[0]
+    right = wrong.replace("SUM(s.net_amount)", "SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END)")
+    assert compare(run_query(con, right).frame, canonical, ["category"], "net_sales") == []
+
+
+def test_keys_that_differ_only_in_case_are_different_groups():
+    """Found on the full shop: 'ADIDAS' and 'Adidas' are separate brand values and must not be merged."""
+    import pandas as pd
+
+    from pantree_insights.recompute import compare
+
+    result = pd.DataFrame({"brand": ["ADIDAS", "Adidas"], "units": [10, 20]})
+    canonical = pd.DataFrame({"brand": ["ADIDAS", "Adidas"], "value": [10, 20]})
+    assert compare(result, canonical, ["brand"], "units") == []
+    swapped = pd.DataFrame({"brand": ["ADIDAS", "Adidas"], "value": [20, 10]})
+    assert len(compare(result, canonical.assign(value=swapped["value"]), ["brand"], "units")) == 2

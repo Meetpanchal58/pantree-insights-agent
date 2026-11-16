@@ -7,6 +7,11 @@ queries:
     difficulty: hard
     tags: [delivery, geography]
     metrics: [avg_delivery_days]
+    verify:
+    - metric: avg_delivery_days
+      column: avg_delivery_days
+      by: {region: customer_addresses.region, courier: sales.courier}
+      partial: true
     sql: |
       SELECT a.region, s.courier,
              SUM(date_diff('hour', s.placed_at, s.delivered_at)) / 24.0 / COUNT(s.delivered_at) AS avg_delivery_days,
@@ -23,6 +28,10 @@ queries:
     difficulty: medium
     tags: [rto, courier]
     metrics: [rto_rate]
+    verify:
+    - metric: rto_rate
+      column: rto_rate
+      by: {courier: sales.courier}
     sql: |
       SELECT s.courier,
              COUNT(*) FILTER (WHERE s.rto_at IS NOT NULL) * 1.0
@@ -39,6 +48,11 @@ queries:
     difficulty: medium
     tags: [returns, ranking]
     metrics: [return_rate]
+    verify:
+    - metric: return_rate
+      column: return_rate
+      by: {brand_name: product_master.brand_name}
+      partial: true
     sql: |
       SELECT p.brand_name,
              COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) * 1.0
@@ -89,6 +103,10 @@ queries:
     difficulty: medium
     tags: [cancellations, device]
     metrics: [cancellation_rate]
+    verify:
+    - metric: cancellation_rate
+      column: cancellation_rate
+      by: {device: sales.device}
     sql: |
       SELECT s.device,
              COUNT(*) FILTER (WHERE s.cancelled_at IS NOT NULL) * 1.0 / COUNT(*) AS cancellation_rate,
@@ -106,6 +124,11 @@ queries:
     difficulty: medium
     tags: [delivery, geography]
     metrics: [late_delivery_rate]
+    verify:
+    - metric: late_delivery_rate
+      column: late_delivery_rate
+      by: {ship_pincode: sales.ship_pincode}
+      partial: true
     sql: |
       SELECT s.ship_pincode,
              COUNT(*) FILTER (WHERE CAST(s.delivered_at AS DATE) > CAST(s.promised_delivery_date AS DATE)) * 1.0
@@ -159,6 +182,15 @@ queries:
     difficulty: medium
     tags: [delivery, trend]
     metrics: [late_delivery_rate, avg_delivery_days]
+    verify:
+    - metric: late_delivery_rate
+      column: late_delivery_rate
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
+    - metric: avg_delivery_days
+      column: avg_delivery_days
+      by: {month: 'date_trunc(''month'', sales.placed_at)'}
+      where: [sales.placed_at >= TIMESTAMP '2026-01-01']
     sql: |
       SELECT date_trunc('month', s.placed_at) AS month,
              COUNT(*) FILTER (WHERE CAST(s.delivered_at AS DATE) > CAST(s.promised_delivery_date AS DATE)) * 1.0
@@ -177,6 +209,16 @@ queries:
     difficulty: hard
     tags: [events, returns, comparison]
     metrics: [cancellation_rate, rto_rate, return_rate]
+    verify:
+    - metric: cancellation_rate
+      column: cancellation_rate
+      by: {price_context: CASE WHEN sale_events.event_id IS NULL THEN 'Normal price' ELSE sale_events.event_type END}
+    - metric: rto_rate
+      column: rto_rate
+      by: {price_context: CASE WHEN sale_events.event_id IS NULL THEN 'Normal price' ELSE sale_events.event_type END}
+    - metric: return_rate
+      column: return_rate
+      by: {price_context: CASE WHEN sale_events.event_id IS NULL THEN 'Normal price' ELSE sale_events.event_type END}
     sql: |
       SELECT CASE WHEN e.event_id IS NULL THEN 'Normal price' ELSE e.event_type END AS price_context,
              COUNT(*) FILTER (WHERE s.cancelled_at IS NOT NULL) * 1.0 / COUNT(*) AS cancellation_rate,
@@ -229,6 +271,11 @@ queries:
     difficulty: hard
     tags: [returns, geography]
     metrics: [return_rate]
+    verify:
+    - metric: return_rate
+      column: return_rate
+      by: {ship_city: sales.ship_city}
+      where: [customer_addresses.region = 'North']
     sql: |
       SELECT s.ship_city,
              COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) * 1.0
@@ -245,6 +292,10 @@ queries:
     difficulty: medium
     tags: [rto, geography, ranking]
     metrics: [rto_rate]
+    verify:
+    - metric: rto_rate
+      column: rto_rate
+      by: {region: customer_addresses.region}
     sql: |
       WITH rto AS (
         SELECT a.region,

@@ -22,6 +22,11 @@ queries:
     difficulty: medium
     tags: [stock, ranking]
     metrics: [lost_sales_units]
+    verify:
+    - metric: lost_sales_units
+      column: lost_sales_units
+      by: {brand_name: product_master.brand_name}
+      partial: true
     sql: |
       SELECT p.brand_name,
              SUM(ih.lost_sales_units) AS lost_sales_units,
@@ -263,6 +268,11 @@ queries:
     difficulty: medium
     tags: [stock, trend]
     metrics: [lost_sales_units]
+    verify:
+    - metric: lost_sales_units
+      column: lost_sales_units
+      by: {month: 'date_trunc(''month'', inventory_history.date)'}
+      where: [inventory_history.date >= TIMESTAMP '2026-01-01']
     sql: |
       SELECT date_trunc('month', ih.date) AS month,
              SUM(ih.lost_sales_units) AS lost_sales_units,

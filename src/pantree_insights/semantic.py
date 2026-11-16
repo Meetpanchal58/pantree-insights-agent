@@ -156,6 +156,16 @@ class Metrics(BaseModel):
 
 
 # ----------------------------------------------------------------------------- examples.yaml
+class VerifySpec(BaseModel):
+    """How to recompute one result column from metrics.yaml (recompute.py) to check a reference query's numbers."""
+    metric: str
+    column: str                      # result column holding the metric
+    by: dict[str, str] = {}          # result key column -> SQL expression with full table names
+    where: list[str] = []            # extra conditions with full table names
+    time: str | None = None          # time column if not the metric source's default
+    partial: bool = False            # the query returns only some rows (top-N, HAVING): compare those
+
+
 class Example(BaseModel):
     id: str
     question: str
@@ -166,6 +176,7 @@ class Example(BaseModel):
     area: str | None = None          # query library only: sales, funnel, customers, marketing, ...
     variants: list[str] = []         # other ways people ask the same thing (searched by retrieval)
     metrics: list[str] = []          # metrics.yaml names the query computes (checked by tests)
+    verify: list[VerifySpec] = []    # recomputation checks of its numbers (tests/test_library.py)
 
 
 class Examples(BaseModel):

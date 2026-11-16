@@ -88,3 +88,26 @@ def test_results_do_not_reproduce_an_evaluation_answer(con):
         if same:
             leaks.append(f"{e.id} contains the answer to {same}")
     assert not leaks, leaks
+
+
+@pytest.mark.data
+def test_numbers_match_an_independent_recomputation(con):
+    """Every `verify` spec: the query's column must equal what metrics.yaml gives for the same scope (1%)."""
+    from pantree_insights.joins import JoinGraph
+    from pantree_insights.profile import build_profile
+    from pantree_insights.recompute import canonical_sql, compare
+    from pantree_insights.semantic import load_schema
+
+    graph = JoinGraph(load_schema(), build_profile(con))
+    problems = []
+    for e in LIBRARY:
+        if not e.verify:
+            continue
+        result = run_query(con, check_sql(e.sql).sql).frame
+        for spec in e.verify:
+            sql = canonical_sql(spec.metric, graph, by=spec.by, conditions=spec.where, time_column=spec.time)
+            assert sql, f"{e.id}: {spec.metric} cannot be recomputed"
+            canonical = run_query(con, sql, max_rows=1_000_000).frame    # internal SQL: all rows, not the user cap
+            problems += [f"{e.id} {spec.column}: {p}" for p in
+                         compare(result, canonical, list(spec.by), spec.column, spec.partial)]
+    assert not problems, problems[:10]

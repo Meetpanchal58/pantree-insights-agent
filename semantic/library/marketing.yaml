@@ -52,6 +52,11 @@ queries:
     difficulty: medium
     tags: [cpc, trend]
     metrics: [cpc]
+    verify:
+    - metric: cpc
+      column: cpc
+      by: {month: 'date_trunc(''month'', marketing_spend.date_hour)'}
+      where: [campaigns.channel_group = 'Paid Social', marketing_spend.date_hour >= TIMESTAMP '2026-01-01']
     sql: |
       SELECT date_trunc('month', m.date_hour) AS month,
              SUM(m.spend) FILTER (WHERE cp.channel_group IN ('Paid Search', 'Paid Social', 'Display'))
@@ -151,6 +156,11 @@ queries:
     difficulty: medium
     tags: [geography, spend]
     metrics: [marketing_spend]
+    verify:
+    - metric: marketing_spend
+      column: spend
+      by: {region: marketing_spend.region}
+      where: [marketing_spend.region <> 'All']
     sql: |
       SELECT m.region,
              SUM(m.spend) AS spend,
@@ -168,6 +178,12 @@ queries:
     difficulty: medium
     tags: [budget, ranking]
     metrics: [marketing_spend]
+    verify:
+    - metric: marketing_spend
+      column: spend
+      by: {campaign_name: campaigns.campaign_name, channel_group: campaigns.channel_group, total_budget: campaigns.total_budget}
+      where: [campaigns.total_budget > 0]
+      partial: true
     sql: |
       SELECT cp.campaign_name, cp.channel_group, cp.total_budget,
              SUM(m.spend) AS spend,
@@ -184,6 +200,10 @@ queries:
     difficulty: hard
     tags: [events, spend]
     metrics: [marketing_spend]
+    verify:
+    - metric: marketing_spend
+      column: spend
+      by: {sale_event: sale_events.name, channel_group: campaigns.channel_group}
     sql: |
       SELECT e.name AS sale_event, cp.channel_group,
              SUM(m.spend) AS spend,
@@ -253,6 +273,16 @@ queries:
     difficulty: medium
     tags: [cpc, roas, campaigns]
     metrics: [cpc, platform_roas]
+    verify:
+    - metric: cpc
+      column: cpc
+      by: {campaign_type: campaigns.campaign_type}
+    - metric: platform_roas
+      column: platform_roas
+      by: {campaign_type: campaigns.campaign_type}
+    - metric: marketing_spend
+      column: spend
+      by: {campaign_type: campaigns.campaign_type}
     sql: |
       SELECT cp.campaign_type,
              SUM(m.spend) FILTER (WHERE cp.channel_group IN ('Paid Search', 'Paid Social', 'Display'))
