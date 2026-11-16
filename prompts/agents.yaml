@@ -33,6 +33,8 @@ understander: |
   - breakdowns: concept names to split the result by. period: explicit dates relative to the data's last day
     ({data_last_day}); the data starts on {data_first_day}; no period named = all data. time_meaning: which
     date of the subject when the question implies one ("delivered in October" = delivered).
+    "Shipped orders" requires a shipping event; "orders with delivery city Mumbai" only selects a destination,
+    not a shipment event. Keep "all available dates" as period="all data", without inventing date bounds.
 
   Then list open_points: every detail that would change the numbers or the conclusion and that the question,
   the earlier chat and the user's answers do not settle. Typical: which subject, which metric ("sales" =
@@ -76,8 +78,9 @@ planner: |
   - result_grain names the dimensions of one result row (e.g. "one row per category"; "one row" for a
     single number). Breakdowns must equal the grain's dimensions.
   - Name metrics by their metrics.yaml names; for anything else, describe the exact formula.
-  - Always state an explicit time window with dates. If the question names no period, use all the data
-    ({data_first_day} to {data_last_day}), not "this year". "This year" / "last year" etc. are relative to
+  - State explicit dates for a requested date window. If the question names no period, or requests all
+    available dates, use "all data" with no date bounds. The manifest's coverage is context, not a filter:
+    milestone timestamps may fall outside its first/last order dates. "This year" / "last year" are relative to
     the data's last day ({data_last_day}). The data starts on {data_first_day}. Recent periods are
     incomplete for lagging metrics (returns, RTO, realized revenue) - note it in assumptions.
   - Choose analytical cuts (breakdowns) that answer the question; at most 2 at once.
@@ -109,6 +112,8 @@ sql_writer: |
     the whole period, never as an average of daily ratios. Use NULLIF to avoid division by zero.
   - Use the exact filter values listed in the context. Dates: compare timestamps with explicit
     TIMESTAMP 'YYYY-MM-DD' bounds; an inclusive end date means < the next day.
+    For a resolved period of "all data", add no date bounds. A required milestone event still needs its
+    resolved IS NOT NULL filter; destination-city wording alone does not require a shipment event.
   - For a named metric, use its exact metrics.yaml name as the result alias. For a resolved breakdown,
     use the resolved column's name (e.g. category, brand_name) as the output alias. This allows independent
     verification of the requested metric and grain without guessing from numeric values.

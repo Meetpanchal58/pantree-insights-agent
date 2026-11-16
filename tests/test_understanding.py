@@ -58,6 +58,14 @@ def test_same_word_resolves_by_subject():
     assert not orders.open_points and not signups.open_points
 
 
+def test_all_time_shipment_scope_requires_an_event_without_inventing_date_bounds():
+    text = run(frame(subjects=["orders"], time_meaning="shipped")).to_prompt(period="all data")
+    assert "Required event filter: sales.shipped_at IS NOT NULL" in text
+    assert "All data means no date bounds" in text
+    destination = run(frame(subjects=["orders"])).to_prompt(period="all data")
+    assert "Required event filter" not in destination
+
+
 def test_ambiguous_value_becomes_a_question_with_its_meanings():
     r = run(frame(subjects=["orders"], mentions=[Mention(text="Mumbai", concept="other")]))
     assert not r.subjects[0].filters

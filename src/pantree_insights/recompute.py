@@ -82,7 +82,12 @@ def canonical_sql(metric: str, graph: JoinGraph, by: list[str] | dict[str, str] 
         values = list(dict.fromkeys(values))
         literals = ", ".join(f"'{v}'" for v in values)
         where.append(f"{column} = {literals}" if len(values) == 1 else f"{column} IN ({literals})")
-    time = time_column or _full_names(source.time_column, aliases)[0]
+    default_time = _full_names(source.time_column, aliases)[0]
+    time = time_column or default_time
+    # A different milestone selects events that actually happened, even without date bounds.
+    # Otherwise "shipped, all data" would include orders that have never shipped.
+    if time != default_time:
+        where.append(f"{time} IS NOT NULL")
     if period:
         start, end = period
         where += [f"{time} >= TIMESTAMP '{start[:10]}'", f"{time} < TIMESTAMP '{_end_exclusive(end)}'"]

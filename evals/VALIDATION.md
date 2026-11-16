@@ -23,8 +23,12 @@ These tests use fake model responses. They exercise the real DuckDB execution, g
 verification, memory gating, and UI with synthetic API errors. A passing test suite is not a paid-model score.
 The dry run checks each suite's independently written expected SQL without asking a model.
 
-The five cases in `flow_regression.yaml` cover exact brand spelling, an unknown city, complete category
-coverage, a history-dependent follow-up and multiple selected cities. They were written during these fixes:
+The six cases in `flow_regression.yaml` cover exact brand spelling, an unknown city, complete category
+coverage, a history-dependent follow-up, multiple selected cities and shipment versus destination scope.
+The original `flow-values` gold SQL incorrectly counted unshipped orders for a shipment question; its gold
+now requires a shipment event, and `flow-destinations` separately checks all orders by destination. Preserve
+old reports: scores using the old five-case suite are not directly comparable with this corrected suite.
+These cases were written during these fixes:
 report them as **regressions**, never as unseen holdout accuracy. The history case injects a fixed previous
 exchange; it does not claim to measure arbitrary multi-turn conversations.
 

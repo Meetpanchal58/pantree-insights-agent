@@ -86,6 +86,40 @@ def test_answer_question_without_a_result_counts_as_wrong_not_missing():
         assert out["result_correct"] is None
 
 
+def test_runtime_number_mismatch_is_not_reported_as_a_sql_execution_error():
+    final = {"type": "final", "status": "failed", "message":
+             "Could not produce a valid query after 3 attempts (number check): Orders: disagrees"}
+    out = run_eval.judge(None, {"set": "answer"}, final, [])
+    assert out["failure_type"] == "verification_mismatch"
+    assert not out["passed"]
+
+
+def test_failed_run_preserves_the_scope_sql_attempts_and_full_error(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from pantree_insights import graph
+
+    message = "Could not produce a valid query after 3 attempts (number check): " + "mismatch " * 40
+    scope = {"period": None, "time": "sales.shipped_at"}
+    events = [
+        {"type": "step", "step": "understand", "status": "done", "detail": {"verify_scope": scope}},
+        {"type": "step", "step": "write_sql", "status": "done", "detail": {"sql": "SELECT 1 AS orders"}},
+        {"type": "step", "step": "run_query", "status": "failed", "detail": {"problems": [message]}},
+        {"type": "final", "status": "failed", "message": message},
+    ]
+    monkeypatch.setattr(graph, "Agent", lambda **kwargs: object())
+    monkeypatch.setattr(run_eval, "connect", lambda: None)
+    monkeypatch.setattr(run_eval, "manifest", lambda: {})
+    monkeypatch.setattr(run_eval, "ask", lambda *args, **kwargs: events)
+    monkeypatch.setattr(run_eval, "get_settings", lambda: SimpleNamespace(
+        memory_dir=tmp_path / "profile", data_size="small", model_main="fake", temperature=None))
+    item = {"id": "x", "suite": "flow", "set": "answer", "expect": "answer", "author": "self", "question": "q"}
+    row, = run_eval._run([item], "full", 1, 0, tmp_path / "isolated")
+    assert row["message"] == message
+    assert row["diagnostics"] == events[:-1]
+    assert row["failure_type"] == "verification_mismatch"
+
+
 def test_transient_api_error_is_retried_then_recorded_not_crashed():
     """A provider error (e.g. HTTP 502) must not end the whole run: retry once, then return None."""
     class Flaky:
@@ -156,7 +190,7 @@ def test_a_readback_confirmation_is_not_a_clarifying_question():
 
 def test_flow_cases_are_separate_from_unseen_holdout():
     cases = run_eval.load_suite("flow")
-    assert len(cases) == 5 and all(c["tuned_on"] for c in cases)
+    assert len(cases) == 6 and all(c["tuned_on"] for c in cases)
     assert any(c.get("history") for c in cases)
     assert not ({c["id"] for c in cases} & {c["id"] for c in run_eval.load_suite("holdout")})
 
