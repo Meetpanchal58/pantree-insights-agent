@@ -90,3 +90,12 @@ def test_unrequested_top_n_size_compares_the_top_rows():
     other = pd.DataFrame({"city": ["A", "C", "B"], "rate": [0.5, 0.45, 0.4]})
     trimmed = trim_top_n(other, gold, ranked, "Which cities have the highest rate?")
     assert not score(gold, trimmed, ["city"], ["rate"])[0]
+
+
+def test_true_false_keys_match_readable_labels():
+    """Our prompt asks for readable labels (Prime / Non-Prime) instead of true / false."""
+    gold = pd.DataFrame({"is_prime": [True, False], "orders": [10, 20]})
+    agent = pd.DataFrame({"customer_type": ["Non-Prime", "Prime"], "orders": [20, 10]})
+    assert score(gold, agent, ["is_prime"], ["orders"]) == (True, "match")
+    swapped = pd.DataFrame({"customer_type": ["Non-Prime", "Prime"], "orders": [10, 20]})
+    assert not score(gold, swapped, ["is_prime"], ["orders"])[0]

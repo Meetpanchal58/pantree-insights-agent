@@ -454,12 +454,12 @@
    "sales",
    "customers"
   ],
-  "result_correct": false,
+  "result_correct": true,
   "answer_correct": false,
   "decline_layer": null,
-  "passed": false,
-  "reason": "wrong dimension: no column matches 'is_prime'",
-  "failure_type": "wrong_dimension"
+  "passed": true,
+  "reason": "claims: c1 (8,212): \"0 rows match [('is_prime', 'Prime')]\"; c2 (32,931): \"0 rows match [('is_prime', 'Non-Prime')]\"; c3 (24,719): \"0 rows match [('is_prime', 'Non-Prime')]\"",
+  "failure_type": "claims_unverified"
  },
  {
   "suite": "holdout",
@@ -4426,12 +4426,12 @@
    "sales",
    "customers"
   ],
-  "result_correct": false,
+  "result_correct": true,
   "answer_correct": false,
   "decline_layer": null,
-  "passed": false,
-  "reason": "wrong dimension: no column matches 'is_prime'",
-  "failure_type": "wrong_dimension"
+  "passed": true,
+  "reason": "claims: c1 (1,793): \"0 rows match [('is_prime', 'Prime')]\"; c2 (1,777): \"0 rows match [('is_prime', 'Non-Prime')]\"; c3 (16): \"0 rows match [('is_prime', 'Prime')]\"",
+  "failure_type": "claims_unverified"
  },
  {
   "suite": "holdout",

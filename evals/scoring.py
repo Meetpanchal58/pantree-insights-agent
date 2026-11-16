@@ -61,6 +61,23 @@ def _label_map(wanted: list[str], values: pd.Series) -> dict[str, str] | None:
     return out if sorted(out.values()) == sorted(set(wanted)) else None
 
 
+_NEGATION = re.compile(r"\b(non|not|no|without|never|false)\b", re.I)
+
+
+def _boolean_map(wanted: list[str], values: pd.Series) -> dict[str, str] | None:
+    """agent label -> 'true'/'false' when the gold key is boolean and the agent wrote two readable labels,
+    exactly one of them negated ('Prime' / 'Non-Prime'); else None."""
+    if set(wanted) - {"true", "false"} or pd.api.types.is_numeric_dtype(values):
+        return None
+    labels = sorted(set(map(_norm, values)))
+    if len(labels) != 2:
+        return None
+    negated = [lab for lab in labels if _NEGATION.search(lab.replace("-", " "))]
+    if len(negated) != 1:
+        return None
+    return {lab: ("false" if lab in negated else "true") for lab in labels}
+
+
 _NUMBER_IN_QUESTION = re.compile(r"\b(top|bottom|first|last|best|worst)\s+\d+|"
                                  r"\b\d+\s+(best|worst|top|largest|biggest)", re.I)
 _RANKED = re.compile(r"order\s+by[\s\S]+limit\s+(\d+)\s*;?\s*$", re.I)
@@ -112,11 +129,11 @@ def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
         candidates = [key] + [c for c in agent.columns if c != key] if key in agent.columns else list(agent.columns)
         found = next((c for c in candidates if c not in mapping.values()
                       and sorted(map(_norm, agent[c])) == wanted), None)
-        if found is None:                              # computed labels with the same words
+        if found is None:                              # computed labels with the same words, or true/false labels
             for c in candidates:
                 if c in mapping.values() or pd.api.types.is_numeric_dtype(agent[c]):
                     continue
-                labels = _label_map(wanted, agent[c])
+                labels = _label_map(wanted, agent[c]) or _boolean_map(wanted, agent[c])
                 if labels is not None and sorted(labels[_norm(v)] for v in agent[c]) == wanted:
                     agent[c] = [labels[_norm(v)] for v in agent[c]]
                     found = c
