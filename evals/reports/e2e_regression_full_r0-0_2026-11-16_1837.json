@@ -1,0 +1,4156 @@
+[
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "e01",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "easy",
+  "tuned": false,
+  "question": "How many customers have signed up?",
+  "seconds": 15.9,
+  "status": "done",
+  "cost": 0.01604,
+  "attempts": 1,
+  "sql": "SELECT\n  COUNT(*) AS signups\nFROM customers\nWHERE\n  signup_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND signup_at < CAST('2026-11-15' AS TIMESTAMP)",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 47857.0,
+    "unit": "count",
+    "column": "signups",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "customers"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "e02",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "easy",
+  "tuned": false,
+  "question": "How many products are on sale right now?",
+  "seconds": 19.1,
+  "status": "done",
+  "cost": 0.01593,
+  "attempts": 1,
+  "sql": "SELECT\n  COUNT(*) AS active_products\nFROM product_master\nWHERE\n  is_active = TRUE\n  AND launch_date >= CAST('2025-01-01' AS TIMESTAMP)\n  AND launch_date < CAST('2026-11-15' AS TIMESTAMP)",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 2393.0,
+    "unit": "count",
+    "column": "active_products",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "product_master"
+  ],
+  "required_tables": null,
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong metric value: 'active_products' does not match (value, denominator or category)",
+  "failure_type": "wrong_metric_value"
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "e03",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "easy",
+  "tuned": false,
+  "question": "How many orders have been placed?",
+  "seconds": 14.0,
+  "status": "done",
+  "cost": 0.01644,
+  "attempts": 1,
+  "sql": "SELECT\n  COUNT(DISTINCT s.order_id) AS orders\nFROM sales AS s\nWHERE\n  s.line_type = 'Sale'\n  AND s.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND s.placed_at < CAST('2026-11-15' AS TIMESTAMP)",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 69155.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "sales"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "e04",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "easy",
+  "tuned": false,
+  "question": "Which payment methods are used most?",
+  "seconds": 24.3,
+  "status": "done",
+  "cost": 0.02092,
+  "attempts": 1,
+  "sql": "SELECT\n  sales.payment_method,\n  COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\n  AND sales.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND sales.placed_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  sales.payment_method\nORDER BY\n  orders DESC\nLIMIT 50",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 25551.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "payment_method",
+      "value": "UPI"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 20927.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "payment_method",
+      "value": "COD"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 4624.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "payment_method",
+      "value": "UPI"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "payment_method",
+      "value": "COD"
+     }
+    ],
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 9126.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "payment_method",
+      "value": "Credit Card"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 7011.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "payment_method",
+      "value": "Debit Card"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 3938.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "payment_method",
+      "value": "Wallet"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 2602.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "payment_method",
+      "value": "Net Banking"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "sales"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "e05",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "easy",
+  "tuned": false,
+  "question": "What share of customers are Prime members?",
+  "seconds": 17.7,
+  "status": "done",
+  "cost": 0.01808,
+  "attempts": 1,
+  "sql": "SELECT\n  COUNT(*) AS customers,\n  COUNT(*) FILTER(WHERE\n    is_prime) AS prime_members,\n  AVG(CASE WHEN is_prime THEN 1.0 ELSE 0 END) AS prime_share\nFROM customers\nWHERE\n  signup_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND signup_at < CAST('2026-11-15' AS TIMESTAMP)",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.102012,
+    "unit": "ratio",
+    "column": "prime_share",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c2",
+    "value": 4882.0,
+    "unit": "count",
+    "column": "prime_members",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 47857.0,
+    "unit": "count",
+    "column": "customers",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "customers"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "e06",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "easy",
+  "tuned": false,
+  "question": "What is our total revenue so far?",
+  "seconds": 16.0,
+  "status": "done",
+  "cost": 0.01872,
+  "attempts": 1,
+  "sql": "SELECT\n  SUM(\n    CASE\n      WHEN NOT s.delivered_at IS NULL\n      THEN s.net_amount - COALESCE(s.refund_amount, 0)\n      ELSE 0\n    END\n  ) AS realized_revenue\nFROM sales AS s\nWHERE\n  s.line_type = 'Sale'\n  AND s.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND s.placed_at < CAST('2026-11-15' AS TIMESTAMP)",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 93014274.27,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   }
+  ],
+  "context_tables": [
+   "sales"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m01",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the average order value?",
+  "seconds": 18.1,
+  "status": "done",
+  "cost": 0.01753,
+  "attempts": 1,
+  "sql": "SELECT\n  SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) / NULLIF(COUNT(DISTINCT CASE WHEN s.cancelled_at IS NULL THEN s.order_id END), 0) AS aov,\n  COUNT(DISTINCT CASE WHEN s.cancelled_at IS NULL THEN s.order_id END) AS orders\nFROM sales AS s\nWHERE\n  s.line_type = 'Sale'\n  AND s.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND s.placed_at < CAST('2026-11-15' AS TIMESTAMP)",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 1780.81,
+    "unit": "inr",
+    "column": "aov",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 65701.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "sales"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m02",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "Monthly realized revenue and orders over time",
+  "seconds": 53.9,
+  "status": "done",
+  "cost": 0.03596,
+  "attempts": 1,
+  "sql": "SELECT\n  DATE_TRUNC('MONTH', s.placed_at) AS month,\n  SUM(\n    CASE\n      WHEN NOT s.delivered_at IS NULL\n      THEN s.net_amount - COALESCE(s.refund_amount, 0)\n      ELSE 0\n    END\n  ) AS realized_revenue,\n  COUNT(DISTINCT s.order_id) AS orders\nFROM sales AS s\nWHERE\n  s.line_type = 'Sale'\n  AND s.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND s.placed_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  1\nORDER BY\n  1",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 1808270.29,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-01-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 1391.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-01-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 1530751.5,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-02-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 1035.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-02-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 2386539.91,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-03-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 1671.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-03-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 1515596.21,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-04-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c8",
+    "value": 1057.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-04-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c9",
+    "value": 1799964.58,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-05-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c10",
+    "value": 1308.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-05-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c11",
+    "value": 3112488.41,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-06-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c12",
+    "value": 2442.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-06-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c13",
+    "value": 2452345.65,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-07-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c14",
+    "value": 1816.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-07-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c15",
+    "value": 4358123.95,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-08-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c16",
+    "value": 3248.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-08-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c17",
+    "value": 4678424.55,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-09-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c18",
+    "value": 3820.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-09-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c19",
+    "value": 4803347.51,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-10-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c20",
+    "value": 3515.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-10-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c21",
+    "value": 4106741.22,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-11-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c22",
+    "value": 2996.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-11-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c23",
+    "value": 5214838.64,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-12-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c24",
+    "value": 3713.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2025-12-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c25",
+    "value": 6357976.7,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-01-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c26",
+    "value": 4622.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-01-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c27",
+    "value": 3781744.15,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-02-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c28",
+    "value": 2571.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-02-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c29",
+    "value": 4906485.23,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-03-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c30",
+    "value": 3418.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-03-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c31",
+    "value": 3008313.87,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-04-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c32",
+    "value": 2106.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-04-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c33",
+    "value": 4002765.36,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-05-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c34",
+    "value": 2796.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-05-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c35",
+    "value": 5510916.16,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-06-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c36",
+    "value": 4234.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-06-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c37",
+    "value": 4300693.47,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-07-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c38",
+    "value": 3182.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-07-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c39",
+    "value": 7022750.7,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-08-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c40",
+    "value": 5440.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-08-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c41",
+    "value": 3486443.96,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-09-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c42",
+    "value": 2485.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-09-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c43",
+    "value": 9054214.23,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-10-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c44",
+    "value": 7322.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-10-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c45",
+    "value": 3814538.02,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-11-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c46",
+    "value": 2967.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "month",
+      "value": "2026-11-01T00:00:00.000"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "sales"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m03",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is realized revenue by product category?",
+  "seconds": 23.2,
+  "status": "done",
+  "cost": 0.0211,
+  "attempts": 1,
+  "sql": "SELECT\n  p.category,\n  SUM(\n    CASE\n      WHEN NOT s.delivered_at IS NULL\n      THEN s.net_amount - COALESCE(s.refund_amount, 0)\n      ELSE 0\n    END\n  ) AS realized_revenue\nFROM sales AS s\nJOIN product_master AS p\n  ON s.product_id = p.product_id\nWHERE\n  s.line_type = 'Sale'\n  AND s.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND s.placed_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  p.category\nORDER BY\n  realized_revenue DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 41712833.33,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "category",
+      "value": "Apparel"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 26077505.9,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "category",
+      "value": "Accessories"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 25223935.04,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "category",
+      "value": "Footwear"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 15635327.43,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "category",
+      "value": "Apparel"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "category",
+      "value": "Accessories"
+     }
+    ],
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 853570.86,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "category",
+      "value": "Accessories"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "category",
+      "value": "Footwear"
+     }
+    ],
+    "decimals": 2
+   }
+  ],
+  "context_tables": [
+   "sales",
+   "product_master"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m04",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the return rate by category?",
+  "seconds": 27.7,
+  "status": "done",
+  "cost": 0.02266,
+  "attempts": 1,
+  "sql": "SELECT\n  p.category,\n  COUNT(*) FILTER(WHERE\n    NOT s.return_requested_at IS NULL) / NULLIF(COUNT(*) FILTER(WHERE\n    NOT s.delivered_at IS NULL), 0) AS return_rate,\n  COUNT(*) FILTER(WHERE\n    NOT s.return_requested_at IS NULL) AS return_requested_lines,\n  COUNT(*) FILTER(WHERE\n    NOT s.delivered_at IS NULL) AS delivered_lines\nFROM sales AS s\nJOIN product_master AS p\n  ON s.product_id = p.product_id\nWHERE\n  s.line_type = 'Sale'\n  AND s.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND s.placed_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  p.category\nORDER BY\n  return_rate DESC,\n  p.category",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.253833,
+    "unit": "ratio",
+    "column": "return_rate",
+    "row": [
+     {
+      "column": "category",
+      "value": "Footwear"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c2",
+    "value": 0.227842,
+    "unit": "ratio",
+    "column": "return_rate",
+    "row": [
+     {
+      "column": "category",
+      "value": "Apparel"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c3",
+    "value": 0.0761367,
+    "unit": "ratio",
+    "column": "return_rate",
+    "row": [
+     {
+      "column": "category",
+      "value": "Accessories"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c4",
+    "value": 0.025991,
+    "unit": "pct_points",
+    "column": "return_rate",
+    "row": [
+     {
+      "column": "category",
+      "value": "Footwear"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "category",
+      "value": "Apparel"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c5",
+    "value": 0.1776963,
+    "unit": "pct_points",
+    "column": "return_rate",
+    "row": [
+     {
+      "column": "category",
+      "value": "Footwear"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "category",
+      "value": "Accessories"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c6",
+    "value": 10902.0,
+    "unit": "count",
+    "column": "return_requested_lines",
+    "row": [
+     {
+      "column": "category",
+      "value": "Apparel"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 47849.0,
+    "unit": "count",
+    "column": "delivered_lines",
+    "row": [
+     {
+      "column": "category",
+      "value": "Apparel"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "sales",
+   "product_master"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m05",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "Which return reasons are most common?",
+  "seconds": 25.8,
+  "status": "done",
+  "cost": 0.02162,
+  "attempts": 1,
+  "sql": "SELECT\n  s.return_reason,\n  COUNT(*) AS return_requested_sale_lines\nFROM sales AS s\nWHERE\n  s.line_type = 'Sale'\n  AND s.return_requested_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND s.return_requested_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  s.return_reason\nORDER BY\n  return_requested_sale_lines DESC\nLIMIT 50",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 3657.0,
+    "unit": "count",
+    "column": "return_requested_sale_lines",
+    "row": [
+     {
+      "column": "return_reason",
+      "value": "Size Issue"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 3148.0,
+    "unit": "count",
+    "column": "return_requested_sale_lines",
+    "row": [
+     {
+      "column": "return_reason",
+      "value": "Quality Issue"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c3",
+    "value": 509.0,
+    "unit": "count",
+    "column": "return_requested_sale_lines",
+    "row": [
+     {
+      "column": "return_reason",
+      "value": "Size Issue"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "return_reason",
+      "value": "Quality Issue"
+     }
+    ],
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 2917.0,
+    "unit": "count",
+    "column": "return_requested_sale_lines",
+    "row": [
+     {
+      "column": "return_reason",
+      "value": "Changed Mind"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 1933.0,
+    "unit": "count",
+    "column": "return_requested_sale_lines",
+    "row": [
+     {
+      "column": "return_reason",
+      "value": "Fit Issue"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 1882.0,
+    "unit": "count",
+    "column": "return_requested_sale_lines",
+    "row": [
+     {
+      "column": "return_reason",
+      "value": "Colour Mismatch"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 1145.0,
+    "unit": "count",
+    "column": "return_requested_sale_lines",
+    "row": [
+     {
+      "column": "return_reason",
+      "value": "Damaged"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c8",
+    "value": 794.0,
+    "unit": "count",
+    "column": "return_requested_sale_lines",
+    "row": [
+     {
+      "column": "return_reason",
+      "value": "Wrong Product"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "sales"
+  ],
+  "required_tables": null,
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong metric value: 'share' does not match (value, denominator or category)",
+  "failure_type": "wrong_metric_value"
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m06",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "How does the RTO rate compare between COD and prepaid orders?",
+  "seconds": 30.7,
+  "status": "done",
+  "cost": 0.02451,
+  "attempts": 1,
+  "sql": "SELECT\n  CASE WHEN s.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type,\n  COUNT(*) FILTER(WHERE\n    NOT s.rto_at IS NULL) / NULLIF(COUNT(*) FILTER(WHERE\n    NOT s.shipped_at IS NULL), 0) AS rto_rate,\n  COUNT(*) FILTER(WHERE\n    NOT s.rto_at IS NULL) AS rto_lines,\n  COUNT(*) FILTER(WHERE\n    NOT s.shipped_at IS NULL) AS shipped_lines\nFROM sales AS s\nWHERE\n  s.line_type = 'Sale'\n  AND NOT s.payment_method IS NULL\n  AND s.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND s.placed_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  1\nORDER BY\n  rto_rate DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.0855584,
+    "unit": "ratio",
+    "column": "rto_rate",
+    "row": [
+     {
+      "column": "payment_type",
+      "value": "COD"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c2",
+    "value": 0.00744671,
+    "unit": "ratio",
+    "column": "rto_rate",
+    "row": [
+     {
+      "column": "payment_type",
+      "value": "Prepaid"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c3",
+    "value": 0.07811169,
+    "unit": "pct_points",
+    "column": "rto_rate",
+    "row": [
+     {
+      "column": "payment_type",
+      "value": "COD"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "payment_type",
+      "value": "Prepaid"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c4",
+    "value": 11.4880746,
+    "unit": "number",
+    "column": "rto_rate",
+    "row": [
+     {
+      "column": "payment_type",
+      "value": "COD"
+     }
+    ],
+    "op": "ratio",
+    "against": [
+     {
+      "column": "payment_type",
+      "value": "Prepaid"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c5",
+    "value": 2038.0,
+    "unit": "count",
+    "column": "rto_lines",
+    "row": [
+     {
+      "column": "payment_type",
+      "value": "COD"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 23820.0,
+    "unit": "count",
+    "column": "shipped_lines",
+    "row": [
+     {
+      "column": "payment_type",
+      "value": "COD"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 421.0,
+    "unit": "count",
+    "column": "rto_lines",
+    "row": [
+     {
+      "column": "payment_type",
+      "value": "Prepaid"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c8",
+    "value": 56535.0,
+    "unit": "count",
+    "column": "shipped_lines",
+    "row": [
+     {
+      "column": "payment_type",
+      "value": "Prepaid"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "sales"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m07",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What is the click-through rate by listing position?",
+  "seconds": 24.3,
+  "status": "done",
+  "cost": 0.01859,
+  "attempts": 1,
+  "sql": "SELECT\n  i.position,\n  COUNT(*) AS impressions,\n  COUNT(*) FILTER(WHERE\n    i.clicked) AS clicked_impressions,\n  (\n    COUNT(*) FILTER(WHERE\n      i.clicked)\n  ) / NULLIF(COUNT(*), 0) AS ctr\nFROM impressions AS i\nWHERE\n  i.shown_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND i.shown_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  i.position\nORDER BY\n  i.position\nLIMIT 50",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.122455,
+    "unit": "ratio",
+    "column": "ctr",
+    "row": [
+     {
+      "column": "position",
+      "value": "1"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c2",
+    "value": 0.0862889,
+    "unit": "ratio",
+    "column": "ctr",
+    "row": [
+     {
+      "column": "position",
+      "value": "2"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c3",
+    "value": 0.0658287,
+    "unit": "ratio",
+    "column": "ctr",
+    "row": [
+     {
+      "column": "position",
+      "value": "3"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c4",
+    "value": 0.0528719,
+    "unit": "ratio",
+    "column": "ctr",
+    "row": [
+     {
+      "column": "position",
+      "value": "4"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c5",
+    "value": 0.0801346,
+    "unit": "ratio",
+    "column": "ctr",
+    "row": [
+     {
+      "column": "position",
+      "value": "5"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c6",
+    "value": 0.0675304,
+    "unit": "ratio",
+    "column": "ctr",
+    "row": [
+     {
+      "column": "position",
+      "value": "6"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c7",
+    "value": 0.0554744,
+    "unit": "ratio",
+    "column": "ctr",
+    "row": [
+     {
+      "column": "position",
+      "value": "7"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c8",
+    "value": 0.0487479,
+    "unit": "ratio",
+    "column": "ctr",
+    "row": [
+     {
+      "column": "position",
+      "value": "8"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c9",
+    "value": 0.0272627,
+    "unit": "pct_points",
+    "column": "ctr",
+    "row": [
+     {
+      "column": "position",
+      "value": "5"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "position",
+      "value": "4"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c10",
+    "value": 6674651.0,
+    "unit": "count",
+    "column": "impressions",
+    "row": [
+     {
+      "column": "position",
+      "value": "1"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c11",
+    "value": 817344.0,
+    "unit": "count",
+    "column": "clicked_impressions",
+    "row": [
+     {
+      "column": "position",
+      "value": "1"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "impressions"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m08",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "Which SKUs of active products are out of stock right now?",
+  "seconds": 40.1,
+  "status": "done",
+  "cost": 0.02643,
+  "attempts": 1,
+  "sql": "SELECT\n  il.sku_id,\n  il.product_id,\n  p.product_name,\n  ps.size,\n  MAX(il.on_hand_qty) AS on_hand_qty\nFROM inventory_live AS il\nJOIN product_master AS p\n  ON il.product_id = p.product_id\nJOIN product_skus AS ps\n  ON il.sku_id = ps.sku_id\nWHERE\n  p.is_active = TRUE AND il.on_hand_qty <= 0\nGROUP BY\n  il.sku_id,\n  il.product_id,\n  p.product_name,\n  ps.size\nORDER BY\n  p.product_name,\n  ps.size,\n  il.sku_id\nLIMIT 50",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.0,
+    "unit": "count",
+    "column": "on_hand_qty",
+    "row": [],
+    "op": "mean",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "inventory_live",
+   "product_master",
+   "product_skus"
+  ],
+  "required_tables": null,
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong metric value: 'inbound_qty' does not match (value, denominator or category)",
+  "failure_type": "wrong_metric_value"
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m09",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "How much did we spend on each marketing channel?",
+  "seconds": 24.9,
+  "status": "done",
+  "cost": 0.02181,
+  "attempts": 1,
+  "sql": "SELECT\n  cp.channel,\n  SUM(m.spend) AS marketing_spend\nFROM marketing_spend AS m\nJOIN campaigns AS cp\n  ON cp.campaign_id = m.campaign_id\nWHERE\n  m.date_hour >= CAST('2025-01-01' AS TIMESTAMP)\n  AND m.date_hour < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  cp.channel\nORDER BY\n  marketing_spend DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 2369745.05,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Google Search"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 2014142.69,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Meta"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 1228332.0,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Google Shopping"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 1090493.23,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Instagram"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 813115.63,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "YouTube"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c6",
+    "value": 745463.33,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "DSP Display"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c7",
+    "value": 346639.01,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Affiliate Network"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c8",
+    "value": 155168.08,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Bing Search"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c9",
+    "value": 103251.3,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Email"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c10",
+    "value": 74106.2,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "WhatsApp"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c11",
+    "value": 19132.1,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "SMS"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c12",
+    "value": 0.0,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Push"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "marketing_spend",
+   "campaigns"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m10",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "Which product categories get the worst reviews?",
+  "seconds": 43.1,
+  "status": "done",
+  "cost": 0.03283,
+  "attempts": 2,
+  "sql": "SELECT\n  p.category AS category,\n  SUM(r.rating) / NULLIF(COUNT(r.rating), 0) AS avg_rating,\n  COUNT(*) AS review_count,\n  COUNT(*) FILTER(WHERE\n    r.sentiment = 'Negative') / NULLIF(COUNT(*), 0) AS negative_review_share\nFROM product_reviews AS r\nJOIN product_master AS p\n  ON r.product_id = p.product_id\nWHERE\n  r.moderation_status = 'Published'\n  AND r.reviewed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND r.reviewed_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  p.category\nORDER BY\n  avg_rating ASC,\n  p.category\nLIMIT 50",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 3.88538,
+    "unit": "rating",
+    "column": "avg_rating",
+    "row": [
+     {
+      "column": "category",
+      "value": "Apparel"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 5
+   },
+   {
+    "id": "c2",
+    "value": 3.88559,
+    "unit": "rating",
+    "column": "avg_rating",
+    "row": [
+     {
+      "column": "category",
+      "value": "Footwear"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 5
+   },
+   {
+    "id": "c3",
+    "value": 3.97991,
+    "unit": "rating",
+    "column": "avg_rating",
+    "row": [
+     {
+      "column": "category",
+      "value": "Accessories"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 5
+   },
+   {
+    "id": "c4",
+    "value": 10059.0,
+    "unit": "count",
+    "column": "review_count",
+    "row": [
+     {
+      "column": "category",
+      "value": "Apparel"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 2867.0,
+    "unit": "count",
+    "column": "review_count",
+    "row": [
+     {
+      "column": "category",
+      "value": "Footwear"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 3086.0,
+    "unit": "count",
+    "column": "review_count",
+    "row": [
+     {
+      "column": "category",
+      "value": "Accessories"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 0.0569639,
+    "unit": "ratio",
+    "column": "negative_review_share",
+    "row": [
+     {
+      "column": "category",
+      "value": "Apparel"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c8",
+    "value": 0.0533659,
+    "unit": "ratio",
+    "column": "negative_review_share",
+    "row": [
+     {
+      "column": "category",
+      "value": "Footwear"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c9",
+    "value": 0.0324044,
+    "unit": "ratio",
+    "column": "negative_review_share",
+    "row": [
+     {
+      "column": "category",
+      "value": "Accessories"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   }
+  ],
+  "context_tables": [
+   "product_reviews",
+   "product_master"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m11",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "What do customers contact support about most, and how satisfied are they?",
+  "seconds": 42.8,
+  "status": "done",
+  "cost": 0.02714,
+  "attempts": 1,
+  "sql": "WITH tk AS (\n  SELECT\n    ticket_id,\n    MIN(contact_at) AS opened_at,\n    ARG_MIN(issue_category, contact_at) AS issue_category,\n    BOOL_OR(CAST(NOT resolved_at IS NULL AS BOOLEAN)) AS resolved\n  FROM support_contacts\n  GROUP BY\n    ticket_id\n), ticket_summary AS (\n  SELECT\n    issue_category,\n    COUNT(*) AS support_tickets,\n    COUNT(*) FILTER(WHERE\n      resolved) * 1.0 / NULLIF(COUNT(*), 0) AS ticket_resolution_rate\n  FROM tk\n  WHERE\n    opened_at >= CAST('2025-01-01' AS TIMESTAMP)\n    AND opened_at < CAST('2026-11-15' AS TIMESTAMP)\n  GROUP BY\n    issue_category\n)\nSELECT\n  COALESCE(t.issue_category, c.issue_category) AS issue_category,\n  COALESCE(t.support_tickets, 0) AS support_tickets,\n  c.avg_csat,\n  COALESCE(c.rated_contacts, 0) AS rated_contacts,\n  t.ticket_resolution_rate\nFROM ticket_summary AS t\nFULL OUTER JOIN (\n  SELECT\n    issue_category,\n    SUM(csat) / NULLIF(COUNT(csat), 0) AS avg_csat,\n    COUNT(csat) AS rated_contacts\n  FROM support_contacts\n  WHERE\n    contact_at >= CAST('2025-01-01' AS TIMESTAMP)\n    AND contact_at < CAST('2026-11-15' AS TIMESTAMP)\n  GROUP BY\n    issue_category\n) AS c\n  ON t.issue_category IS NOT DISTINCT FROM c.issue_category\nORDER BY\n  support_tickets DESC\nLIMIT 50",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 1358.0,
+    "unit": "count",
+    "column": "support_tickets",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Delivery"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 4.17001,
+    "unit": "rating",
+    "column": "avg_csat",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Delivery"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 1194.0,
+    "unit": "count",
+    "column": "support_tickets",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Late Delivery"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c4",
+    "value": 1184.0,
+    "unit": "count",
+    "column": "support_tickets",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Tracking"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c5",
+    "value": 0.843888,
+    "unit": "ratio",
+    "column": "ticket_resolution_rate",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Delivery"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c6",
+    "value": 0.850084,
+    "unit": "ratio",
+    "column": "ticket_resolution_rate",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Late Delivery"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c7",
+    "value": 0.847973,
+    "unit": "ratio",
+    "column": "ticket_resolution_rate",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Tracking"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c8",
+    "value": 4.14845,
+    "unit": "rating",
+    "column": "avg_csat",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Late Delivery"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c9",
+    "value": 4.13681,
+    "unit": "rating",
+    "column": "avg_csat",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Tracking"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c10",
+    "value": 205.0,
+    "unit": "count",
+    "column": "support_tickets",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Product Quality"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c11",
+    "value": 4.04348,
+    "unit": "rating",
+    "column": "avg_csat",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Product Quality"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c12",
+    "value": 0.839024,
+    "unit": "ratio",
+    "column": "ticket_resolution_rate",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Product Quality"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c13",
+    "value": 118.0,
+    "unit": "count",
+    "column": "support_tickets",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Not Received"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c14",
+    "value": 0.805085,
+    "unit": "ratio",
+    "column": "ticket_resolution_rate",
+    "row": [
+     {
+      "column": "issue_category",
+      "value": "Not Received"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   }
+  ],
+  "context_tables": [
+   "support_contacts"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "m12",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "medium",
+  "tuned": false,
+  "question": "How much revenue comes from new versus repeat customers?",
+  "seconds": 23.1,
+  "status": "done",
+  "cost": 0.02152,
+  "attempts": 1,
+  "sql": "SELECT\n  CASE\n    WHEN sales.is_first_order\n    THEN 'New'\n    WHEN NOT sales.is_first_order\n    THEN 'Repeat'\n    ELSE 'Unknown'\n  END AS customer_type,\n  SUM(\n    CASE\n      WHEN NOT sales.delivered_at IS NULL\n      THEN sales.net_amount - COALESCE(sales.refund_amount, 0)\n      ELSE 0\n    END\n  ) AS realized_revenue,\n  COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nJOIN product_master\n  ON sales.product_id = product_master.product_id\nWHERE\n  sales.line_type = 'Sale'\n  AND product_master.brand_name = 'New'\n  AND sales.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND sales.placed_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  sales.is_first_order\nORDER BY\n  realized_revenue DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.0,
+    "unit": "inr",
+    "column": "realized_revenue",
+    "row": [
+     {
+      "column": "customer_type",
+      "value": "Repeat"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c2",
+    "value": 1.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "customer_type",
+      "value": "Repeat"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "sales",
+   "product_master"
+  ],
+  "required_tables": null,
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "missing rows for 'customer_type'",
+  "failure_type": "missing_rows"
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "h01",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "What is the conversion rate (orders per visit) by device?",
+  "seconds": 28.5,
+  "status": "done",
+  "cost": 0.02182,
+  "attempts": 1,
+  "sql": "SELECT\n  c.device,\n  COUNT(DISTINCT c.session_id) AS visits,\n  COUNT(DISTINCT CASE WHEN c.event_type = 'purchase' THEN c.session_id END) AS converting_visits,\n  COUNT(DISTINCT CASE WHEN c.event_type = 'purchase' THEN c.session_id END) / NULLIF(COUNT(DISTINCT c.session_id), 0) AS conversion_rate\nFROM clickstream AS c\nWHERE\n  c.event_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND c.event_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  c.device\nORDER BY\n  conversion_rate DESC",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 0.0442004,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "device",
+      "value": "Desktop Web"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 0.0438306,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "device",
+      "value": "iOS App"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 0.0438156,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "device",
+      "value": "Android App"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 0.0435296,
+    "unit": "ratio",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "device",
+      "value": "Mobile Web"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 0.0006708,
+    "unit": "pct_points",
+    "column": "conversion_rate",
+    "row": [
+     {
+      "column": "device",
+      "value": "Desktop Web"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "device",
+      "value": "Mobile Web"
+     }
+    ],
+    "decimals": 2
+   },
+   {
+    "id": "c6",
+    "value": 31243.0,
+    "unit": "count",
+    "column": "converting_visits",
+    "row": [
+     {
+      "column": "device",
+      "value": "Android App"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 713057.0,
+    "unit": "count",
+    "column": "visits",
+    "row": [
+     {
+      "column": "device",
+      "value": "Android App"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c8",
+    "value": 341055.0,
+    "unit": "count",
+    "column": "visits",
+    "row": [
+     {
+      "column": "device",
+      "value": "Mobile Web"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "clickstream"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "h02",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "How did Diwali 2026 do compared with Diwali 2025?",
+  "seconds": 44.1,
+  "status": "done",
+  "cost": 0.03124,
+  "attempts": 1,
+  "sql": "SELECT\n  e.name AS sale_event,\n  CAST(e.start_date AS DATE) AS start_date,\n  CAST(e.end_date AS DATE) AS end_date,\n  DATE_DIFF('DAY', CAST(e.start_date AS DATE), CAST(e.end_date AS DATE)) + 1 AS event_days,\n  SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) AS net_sales,\n  COUNT(DISTINCT s.order_id) AS orders,\n  SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) / NULLIF(DATE_DIFF('DAY', CAST(e.start_date AS DATE), CAST(e.end_date AS DATE)) + 1, 0) AS net_sales_per_day,\n  COUNT(DISTINCT s.order_id) * 1.0 / NULLIF(DATE_DIFF('DAY', CAST(e.start_date AS DATE), CAST(e.end_date AS DATE)) + 1, 0) AS orders_per_day\nFROM sales AS s\nJOIN sale_events AS e\n  ON s.event_id = e.event_id\nWHERE\n  s.line_type = 'Sale'\n  AND e.name IN ('Diwali 2025', 'Diwali 2026')\n  AND s.placed_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND s.placed_at < CAST('2026-11-15' AS TIMESTAMP)\n  AND s.placed_at >= DATE_TRUNC('DAY', e.start_date)\n  AND s.placed_at < DATE_TRUNC('DAY', e.end_date) + INTERVAL '1' DAY\nGROUP BY\n  e.event_id,\n  e.name,\n  e.start_date,\n  e.end_date\nORDER BY\n  start_date",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 287878.4,
+    "unit": "inr",
+    "column": "net_sales",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 0.170147,
+    "unit": "ratio",
+    "column": "net_sales",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2026"
+     }
+    ],
+    "op": "pct_change",
+    "against": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2025"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c3",
+    "value": 41858.92,
+    "unit": "inr",
+    "column": "net_sales",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2026"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2025"
+     }
+    ],
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 246019.48,
+    "unit": "inr",
+    "column": "net_sales",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 225.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c6",
+    "value": 290.0,
+    "unit": "count",
+    "column": "orders",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 0.288889,
+    "unit": "ratio",
+    "column": "orders",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2026"
+     }
+    ],
+    "op": "pct_change",
+    "against": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2025"
+     }
+    ],
+    "decimals": 1
+   },
+   {
+    "id": "c8",
+    "value": 6.0,
+    "unit": "days",
+    "column": "event_days",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c9",
+    "value": 7.0,
+    "unit": "days",
+    "column": "event_days",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c10",
+    "value": 35145.6,
+    "unit": "inr",
+    "column": "net_sales_per_day",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c11",
+    "value": 47979.7,
+    "unit": "inr",
+    "column": "net_sales_per_day",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c12",
+    "value": 32.1429,
+    "unit": "number",
+    "column": "orders_per_day",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c13",
+    "value": 48.3333,
+    "unit": "number",
+    "column": "orders_per_day",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   }
+  ],
+  "context_tables": [
+   "sales",
+   "sale_events"
+  ],
+  "required_tables": null,
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong metric value: 'realized_revenue' does not match (value, denominator or category)",
+  "failure_type": "wrong_metric_value"
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "h03",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "How much did each sale event lift daily net sales compared with the two weeks before it?",
+  "seconds": 326.5,
+  "status": "done",
+  "cost": 0.09022,
+  "attempts": 3,
+  "sql": "WITH event_totals AS (\n  SELECT\n    e.name AS sale_event,\n    CAST(MIN(e.start_date) AS DATE) AS start_date,\n    CAST(MAX(e.end_date) AS DATE) AS end_date,\n    DATE_DIFF('DAY', CAST(MIN(e.start_date) AS DATE), CAST(MAX(e.end_date) AS DATE)) + 1 AS event_days,\n    COALESCE(\n      SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) FILTER(WHERE\n        s.placed_at >= DATE_TRUNC('DAY', e.start_date)\n        AND s.placed_at < DATE_TRUNC('DAY', e.end_date) + INTERVAL '1' DAY),\n      0\n    ) AS event_net_sales,\n    COALESCE(\n      SUM(CASE WHEN s.cancelled_at IS NULL THEN s.net_amount ELSE 0 END) FILTER(WHERE\n        s.placed_at >= DATE_TRUNC('DAY', e.start_date) - INTERVAL '14' DAY\n        AND s.placed_at < DATE_TRUNC('DAY', e.start_date)),\n      0\n    ) AS baseline_net_sales,\n    COUNT(\n      DISTINCT CASE\n        WHEN s.cancelled_at IS NULL\n        AND s.placed_at >= DATE_TRUNC('DAY', e.start_date)\n        AND s.placed_at < DATE_TRUNC('DAY', e.end_date) + INTERVAL '1' DAY\n        THEN s.order_id\n      END\n    ) AS event_orders,\n    COUNT(\n      DISTINCT CASE\n        WHEN s.cancelled_at IS NULL\n        AND s.placed_at >= DATE_TRUNC('DAY', e.start_date) - INTERVAL '14' DAY\n        AND s.placed_at < DATE_TRUNC('DAY', e.start_date)\n        THEN s.order_id\n      END\n    ) AS baseline_orders\n  FROM sale_events AS e\n  LEFT JOIN sales AS s\n    ON s.line_type = 'Sale'\n    AND s.placed_at >= DATE_TRUNC('DAY', e.start_date) - INTERVAL '14' DAY\n    AND s.placed_at < DATE_TRUNC('DAY', e.end_date) + INTERVAL '1' DAY\n  WHERE\n    DATE_TRUNC('DAY', e.start_date) >= CAST('2025-01-15' AS TIMESTAMP)\n    AND DATE_TRUNC('DAY', e.end_date) < CAST('2026-11-15' AS TIMESTAMP)\n  GROUP BY\n    e.name\n)\nSELECT\n  sale_event,\n  start_date,\n  end_date,\n  event_days,\n  event_net_sales,\n  event_orders,\n  event_net_sales / NULLIF(event_days, 0) AS event_net_sales_per_day,\n  baseline_net_sales,\n  baseline_orders,\n  baseline_net_sales / 14.0 AS baseline_net_sales_per_day,\n  event_net_sales / NULLIF(event_days, 0) - baseline_net_sales / 14.0 AS daily_net_sales_lift,\n  100.0 * (\n    event_net_sales / NULLIF(event_days, 0) / NULLIF(baseline_net_sales / 14.0, 0) - 1\n  ) AS daily_net_sales_lift_pct\nFROM event_totals\nORDER BY\n  daily_net_sales_lift DESC\nLIMIT 50",
+  "warnings": [
+   "Numbers not confirmed: Net sales: No column of the result matches the metric recomputed from its definition for the same scope (Grand Festive Sale 2026: recomputed 6.044e+06; Diwali 2026: recomputed 2.879e+05; Mid-Year Member Days 2026: recomputed 1.388e+06). Check the formula, filters and period against the definition.",
+   "Reviewer concern: The query filters out incomplete events but does not report them separately as required. Add a separate list of excluded event names, dates, and the coverage boundary each fails."
+  ],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 393322.57,
+    "unit": "inr",
+    "column": "daily_net_sales_lift",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Grand Festive Sale 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 275.878,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Navratri & Dussehra 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c3",
+    "value": 239.221,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Grand Festive Sale 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c4",
+    "value": 195.505,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Father's Day 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c5",
+    "value": 192.129,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Black Friday & Cyber Monday 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c6",
+    "value": 187.382,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Grand Festive Sale 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c7",
+    "value": 171.207,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Mid-Year Member Days 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c8",
+    "value": 166.849,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Raksha Bandhan 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c9",
+    "value": 162.683,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c10",
+    "value": 162.272,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Summer End of Season Sale 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c11",
+    "value": 158.781,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Women's Day 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c12",
+    "value": 145.61,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Mid-Year Member Days 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c13",
+    "value": 143.422,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Republic Day Sale 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c14",
+    "value": 141.544,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Summer End of Season Sale 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c15",
+    "value": 141.168,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Christmas 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c16",
+    "value": 140.938,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Independence Day Sale 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c17",
+    "value": 125.215,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Diwali 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c18",
+    "value": 104.847,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Eid al-Fitr 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c19",
+    "value": 104.732,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Holi 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c20",
+    "value": 100.537,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Independence Day Sale 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c21",
+    "value": 99.5057,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Onam 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c22",
+    "value": 97.0434,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Mother's Day 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c23",
+    "value": 96.3936,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Republic Day Sale 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c24",
+    "value": 90.904,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Mother's Day 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c25",
+    "value": 77.517,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Navratri & Dussehra 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c26",
+    "value": 62.7446,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Father's Day 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c27",
+    "value": 61.0611,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Makar Sankranti & Pongal 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c28",
+    "value": 59.5523,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Women's Day 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c29",
+    "value": 58.3667,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Year End Sale 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c30",
+    "value": 47.9438,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Valentine's Day 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c31",
+    "value": 47.134,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Eid al-Fitr 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c32",
+    "value": 42.5325,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Valentine's Day 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c33",
+    "value": 39.5253,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Holi 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c34",
+    "value": 36.0495,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Winter End of Season Sale 2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c35",
+    "value": 29.6795,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Winter End of Season Sale 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c36",
+    "value": 14.0709,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Raksha Bandhan 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c37",
+    "value": 8.62476,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Onam 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c38",
+    "value": 1.97743,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "New Year Sale 2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   },
+   {
+    "id": "c39",
+    "value": -99.1449,
+    "unit": "number",
+    "column": "daily_net_sales_lift_pct",
+    "row": [
+     {
+      "column": "sale_event",
+      "value": "Payday Sale"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 1
+   }
+  ],
+  "context_tables": [
+   "sales",
+   "sale_events"
+  ],
+  "required_tables": null,
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "missing rows for 'name'",
+  "failure_type": "missing_rows"
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "h04",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "Which channels bring the best return on ad spend, using our own attribution?",
+  "seconds": 46.3,
+  "status": "done",
+  "cost": 0.03362,
+  "attempts": 2,
+  "sql": "WITH revenue AS (\n  SELECT\n    c.channel,\n    SUM(a.credit_last_click * a.order_revenue) AS last_click_revenue\n  FROM marketing_attribution AS a\n  JOIN campaigns AS c\n    ON c.campaign_id = a.campaign_id\n  WHERE\n    a.order_at >= CAST('2025-01-01' AS TIMESTAMP)\n    AND a.order_at < CAST('2026-11-15' AS TIMESTAMP)\n  GROUP BY\n    c.channel\n), spend AS (\n  SELECT\n    c.channel,\n    SUM(m.spend) AS marketing_spend\n  FROM marketing_spend AS m\n  JOIN campaigns AS c\n    ON c.campaign_id = m.campaign_id\n  WHERE\n    m.date_hour >= CAST('2025-01-01' AS TIMESTAMP)\n    AND m.date_hour < CAST('2026-11-15' AS TIMESTAMP)\n  GROUP BY\n    c.channel\n)\nSELECT\n  s.channel,\n  r.last_click_revenue,\n  s.marketing_spend,\n  r.last_click_revenue / NULLIF(s.marketing_spend, 0) AS roas_last_click\nFROM spend AS s\nLEFT JOIN revenue AS r\n  ON s.channel = r.channel\nORDER BY\n  roas_last_click DESC\nLIMIT 50",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 96.7077,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Email"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 64.9798,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "SMS"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 32.3731,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Affiliate Network"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 28.6683,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "WhatsApp"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 10.3139,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Google Search"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c6",
+    "value": 2369745.05,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Google Search"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c7",
+    "value": 8.25816,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Bing Search"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c8",
+    "value": 7.01014,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "YouTube"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c9",
+    "value": 6.79784,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Instagram"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c10",
+    "value": 6.72688,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Google Shopping"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c11",
+    "value": 6.05411,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Meta"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c12",
+    "value": 4.20431,
+    "unit": "number",
+    "column": "roas_last_click",
+    "row": [
+     {
+      "column": "channel",
+      "value": "DSP Display"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c13",
+    "value": 3685245.71,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Push"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   },
+   {
+    "id": "c14",
+    "value": 0.0,
+    "unit": "inr",
+    "column": "marketing_spend",
+    "row": [
+     {
+      "column": "channel",
+      "value": "Push"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 0
+   }
+  ],
+  "context_tables": [
+   "marketing_attribution",
+   "campaigns",
+   "marketing_spend"
+  ],
+  "required_tables": null,
+  "result_correct": true,
+  "answer_correct": true,
+  "decline_layer": null,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null
+ },
+ {
+  "suite": "regression",
+  "variant": "full",
+  "repeat": 0,
+  "model": "openai:gpt-6.1-terra",
+  "temperature": null,
+  "id": "h05",
+  "author": "self",
+  "set": "answer",
+  "expect": "answer",
+  "difficulty": "hard",
+  "tuned": false,
+  "question": "Which campaigns get the most last-click credited revenue?",
+  "seconds": 28.9,
+  "status": "done",
+  "cost": 0.02291,
+  "attempts": 1,
+  "sql": "SELECT\n  c.campaign_name,\n  SUM(a.credit_last_click * a.order_revenue) AS last_click_revenue,\n  SUM(a.credit_last_click) AS credited_orders\nFROM marketing_attribution AS a\nJOIN campaigns AS c\n  ON a.campaign_id = c.campaign_id\nWHERE\n  a.order_at >= CAST('2025-01-01' AS TIMESTAMP)\n  AND a.order_at < CAST('2026-11-15' AS TIMESTAMP)\nGROUP BY\n  c.campaign_name\nORDER BY\n  last_click_revenue DESC\nLIMIT 10",
+  "warnings": [],
+  "grounded": true,
+  "claims": [
+   {
+    "id": "c1",
+    "value": 780203.2,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "GSEARCH_Event_All_GrandFestiveSale2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c2",
+    "value": 676571.4,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "GSEARCH_Event_All_GrandFestiveSale2025"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c3",
+    "value": 103631.8,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "GSEARCH_Event_All_GrandFestiveSale2026"
+     }
+    ],
+    "op": "diff",
+    "against": [
+     {
+      "column": "campaign_name",
+      "value": "GSEARCH_Event_All_GrandFestiveSale2025"
+     }
+    ],
+    "decimals": 2
+   },
+   {
+    "id": "c4",
+    "value": 646863.1,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "YT_Event_All_GrandFestiveSale2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c5",
+    "value": 638732.41,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "CRM_PUSH_Event_PaydaySale"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c6",
+    "value": 545254.31,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "GSEARCH_Event_All_NavratriDussehra2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c7",
+    "value": 537709.4,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "GSEARCH_Event_All_IndependenceDaySale2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c8",
+    "value": 535246.6,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "IG_Event_All_GrandFestiveSale2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c9",
+    "value": 502530.9,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "GSEARCH_Brand_All_AlwaysOn_2605"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c10",
+    "value": 481794.2,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "META_Event_All_GrandFestiveSale2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   },
+   {
+    "id": "c11",
+    "value": 478480.8,
+    "unit": "inr",
+    "column": "last_click_revenue",
+    "row": [
+     {
+      "column": "campaign_name",
+      "value": "META_Event_All_SummerEndOfSeasonSale2026"
+     }
+    ],
+    "op": "value",
+    "against": null,
+    "decimals": 2
+   }
+  ],
+  "context_tables": [
+   "marketing_attribution",
+   "campaigns"
+  ],
+  "required_tables": null,
+  "result_correct": false,
+  "answer_correct": false,
+  "decline_layer": null,
+  "passed": false,
+  "reason": "wrong dimension: no column matches 'campaign_id'",
+  "failure_type": "wrong_dimension"
+ }
+]
