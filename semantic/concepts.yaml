@@ -222,6 +222,10 @@ concepts:
     orders: sellers.city
     catalogue: sellers.city
   warehouse:
+    orders: {column: sales.warehouse_id, note: show warehouses.city next to the ID as its label}
+    stock_history: {column: inventory_history.warehouse_id, note: show warehouses.city next to the ID as its label}
+    stock_now: {column: inventory_live.warehouse_id, note: show warehouses.city next to the ID as its label}
+  warehouse_city:
     orders: warehouses.city
     stock_history: warehouses.city
     stock_now: warehouses.city
@@ -271,7 +275,8 @@ concept_info:
   courier: {label: courier, group: fulfilment}
   seller: {label: seller, group: seller}
   seller_city: {label: seller's city, group: seller}
-  warehouse: {label: warehouse (city), group: warehouse}
+  warehouse: {label: warehouse, group: warehouse}
+  warehouse_city: {label: warehouse (city), group: warehouse}
   sale_event: {label: sale event, group: event}
   return_reason: {label: return reason, group: returns}
   issue: {label: support issue, group: support}

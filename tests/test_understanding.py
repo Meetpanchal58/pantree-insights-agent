@@ -63,7 +63,7 @@ def test_ambiguous_value_becomes_a_question_with_its_meanings():
     assert not r.subjects[0].filters
     (point,) = r.open_points
     assert point.key == "mention:Mumbai"
-    assert set(point.meaning.values()) == {"city", "seller_city", "warehouse", "brand"}
+    assert set(point.meaning.values()) == {"city", "seller_city", "warehouse_city", "brand"}
     # for sign-ups only the customer's city exists, so there is nothing to ask
     assert not run(frame(subjects=["signups"], mentions=[Mention(text="Mumbai", concept="other")])).open_points
 
