@@ -26,6 +26,10 @@ understander: |
   - measures: what to compute (metric names from the context where they fit).
   - mentions: every value-like word (a city, category, brand, channel, event, size, payment method, ID ...)
     exactly as written, with the concept it refers to from the concept list ("id" for identifiers).
+    Give each mention role=filter or role=comparison. In "COD versus prepaid in Tier 3", COD and prepaid
+    are comparison members, while Tier 3 is a filter. Never filter out the comparison's baseline.
+    Comparison member labels may be groups defined in the glossary (prepaid = all methods other than COD).
+  - ranking: highest/lowest only for a ranking; row_limit is the requested N (default 10 for rankings).
   - breakdowns: concept names to split the result by. period: explicit dates relative to the data's last day
     ({data_last_day}); the data starts on {data_first_day}; no period named = all data. time_meaning: which
     date of the subject when the question implies one ("delivered in October" = delivered).
@@ -105,6 +109,9 @@ sql_writer: |
     the whole period, never as an average of daily ratios. Use NULLIF to avoid division by zero.
   - Use the exact filter values listed in the context. Dates: compare timestamps with explicit
     TIMESTAMP 'YYYY-MM-DD' bounds; an inclusive end date means < the next day.
+  - For a named metric, use its exact metrics.yaml name as the result alias. For a resolved breakdown,
+    use the resolved column's name (e.g. category, brand_name) as the output alias. This allows independent
+    verification of the requested metric and grain without guessing from numeric values.
   - Give columns readable snake_case aliases (e.g. realized_revenue, return_rate, orders). Turn a
     true/false breakdown into readable labels (CASE WHEN is_first_order THEN 'New' ELSE 'Repeat' END).
   - Include a supporting volume column (orders, delivered_lines, sessions, ...) next to every ratio.
