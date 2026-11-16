@@ -1,0 +1,84 @@
+# Review-derived regression cases, intentionally not an unseen holdout and never added to RAG examples.
+questions:
+  - id: flow-case
+    expect: answer
+    tuned_on: true
+    author: self
+    question: Show total realized revenue for the exact brand ADIDAS across all available dates.
+    intent: preserve the exact stored brand spelling
+    required_tables: [sales, product_master]
+    required_metrics: [realized_revenue]
+    required_joins: [sales.product_id = product_master.product_id]
+    filter_values: [{value: ADIDAS, column: product_master.brand_name}]
+    result_grain: one total
+    key_columns: []
+    metric_columns: [realized_revenue]
+    gold_sql: |
+      SELECT SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END)
+        AS realized_revenue
+      FROM sales s JOIN product_master p ON p.product_id=s.product_id
+      WHERE s.line_type='Sale' AND p.brand_name='ADIDAS'
+
+  - id: flow-typo
+    expect: clarify
+    tuned_on: true
+    author: self
+    question: How many orders were shipped to Mumbay across all available dates?
+    intent: confirm the unknown city instead of silently removing it
+
+  - id: flow-complete
+    expect: answer
+    tuned_on: true
+    author: self
+    question: Give realized revenue for every product category, including all categories, across all available dates.
+    intent: return complete category coverage, not an unrequested ranking
+    required_tables: [sales, product_master]
+    required_metrics: [realized_revenue]
+    required_joins: [sales.product_id = product_master.product_id]
+    filter_values: []
+    result_grain: one row per category
+    key_columns: [category]
+    metric_columns: [realized_revenue]
+    gold_sql: |
+      SELECT p.category,
+        SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END)
+          AS realized_revenue
+      FROM sales s JOIN product_master p ON p.product_id=s.product_id
+      WHERE s.line_type='Sale' GROUP BY 1
+
+  - id: flow-context
+    expect: answer
+    tuned_on: true
+    author: self
+    question: Now split those orders by payment method, keeping that same city and all available dates.
+    history: |
+      User: Count orders whose delivery city is Mumbai, across all available dates.
+      Analyst: I used sales.ship_city = 'Mumbai' and counted distinct orders, excluding exchange replacement lines.
+    intent: retain a confirmed delivery-city filter in a conversational follow-up
+    required_tables: [sales]
+    required_metrics: [orders]
+    required_joins: []
+    filter_values: [{value: Mumbai, column: sales.ship_city}]
+    result_grain: one row per payment_method
+    key_columns: [payment_method]
+    metric_columns: [orders]
+    gold_sql: |
+      SELECT payment_method, COUNT(DISTINCT order_id) AS orders
+      FROM sales WHERE line_type='Sale' AND ship_city='Mumbai' GROUP BY 1
+
+  - id: flow-values
+    expect: answer
+    tuned_on: true
+    author: self
+    question: Count orders shipped to Mumbai or Pune, separately for each city, across all available dates.
+    intent: selected cities are alternatives, not mutually exclusive equalities
+    required_tables: [sales]
+    required_metrics: [orders]
+    required_joins: []
+    filter_values: [{value: Mumbai, column: sales.ship_city}, {value: Pune, column: sales.ship_city}]
+    result_grain: one row per ship_city
+    key_columns: [ship_city]
+    metric_columns: [orders]
+    gold_sql: |
+      SELECT ship_city, COUNT(DISTINCT order_id) AS orders
+      FROM sales WHERE line_type='Sale' AND ship_city IN ('Mumbai', 'Pune') GROUP BY 1

@@ -85,21 +85,21 @@ def test_keys_that_differ_only_in_case_are_different_groups():
 
 
 # ----------------------------------------------------------------------------- runtime: the agent's answer
-def test_answer_alignment_by_values_whatever_the_column_names():
+def test_answer_requires_explicit_metric_and_dimension_columns():
     import pandas as pd
 
     from pantree_insights.recompute import check_answer
 
     canonical = pd.DataFrame({"category": ["Apparel", "Footwear"], "value": [100.0, 50.0]})
-    agent = pd.DataFrame({"cat": ["Footwear", "Apparel"], "lines": [7, 9], "net": [50.2, 99.8]})
-    assert check_answer(agent, canonical, ["category"]) == ("verified", [])
+    agent = pd.DataFrame({"category": ["Footwear", "Apparel"], "lines": [7, 9], "net": [50.2, 99.8]})
+    assert check_answer(agent, canonical, ["category"], column="net") == ("verified", [])
     wrong = agent.assign(net=[60.0, 99.8])
-    status, problems = check_answer(wrong, canonical, ["category"])
-    assert status == "mismatch" and "Footwear" in problems[0] and "50" in problems[0]
+    status, problems = check_answer(wrong, canonical, ["category"], column="net")
+    assert status == "mismatch" and "net" in problems[0]
     top1 = agent.iloc[[1]]                                              # top-N: a subset of the rows
-    assert check_answer(top1, canonical, ["category"])[0] == "verified"
+    assert check_answer(top1, canonical, ["category"], column="net", limit=1, ranking="highest")[0] == "verified"
     in_percent = agent.assign(net=[5020.0, 9980.0])                     # not a ratio: x100 is a mismatch
-    assert check_answer(in_percent, canonical, ["category"])[0] == "mismatch"
+    assert check_answer(in_percent, canonical, ["category"], column="net")[0] == "mismatch"
 
 
 def test_answer_that_cannot_be_aligned_is_unverified_not_wrong():
@@ -111,8 +111,8 @@ def test_answer_that_cannot_be_aligned_is_unverified_not_wrong():
     by_month = pd.DataFrame({"month": ["2026-01", "2026-02"], "net": [70.0, 80.0]})   # a different breakdown
     assert check_answer(by_month, canonical, ["category"])[0] == "unverified"
     single = pd.DataFrame({"total": [150.0]})
-    assert check_answer(single, pd.DataFrame({"value": [150.0]}), []) == ("verified", [])
-    assert check_answer(single, pd.DataFrame({"value": [120.0]}), [])[0] == "mismatch"
+    assert check_answer(single, pd.DataFrame({"value": [150.0]}), [], column="total") == ("verified", [])
+    assert check_answer(single, pd.DataFrame({"value": [120.0]}), [], column="total")[0] == "mismatch"
 
 
 def test_ratio_in_percent_is_accepted():
@@ -122,4 +122,16 @@ def test_ratio_in_percent_is_accepted():
 
     canonical = pd.DataFrame({"category": ["Apparel"], "value": [0.253]})
     agent = pd.DataFrame({"category": ["Apparel"], "return_pct": [25.3]})
-    assert check_answer(agent, canonical, ["category"], ratio=True)[0] == "verified"
+    assert check_answer(agent, canonical, ["category"], ratio=True, column="return_pct")[0] == "verified"
+
+
+def test_ranking_cannot_replace_a_valid_group_with_a_null_group():
+    import pandas as pd
+
+    from pantree_insights.recompute import check_answer
+
+    canonical = pd.DataFrame({"category": ["A", "B", "C", "D"], "value": [100., 50., None, None]})
+    actual = pd.DataFrame({"category": ["A", "C", "D"], "orders": [100., None, None]})
+    assert check_answer(actual, canonical, ["category"], column="orders", limit=3, ranking="highest")[0] == "mismatch"
+    actual = pd.DataFrame({"category": ["A", "B", "C"], "orders": [100., 50., None]})
+    assert check_answer(actual, canonical, ["category"], column="orders", limit=3, ranking="highest")[0] == "verified"

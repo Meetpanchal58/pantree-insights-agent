@@ -104,14 +104,14 @@ def free_numbers(text: str) -> list[str]:
 
 # ----------------------------------------------------------------------------- verification
 def _norm(value) -> str:
-    text = str(value).strip().lower()
+    text = str(value).strip()
     if len(text) >= 10 and text[4] == "-" and text[7] == "-":
         return text[:10]
     try:
         number = float(text)
         return str(int(number)) if number.is_integer() else f"{number:.6g}"
     except ValueError:
-        return {"true": "true", "false": "false"}.get(text, text)
+        return {"true": "true", "false": "false"}.get(text.lower(), text)
 
 
 def _rows(frame: pd.DataFrame, keys: list[KeyValue] | None) -> pd.DataFrame:

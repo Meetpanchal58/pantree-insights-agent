@@ -246,7 +246,7 @@ def test_ungrounded_answer_is_flagged_after_one_rewrite(con, retriever, tmp_path
         analyst=[lambda u: analysis_from(u, wrong=True)]))
     _, events = run(agent, "What is revenue by category?")
     final = events[-1]
-    assert final["status"] == "done" and final["grounded"] is False
+    assert final["status"] == "failed" and final["grounded"] is False
     assert any(w.startswith("Unverified claims") for w in final["warnings"])
     assert "{c1}" not in final["analysis"]["headline"]                 # placeholders are rendered
 
@@ -256,14 +256,14 @@ def test_ungrounded_or_disputed_answers_are_not_remembered(con, retriever, tmp_p
         planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}], validator=[{"ok": True}],
         analyst=[lambda u: analysis_from(u, wrong=True)]))
     _, events = run(agent, "What is revenue by category?")
-    remember = [e for e in events if e.get("step") == "remember" and e["status"] != "started"][0]
-    assert remember["status"] == "skipped" and "did not verify" in remember["detail"]["reason"]
+    assert events[-1]["status"] == "failed"
+    assert not any(e.get("step") == "remember" for e in events)
     assert memory.insights() == []
     agent, _, memory = make_agent(con, retriever, tmp_path / "b", Script(
         planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
         validator=[{"ok": False, "problems": ["Wrong denominator"]}], analyst=[analysis_from]))
     _, events = run(agent, "What is revenue by category?")
-    assert events[-1]["status"] == "done" and memory.insights() == []    # validator concern after 3 tries
+    assert events[-1]["status"] == "failed" and memory.insights() == []   # no answer after failed review
 
 
 def test_empty_result_goes_to_the_validator(con, retriever, tmp_path):
@@ -372,7 +372,7 @@ def test_use_defaults_answers_every_open_point_without_pausing(con, retriever, t
     assert "Which metric?: A" in [u for a, _, u in fakes[0].prompts if a == "planner"][-1]
 
 
-def test_safety_stop_after_max_rounds_uses_defaults_and_warns(con, retriever, tmp_path):
+def test_safety_stop_after_max_rounds_does_not_compute_guessed_values(con, retriever, tmp_path):
     from pantree_insights.graph import MAX_CLARIFY_ROUNDS
 
     def understander(user):                                  # a confused model: always a new question
@@ -386,15 +386,15 @@ def test_safety_stop_after_max_rounds_uses_defaults_and_warns(con, retriever, tm
     while events[-1]["type"] == "clarify":
         rounds += 1
         events = resume(agent, run_id, {events[-1]["questions"][0]["question"]: "A"})
-    assert rounds == MAX_CLARIFY_ROUNDS and events[-1]["status"] == "done"
-    assert any("Still unclear" in w for w in events[-1]["warnings"])
+    assert rounds == MAX_CLARIFY_ROUNDS and events[-1]["status"] == "declined"
+    assert not any(e.get("step") == "write_sql" for e in events)
 
 
 def test_which_mumbai_is_asked_and_the_answer_reaches_the_sql_writer(con, retriever, tmp_path):
-    frame = {**CLEAR_FRAME, "restated_question": "Orders in Mumbai", "breakdowns": [],
+    frame = {**CLEAR_FRAME, "restated_question": "Orders in Mumbai", "breakdowns": [], "measures": ["orders"],
              "mentions": [{"text": "Mumbai", "concept": "other"}]}
     agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
-        understander=[frame], planner=[PLAN], sql_writer=[{"sql": GOOD_SQL, "explanation": "x"}],
+        understander=[frame], planner=[PLAN], sql_writer=[{"sql": WITH_FILTER, "explanation": "x"}],
         validator=[{"ok": True}], analyst=[analysis_from]))
     run_id, events = run(agent, "How many orders in Mumbai?")
     question = events[-1]["questions"][0]
@@ -538,3 +538,21 @@ def test_a_measure_that_is_not_a_metric_is_unverified_not_wrong(con, retriever, 
         validator=[{"ok": True}], analyst=[analysis_from]))
     final = run(agent, "Revenue per active seller by category?")[1][-1]
     assert final["status"] == "done" and final["verification"]["status"] == "unverified"
+
+
+def test_followup_retrieves_history_then_resolved_intent(con, retriever, tmp_path, monkeypatch):
+    queries = []
+    original = retriever.retrieve
+
+    def tracked(question, *args, **kwargs):
+        queries.append(question)
+        return original(question, *args, **kwargs)
+
+    monkeypatch.setattr(retriever, "retrieve", tracked)
+    agent, _, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[MUMBAI_SELLERS], planner=[PLAN], sql_writer=[{"sql": WITH_FILTER, "explanation": "x"}],
+        validator=[{"ok": True}], analyst=[analysis_from]))
+    final = run(agent, "Now count those orders", history="User: Orders from Mumbai sellers", use_defaults=True)[1][-1]
+    assert final["status"] == "done"
+    assert "Earlier chat: User: Orders from Mumbai sellers" in queries[0]
+    assert "Mumbai" in queries[1] and "orders" in queries[1]

@@ -30,7 +30,8 @@ def analysis(user):
             "chart_metric": "realized_revenue", "claims": [claim]}
 
 
-FRAME = {"restated_question": "Realized revenue by category", "subjects": ["orders"], "breakdowns": ["category"]}
+FRAME = {"restated_question": "Realized revenue by category", "subjects": ["orders"],
+         "measures": ["realized_revenue"], "breakdowns": ["category"]}
 
 
 def responder(agent, schema, system, user):

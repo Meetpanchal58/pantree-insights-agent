@@ -1,7 +1,7 @@
 """Dimension-aware result scoring: is the agent's result the same answer as the gold result?
 
 1. Find the agent column for each gold key (dimension) column: the column whose normalised values are
-   the same set (dates compared as YYYY-MM-DD, months as YYYY-MM, text case-insensitive).
+   the same set (dates compared as YYYY-MM-DD, months as YYYY-MM, text case preserved).
    No such column -> "missing dimension". Duplicate key rows -> "duplicate rows".
 2. The set of key rows must be identical: missing or extra rows fail.
 3. Rows are aligned on the keys; each gold metric column must match one agent numeric column on every
@@ -31,11 +31,11 @@ def _norm(value) -> str:
         return "∅"
     if isinstance(value, pd.Timestamp):
         value = value.isoformat()
-    text = str(value).strip().lower()
+    text = str(value).strip()
     if len(text) >= 10 and text[4] == "-" and text[7] == "-":          # ISO date / timestamp
         return text[:10]
-    if text in ("true", "false"):
-        return text
+    if text.lower() in ("true", "false"):
+        return text.lower()
     try:
         number = float(text)
         return str(int(number)) if number.is_integer() else f"{number:.6g}"
@@ -44,10 +44,10 @@ def _norm(value) -> str:
 
 
 def _words(value) -> frozenset[str]:
-    return frozenset(w for w in re.findall(r"[a-z0-9]+", _norm(value)) if w not in _FILLER)
+    return frozenset(w for w in re.findall(r"[a-z0-9]+", _norm(value).lower()) if w not in _FILLER)
 
 
-def _label_map(wanted: list[str], values: pd.Series) -> dict[str, str] | None:
+def _label_map(wanted: list[str], values: pd.Series, allow_case: bool = False) -> dict[str, str] | None:
     """agent value -> gold value when the labels are the same words, one-to-one; else None."""
     gold_words = {w: v for v in set(wanted) if (w := _words(v))}
     if len(gold_words) != len(set(wanted)):
@@ -55,7 +55,9 @@ def _label_map(wanted: list[str], values: pd.Series) -> dict[str, str] | None:
     out = {}
     for value in set(map(_norm, values)):
         match = gold_words.get(_words(value))
-        if match is None or match in out.values():
+        # Case-only changes can identify different stored entities (ADIDAS versus Adidas).
+        if match is None or (not allow_case and _norm(value) != match and _norm(value).casefold() == match.casefold()) \
+                or match in out.values():
             return None
         out[value] = match
     return out if sorted(out.values()) == sorted(set(wanted)) else None
@@ -88,13 +90,13 @@ def _numeric(frame: pd.DataFrame) -> list[str]:
 
 
 def score(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
-          metric_columns: list[str]) -> tuple[bool, str]:
-    ok, reason, _ = align(gold, agent, key_columns, metric_columns)
+          metric_columns: list[str], *, label_columns: set[str] = frozenset()) -> tuple[bool, str]:
+    ok, reason, _ = align(gold, agent, key_columns, metric_columns, label_columns=label_columns)
     return ok, reason
 
 
 def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
-          metric_columns: list[str]) -> tuple[bool, str, dict[str, str]]:
+          metric_columns: list[str], *, label_columns: set[str] = frozenset()) -> tuple[bool, str, dict[str, str]]:
     """Like score(), plus the column mapping agent column -> gold column (keys and matched metrics)."""
     found_map: dict[str, str] = {}
     if gold.empty:                                    # the correct answer is "no rows"
@@ -116,7 +118,7 @@ def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
             for c in candidates:
                 if c in mapping.values() or pd.api.types.is_numeric_dtype(agent[c]):
                     continue
-                labels = _label_map(wanted, agent[c])
+                labels = _label_map(wanted, agent[c], allow_case=key in label_columns)
                 if labels is not None and sorted(labels[_norm(v)] for v in agent[c]) == wanted:
                     agent[c] = [labels[_norm(v)] for v in agent[c]]
                     found = c
@@ -154,7 +156,9 @@ def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
     numeric = _numeric(agent)
     for metric in metric_columns:
         expected = gold[metric].astype(float).tolist()
-        options = ([metric] if metric in numeric else []) + [c for c in numeric if c != metric]
+        if metric in agent.columns and metric not in numeric:
+            return False, f"wrong metric value: '{metric}' is not numeric", {}
+        options = [metric] if metric in numeric else [c for c in numeric if c not in found_map]
         ok = False
         for col in options:
             got = agent[col].astype(float).tolist()

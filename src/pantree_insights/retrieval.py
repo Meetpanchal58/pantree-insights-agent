@@ -32,7 +32,7 @@ from llama_index.embeddings.fastembed import FastEmbedEmbedding
 from llama_index.retrievers.bm25 import BM25Retriever
 
 from .config import ROOT, get_settings
-from .db import connect
+from .db import connect, snapshot_signature
 from .semantic import (
     Example,
     Glossary,
@@ -238,11 +238,14 @@ class Retriever:
         return sorted(tables_in(sql) & set(self.schema.tables))
 
 
-@lru_cache
+@lru_cache(maxsize=1)
+def _snapshot_retriever(signature: str) -> Retriever:
+    return Retriever(connect(get_settings().shop_dir))
+
+
 def get_retriever() -> Retriever:
-    """One shared retriever per process (indexes are built once, in a few seconds)."""
-    settings = get_settings()
-    return Retriever(connect(settings.shop_dir))
+    """Reuse indexes for this manifest, rebuilding after a published data refresh."""
+    return _snapshot_retriever(snapshot_signature())
 
 
 def main() -> None:

@@ -86,3 +86,13 @@ def test_render_formats_claims():
               Claim(id="c4", value=1423.0, unit="count", column="orders", row=[])]
     text = render("{c1} returns, Rs {c2}, {c3} higher, {c4} orders", claims)
     assert text == "25.3% returns, Rs 19.19 lakh, 2.7 pp higher, 1,423 orders"
+
+
+def test_brand_case_is_preserved_when_matching_claim_rows():
+    import pandas as pd
+
+    from pantree_insights.grounding import Claim, KeyValue, actual
+
+    data = pd.DataFrame({"brand": ["ADIDAS", "Adidas"], "orders": [10, 20]})
+    claim = Claim(id="c1", value=10, unit="count", column="orders", row=[KeyValue(column="brand", value="ADIDAS")])
+    assert actual(data, claim) == 10

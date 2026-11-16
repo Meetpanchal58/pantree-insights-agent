@@ -75,8 +75,13 @@ def canonical_sql(metric: str, graph: JoinGraph, by: list[str] | dict[str, str] 
     dims_map = dict(by) if isinstance(by, dict) else {c.split(".")[1]: c for c in (by or [])}
     filters, conditions = list(filters or []), list(conditions or [])
     where += conditions
+    grouped: dict[str, list[str]] = {}
     for column, val in filters:
-        where.append(f"{column} = '{str(val).replace(chr(39), chr(39) * 2)}'")
+        grouped.setdefault(column, []).append(str(val).replace("'", "''"))
+    for column, values in grouped.items():
+        values = list(dict.fromkeys(values))
+        literals = ", ".join(f"'{v}'" for v in values)
+        where.append(f"{column} = {literals}" if len(values) == 1 else f"{column} IN ({literals})")
     time = time_column or _full_names(source.time_column, aliases)[0]
     if period:
         start, end = period
@@ -148,37 +153,49 @@ def compare(result, canonical, keys: list[str], column: str, partial: bool = Fal
 
 
 # ----------------------------------------------------------------------------- runtime: the agent's answer
-def check_answer(agent, canonical, keys: list[str], ratio: bool = False,
-                 tolerance: float = 0.01) -> tuple[str, list[str]]:
-    """Compare the agent's result with the recomputed metric, matching columns by their values (the agent's
-    column names are unknown). Returns ("verified" | "mismatch" | "unverified", problems).
-    - every canonical key column must match an agent column whose values are among the canonical keys; the
-      agent may return only some rows (top-N); if keys cannot be matched the answer is "unverified"
-    - verified if some numeric agent column equals the metric on every aligned row (x100 accepted for ratios)"""
+def check_answer(agent, canonical, keys: list[str], ratio: bool = False, tolerance: float = 0.01,
+                 *, column: str | None = None, limit: int | None = None,
+                 ranking: str | None = None) -> tuple[str, list[str]]:
+    """Verify a named metric and named dimensions, never infer their identity from coincidental values.
+
+    A subset is permitted only for an explicit highest/lowest ranking with a confirmed row limit.
+    Unknown aliases/unsupported shapes stay unverified rather than receiving a green badge.
+    """
     import pandas as pd
 
-    if agent is None or agent.empty or canonical.empty:
+    if agent is None or column is None or column not in agent or any(k not in agent for k in keys):
+        return "unverified", []
+    if canonical.empty:
+        return ("verified", []) if agent.empty else ("mismatch", ["Expected an empty result for this scope."])
+    if agent.empty:
+        return "mismatch", ["All recomputed rows are missing."]
+    if not pd.api.types.is_numeric_dtype(agent[column]) or agent[column].dtype == bool:
         return "unverified", []
     canon = canonical.copy()
-    canon_keys = {k: [_key(v) for v in canon[k]] for k in keys}
-    mapping: dict[str, str] = {}
-    for k in keys:
-        wanted = set(canon_keys[k]) - {"∅"}
-        found = next((c for c in agent.columns if c not in mapping.values()
-                      and set(_key(v) for v in agent[c]) <= wanted and agent[c].notna().any()), None)
-        if found is None:
-            return "unverified", []
-        mapping[k] = found
-    lookup = {tuple(canon_keys[k][i] for k in keys): canon["value"].iloc[i] for i in range(len(canon))}
-    rows = [(tuple(_key(r[mapping[k]]) for k in keys), r) for _, r in agent.iterrows()] if keys else \
-        [((), agent.iloc[0])]
-    if not keys and len(agent) != 1:
-        return "unverified", []
-    if any(key not in lookup for key, _ in rows):
-        return "unverified", []
-    numeric = [c for c in agent.columns if c not in mapping.values() and pd.api.types.is_numeric_dtype(agent[c])
-               and agent[c].dtype != bool]
-    scales = [1.0, 100.0] if ratio else [1.0]
+    mine_keys = [tuple(_key(v) for v in row) for row in agent[keys].itertuples(index=False, name=None)] \
+        if keys else [()] * len(agent)
+    ref_keys = [tuple(_key(v) for v in row) for row in canon[keys].itertuples(index=False, name=None)] \
+        if keys else [()] * len(canon)
+    if len(set(mine_keys)) != len(mine_keys) or len(set(ref_keys)) != len(ref_keys):
+        return "mismatch", ["Duplicate rows at the confirmed result grain."]
+    lookup = dict(zip(ref_keys, canon["value"], strict=True))
+    if set(mine_keys) - set(ref_keys):
+        return "mismatch", ["Result contains groups outside the confirmed scope."]
+    partial = limit is not None and ranking in {"highest", "lowest"}
+    if partial:
+        if len(agent) != min(limit, len(canon)):
+            return "mismatch", ["The result does not contain the confirmed number of ranked groups."]
+        ranked = canon["value"].dropna().sort_values(ascending=ranking == "lowest")
+        non_null = [lookup[key] for key in mine_keys if not pd.isna(lookup[key])]
+        expected_non_null = min(limit, len(ranked))
+        if len(non_null) != expected_non_null:
+            return "mismatch", ["The ranking omitted non-null groups in favor of null-valued groups."]
+        if expected_non_null:
+            threshold = ranked.iloc[expected_non_null - 1]
+            if any(value < threshold if ranking == "highest" else value > threshold for value in non_null):
+                return "mismatch", ["The returned groups are not the confirmed highest/lowest groups."]
+    elif set(ref_keys) - set(mine_keys):
+        return "mismatch", ["Recomputed groups are missing; no partial ranking was confirmed."]
 
     def close(got, want, scale):
         if pd.isna(got) and pd.isna(want):
@@ -187,10 +204,9 @@ def check_answer(agent, canonical, keys: list[str], ratio: bool = False,
             return False
         return abs(float(got) - float(want) * scale) <= max(tolerance * abs(float(want) * scale), 1e-6)
 
-    for col in numeric:
-        if any(all(close(r[col], lookup[key], s) for key, r in rows) for s in scales):
-            return "verified", []
-    sample = [f"{', '.join(key) or 'total'}: recomputed {lookup[key]:,.4g}" for key, _ in rows[:3]
-              if not pd.isna(lookup[key])]
-    return "mismatch", [f"No column of the result matches the metric recomputed from its definition for the same "
-                        f"scope ({'; '.join(sample)}). Check the formula, filters and period against the definition."]
+    if any(all(close(got, lookup[key], scale) for key, got in zip(mine_keys, agent[column], strict=True))
+           for scale in ([1.0, 100.0] if ratio else [1.0])):
+        return "verified", []
+    sample = "; ".join(f"{', '.join(key) or 'total'}: {lookup[key]}" for key in mine_keys[:3])
+    return "mismatch", [f"{column} disagrees with the metric recomputed from its definition for the confirmed "
+                        f"filters, period and grain ({sample})."]

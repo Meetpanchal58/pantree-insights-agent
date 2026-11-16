@@ -61,3 +61,10 @@ def test_stacked_breakdowns_become_labelled_bars():
     chart = build_chart(frame)
     assert chart["kind"] == "bar_h" and len(chart["figure"]["data"]) == 2
     assert chart["figure"]["data"][1]["y"][0] == "Footwear · Shoes"
+
+
+def test_lost_sales_units_are_not_money():
+    from pantree_insights.charts import _fmt
+
+    assert "tickprefix" not in _fmt("lost_sales_units", pd.Series([247, 209]))
+    assert _fmt("net_sales", pd.Series([247., 209.]))["tickprefix"] == "₹"

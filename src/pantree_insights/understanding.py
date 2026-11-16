@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from difflib import get_close_matches
 
 from .joins import JoinGraph
 from .profile import IdFormat
@@ -45,7 +46,11 @@ class IdResolver:
         if self.con is None:
             return True
         table, col = column.split(".")
-        return self.con.execute(f'SELECT 1 FROM {table} WHERE "{col}" = ? LIMIT 1', [value]).fetchone() is not None
+        cursor = self.con.cursor()
+        try:
+            return cursor.execute(f'SELECT 1 FROM {table} WHERE "{col}" = ? LIMIT 1', [value]).fetchone() is not None
+        finally:
+            cursor.close()
 
     def find(self, question: str) -> list[IdMatch]:
         found: dict[tuple[str, str], IdMatch] = {}
@@ -100,6 +105,7 @@ class OpenPoint:
     default: str
     why: str
     meaning: dict[str, str] = field(default_factory=dict)
+    required: bool = False            # unresolved values cannot be guessed even when defaults were requested
 
     def public(self) -> dict:
         return {"question": self.question, "options": self.options, "default": self.default, "why": self.why}
@@ -139,10 +145,17 @@ class Resolution:
 
 
 def _find_value(text: str, value_columns: dict[str, list[str]], aliases: dict[str, str]) -> str | None:
-    """The stored value a mention refers to: exact (any case), or through a glossary alias."""
-    lowered = {v.lower(): v for v in value_columns}
-    t = text.strip().strip("'\"").lower()
-    return lowered.get(t) or (aliases.get(t) if aliases.get(t) in value_columns else None)
+    """Exact spelling wins; a case-insensitive match is safe only when it is unique."""
+    text = text.strip().strip("'\"")
+    if text in value_columns:
+        return text
+    matches = [v for v in value_columns if v.casefold() == text.casefold()]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        return None
+    alias = aliases.get(text.casefold())
+    return alias if alias in value_columns else None
 
 
 def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str, list[str]],
@@ -178,13 +191,44 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
         for mention in frame.mentions:
             if mention.concept in ("id", "metric", "period"):    # "other" = the LLM was unsure: resolve it here
                 continue
-            value = _find_value(mention.text, value_columns, aliases)
-            if value is None:
-                if mention.concept in concepts.concepts:
-                    notes.append(f"'{mention.text}' was not found as a value of {concepts.label(mention.concept)}; "
-                                 "check the spelling against the values in the context")
+            comparison_member = mention.role == "comparison" or (
+                frame.comparison and mention.concept in frame.breakdowns
+                and sum(m.concept == mention.concept for m in frame.mentions) > 1)
+            if comparison_member:
+                notes.append(f"Comparison group: {mention.text} ({mention.concept}); keep the other comparison groups.")
                 continue
-            columns = set(value_columns[value])
+            value = _find_value(mention.text, value_columns, aliases)
+            value_key = f"value:{name}:{mention.concept}:{mention.text}"
+            entry = concepts.column(mention.concept, name)
+            literal_choice = f"Use exactly '{mention.text}' (may return no rows)"
+            choice = choices.get(value_key)
+            if value is None:
+                eligible = {v: cols for v, cols in value_columns.items()
+                            if (entry and entry.column in cols) or (entry is None and any(
+                                name in entries and entries[name].column in cols
+                                for entries in concepts.concepts.values()))}
+                options = [v for v in eligible if v.casefold() == mention.text.casefold()]
+                if not options:
+                    options = get_close_matches(mention.text, list(eligible), n=3, cutoff=0.6)
+                meanings = {v: v for v in options}
+                if entry:
+                    meanings[literal_choice] = mention.text
+                if choice in meanings.values() and choice != "__revise__":
+                    value = choice
+                    if choice == mention.text and entry:
+                        view.filters.append(Filter(mention.text, mention.concept, entry.column, choice))
+                        notes.append(f"No indexed match for '{choice}'; using the user's exact spelling.")
+                        continue
+                else:
+                    if not meanings:
+                        meanings = {"Revise the question with an exact value": "__revise__"}
+                    open_points.append(OpenPoint(
+                        value_key, f"Which exact value should '{mention.text}' mean for {name}?",
+                        list(meanings), next(iter(meanings)),
+                        "the value is missing or has multiple case-distinct matches; it must not be dropped",
+                        meanings, required=True))
+                    continue
+            columns = set(value_columns.get(value, []))
             candidates = [c for c, entries in concepts.concepts.items()
                           if name in entries and entries[name].column in columns]
             key = f"mention:{value}"
