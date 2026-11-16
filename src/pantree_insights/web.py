@@ -27,6 +27,7 @@ from . import demos as demo_runs
 from .auth import current_user, methods, require_admin, require_user
 from .auth import router as auth_router
 from .config import get_settings
+from .db import snapshot_signature
 from .store import MemoryScope, Store, get_store, to_json
 
 log = logging.getLogger("pantree.web")
@@ -79,6 +80,26 @@ class Run:
     paused: bool = False              # waiting for clarifying answers
     finished: bool = False
     segment_done: threading.Event = field(default_factory=threading.Event)
+    agent: object | None = None
+
+
+def failure_details(error: Exception) -> dict:
+    """User-facing failures without raw provider/credential details."""
+    status = getattr(error, "status_code", None)
+    name = type(error).__name__.lower()
+    headers = getattr(getattr(error, "response", None), "headers", {}) or {}
+    try:
+        wait = min(max(int(headers.get("retry-after", 30)), 1), 300)
+    except (TypeError, ValueError):
+        wait = 30
+    if status == 429 or "ratelimit" in name:
+        return {"message": f"The model service is rate-limited. Your chat is saved. Try again in {wait} seconds.",
+                "error_code": "rate_limit", "retry_after": wait, "retryable": True}
+    if isinstance(error, TimeoutError) or "timeout" in name:
+        return {"message": "The model service took too long. Your chat is saved; you can try the question again.",
+                "error_code": "timeout", "retryable": True}
+    return {"message": "The analysis could not finish. Your chat is saved; please try again.",
+            "error_code": "analysis_failed", "retryable": True}
 
 
 class Runner:
@@ -87,15 +108,18 @@ class Runner:
     def __init__(self, agent_factory=None):
         self._agent_factory = agent_factory
         self._agent = None
+        self._snapshot = None
         self._lock = threading.Lock()
         self.runs: dict[str, Run] = {}
 
     @property
     def agent(self):
         with self._lock:
-            if self._agent is None:
+            signature = snapshot_signature() if self._agent_factory is None else None
+            if self._agent is None or signature != self._snapshot:
                 from .graph import Agent
                 self._agent = (self._agent_factory or Agent)()
+                self._snapshot = signature
             return self._agent
 
     def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool) -> Run:
@@ -104,9 +128,10 @@ class Runner:
         if chat["title"] == "New chat":
             store.update_chat(user["id"], chat["id"], title=question[:80])
         scope = MemoryScope(store, user, chat)
-        run_id, events = self.agent.start(question, chat_id=chat["id"], history=history,
+        agent = self.agent
+        run_id, events = agent.start(question, chat_id=chat["id"], history=history,
                                           use_defaults=use_defaults, memory=scope)
-        run = Run(run_id, user, chat, question)
+        run = Run(run_id, user, chat, question, agent=agent)
         self.runs[run_id] = run
         self._consume(store, run, events)
         return run
@@ -115,7 +140,7 @@ class Runner:
         run.paused = False
         run.segment_done.clear()
         run.events.append({"type": "answered", "answers": answers, "t": time.time()})
-        self._consume(store, run, self.agent.resume(run.id, answers))
+        self._consume(store, run, (run.agent or self.agent).resume(run.id, answers))
 
     def _consume(self, store: Store, run: Run, events) -> None:
         def work():
@@ -128,8 +153,9 @@ class Runner:
                         self._save(store, run, event)
             except Exception as error:                      # never leave the browser waiting
                 log.exception("run %s failed", run.id)
-                final = {"type": "final", "run_id": run.id, "status": "failed", "t": time.time(),
-                         "message": f"Something went wrong: {str(error)[:200]}"}
+                final = {"type": "final", "run_id": run.id, "question": run.question,
+                         "status": "failed", "t": time.time(),
+                         **failure_details(error)}
                 run.events.append(final)
                 self._save(store, run, final)
             finally:
@@ -143,6 +169,7 @@ class Runner:
         store.add_message(run.chat["id"], "assistant", headline, to_json({**final, "events": timeline}))
         if final.get("cost"):
             store.add_cost(run.user["id"], final["cost"].get("usd", 0.0))
+        run.agent = None  # Finished runs no longer need to retain an older snapshot's entire agent/index.
 
 
 runner = Runner()

@@ -11,6 +11,7 @@ extensions or change its own settings.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import threading
 from dataclasses import dataclass
@@ -45,6 +46,14 @@ def manifest(shop_dir: Path | None = None) -> dict:
     """The shop's metadata: size, first and last simulated day, ..."""
     shop_dir = shop_dir or get_settings().shop_dir
     return json.loads((shop_dir / "manifest.json").read_text())
+
+
+def snapshot_signature() -> str:
+    """Identity of the published data manifest. Publishers must update it after a data refresh."""
+    path = get_settings().shop_dir / "manifest.json"
+    stat = path.stat()
+    return hashlib.sha256(str(path.resolve()).encode() + path.read_bytes()
+                          + str(stat.st_mtime_ns).encode()).hexdigest()
 
 
 # ----------------------------------------------------------------------------- connection

@@ -204,7 +204,9 @@ def profile_for(con: duckdb.DuckDBPyConnection, info: dict) -> Profile:
     """Cached profile for the data snapshot described by `info` (db.manifest: size, last_day)."""
     schema_text = (get_settings().semantic_dir / "schema.yaml").read_bytes()
     code = Path(__file__).read_bytes()                       # a change in how we measure invalidates the cache
-    key = f"{info['size']}_{info['last_day']}_{hashlib.sha1(schema_text + code).hexdigest()[:8]}"
+    version = str(info.get("snapshot_signature", "")).encode()
+    digest = hashlib.sha1(schema_text + code + version).hexdigest()[:8]
+    key = f"{info['size']}_{info['last_day']}_{digest}"
     return cached_profile(con, key)
 
 

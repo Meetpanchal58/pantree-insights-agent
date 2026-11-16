@@ -35,7 +35,7 @@ def _fmt(col: str, series: pd.Series) -> dict[str, str]:
     """Axis format for a numeric column."""
     if RATIO.search(col) and series.dropna().abs().max() <= 1.5:
         return {"tickformat": ".1%"}
-    if MONEY.search(col):
+    if MONEY.search(col) and not VOLUME.search(col):
         return {"tickprefix": "₹", "tickformat": "~s"}
     return {"tickformat": "~s"}
 

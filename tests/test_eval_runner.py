@@ -48,7 +48,8 @@ def test_result_and_answer_correctness_against_gold(con):
     assert ok["result_correct"] and ok["answer_correct"]
     wrong = {**claim, "value": float(top.orders) * 1.3}
     bad = run_eval.judge(con, item, {**final, "analysis": {"claims": [wrong]}}, [])
-    assert bad["result_correct"] and not bad["answer_correct"] and bad["failure_type"] == "claims_unverified"
+    assert bad["result_correct"] and not bad["answer_correct"] and not bad["passed"]
+    assert bad["failure_type"] == "claims_unverified"
     missing = run_eval.judge(con, item, {**final, "sql": agent_sql + " HAVING COUNT(*) > 99999999"}, [])
     assert missing["failure_type"] in ("missing_rows", "wrong_dimension")
 
@@ -151,3 +152,29 @@ def test_a_readback_confirmation_is_not_a_clarifying_question():
     assert clear["passed"] and clear["failure_type"] is None
     asked = run_eval.judge(None, {"set": "clarify"}, {"type": "clarify", "kind": "clarify"}, [])
     assert asked["passed"]
+
+
+def test_flow_cases_are_separate_from_unseen_holdout():
+    cases = run_eval.load_suite("flow")
+    assert len(cases) == 5 and all(c["tuned_on"] for c in cases)
+    assert any(c.get("history") for c in cases)
+    assert not ({c["id"] for c in cases} & {c["id"] for c in run_eval.load_suite("holdout")})
+
+
+def test_release_gate_rejects_missing_runs_errors_and_low_accuracy():
+    assert run_eval.passes_gate([{"passed": True}], 1, 1.)
+    assert not run_eval.passes_gate([], 1, 0.)
+    assert not run_eval.passes_gate([{"passed": None}], 1, 0.)
+    assert not run_eval.passes_gate([{"passed": True}, {"passed": False}], 2, .9)
+
+
+def test_history_is_forwarded_to_the_agent():
+    seen = {}
+
+    class Agent:
+        def start(self, question, **kwargs):
+            seen.update(kwargs)
+            return "r", iter([{"type": "final", "status": "done"}])
+
+    run_eval.ask(Agent(), {"question": "Now by channel", "history": "Orders from Mumbai", "set": "answer"})
+    assert seen["history"] == "Orders from Mumbai"

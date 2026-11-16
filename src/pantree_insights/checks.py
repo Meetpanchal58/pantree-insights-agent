@@ -7,15 +7,17 @@
   denominator does not (rows repeated by a join). Percentages on a 0-100 scale, growth, change, lift, ROAS and
   other ratios may exceed 1; margins may be negative.
 
-Empty results are not checked here: the validator decides whether 0 rows is correct.
+Filter enforcement is checked even for empty results; the validator decides whether emptiness is correct.
 """
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 
 import pandas as pd
 import sqlglot
 from sqlglot import exp
+from sqlglot.optimizer.scope import Scope, build_scope
 
 from .guardrails import _qualify
 from .semantic import load_schema
@@ -26,40 +28,131 @@ PERCENT_SCALE = re.compile(r"(pct|percent)", re.I)
 MAY_BE_NEGATIVE = re.compile(r"(margin|growth|change|lift|diff)", re.I)
 
 
-def _uses_filter(tree: exp.Expression, column: str, value: str) -> bool:
-    """Is table.column compared with `value` (=, IN) anywhere in the query? Columns are resolved to their table
-    (sqlglot qualify against the schema), so customers.city does not count for sellers.city."""
+def _uses_filter(tree: exp.Expression, column: str, value: str | list[str]) -> bool:
+    """Prove the requested values constrain every contributing scan, following simple CTE projections.
+
+    SELECT/CASE/aggregate FILTER expressions are not row filters. OR must constrain both branches;
+    an optional outer-join side cannot filter preserved rows. Unsupported lineage is not certified.
+    """
     table, name = column.lower().split(".")
-    wanted = value.lower()
-    alias = {t.alias_or_name.lower(): t.name.lower() for t in tree.find_all(exp.Table)}
-    tables = load_schema().tables
+    wanted = frozenset([value] if isinstance(value, str) else value)
+    root = build_scope(tree)
+    if root is None:
+        return False
 
-    def same_table(c: exp.Column) -> bool:
-        resolved = alias.get((c.table or "").lower())
-        return resolved is None or resolved == table or resolved not in tables     # CTE/subquery: cannot trace
+    def origin(col, scope, path=()):
+        # A CTE may rename the field; trace direct projections before checking the base name.
+        if not isinstance(col, exp.Column):
+            return set()
+        source = scope.sources.get(col.table)
+        if isinstance(source, exp.Table):
+            return {(path, id(source))} if source.name.lower() == table and col.name.lower() == name else set()
+        if isinstance(source, Scope):
+            if source.set_operation_scopes:
+                result = set()
+                for i, branch in enumerate(source.set_operation_scopes):
+                    index = next((i for i, e in enumerate(source.expression.selects)
+                                  if e.alias_or_name == col.name), None)
+                    if index is not None:
+                        expr = branch.expression.selects[index]
+                        expr = expr.this if isinstance(expr, exp.Alias) else expr
+                        result |= origin(expr, branch, (*path, col.table, f"branch:{i}"))
+                return result
+            expr = next((e for e in source.expression.selects if e.alias_or_name == col.name), None)
+            if expr is None:
+                return set()
+            expr = expr.this if isinstance(expr, exp.Alias) else expr
+            return origin(expr, source, (*path, col.table))
+        return set()
 
-    for node in [*tree.find_all(exp.EQ), *tree.find_all(exp.In)]:
-        cols = [c for c in node.find_all(exp.Column) if c.name.lower() == name and same_table(c)]
-        lits = [lit for lit in node.find_all(exp.Literal) if lit.is_string and lit.this.lower() == wanted]
-        if cols and lits:
-            return True
-    return False
+    def combine(left, right):
+        merged = dict(left)
+        for key, values in right.items():
+            merged[key] = merged[key] & values if key in merged else values
+        return merged
+
+    def restrictions(predicate, scope, path):
+        if isinstance(predicate, (exp.Paren, exp.Where)):
+            return restrictions(predicate.this, scope, path)
+        if isinstance(predicate, exp.And):
+            return combine(restrictions(predicate.left, scope, path), restrictions(predicate.right, scope, path))
+        if isinstance(predicate, exp.Or):
+            left, right = restrictions(predicate.left, scope, path), restrictions(predicate.right, scope, path)
+            return {k: left[k] | right[k] for k in left.keys() & right.keys()}
+        if isinstance(predicate, exp.EQ):
+            a, b = predicate.left, predicate.right
+            if isinstance(a, exp.Literal):
+                a, b = b, a
+            if isinstance(b, exp.Literal) and b.is_string:
+                return {key: frozenset([b.this]) for key in origin(a, scope, path)}
+        if (isinstance(predicate, exp.In) and predicate.expressions and not predicate.args.get("query")
+                and all(isinstance(e, exp.Literal) and e.is_string for e in predicate.expressions)):
+            values = frozenset(e.this for e in predicate.expressions)
+            return {key: values for key in origin(predicate.this, scope, path)}
+        return {}
+
+    def prove(scope, path=()):
+        if scope.set_operation_scopes:
+            required, known = set(), {}
+            for i, child in enumerate(scope.set_operation_scopes):
+                req, constraints = prove(child, (*path, f"branch:{i}"))
+                required |= req
+                known.update(constraints)
+            return required, known
+        required, inherited = set(), {}
+        for alias, (_, source) in scope.selected_sources.items():
+            if isinstance(source, exp.Table):
+                req = {(path, id(source))} if source.name.lower() == table else set()
+                constraints = {}
+            else:
+                req, constraints = prove(source, (*path, alias))
+            required |= req
+            inherited[alias] = constraints
+        optional, earlier = set(), []
+        from_ = scope.expression.args.get("from_")
+        if from_ is not None:
+            earlier = [from_.this.alias_or_name]
+        for join in scope.expression.args.get("joins") or []:
+            alias = join.this.alias_or_name
+            if join.side == "LEFT":
+                optional.add(alias)
+            elif join.side == "RIGHT":
+                optional.update(earlier)
+            elif join.side == "FULL":
+                optional.update([*earlier, alias])
+            earlier.append(alias)
+        known = {}
+        for alias, constraints in inherited.items():
+            if alias not in optional:
+                known = combine(known, constraints)
+        # Only WHERE and INNER JOIN predicates necessarily constrain the returned rows.
+        known = combine(known, restrictions(scope.expression.args.get("where"), scope, path))
+        for join in scope.expression.args.get("joins") or []:
+            if not join.side and join.kind not in {"ANTI", "SEMI"}:
+                known = combine(known, restrictions(join.args.get("on"), scope, path))
+        return required, known
+
+    required, known = prove(root)
+    return bool(required) and all(known.get(key) == wanted for key in required)
 
 
 def result_problems(frame: pd.DataFrame, sql: str, filters: list[tuple[str, str]]) -> list[str]:
     """Problems with a query result that code can see for sure; [] when there are none (or the result is empty)."""
-    if frame is None or frame.empty:
-        return []
     problems = []
     try:
         tree, _ = _qualify(sqlglot.parse_one(sql, read="duckdb"), load_schema())
     except sqlglot.errors.ParseError:
         tree = None
-    if tree is not None:
-        for column, value in filters:
-            if not _uses_filter(tree, column, value):
-                problems.append(f"The question was resolved to the filter {column} = '{value}', but the query does "
-                                f"not filter {column.split('.')[1]} on '{value}'. Add it (with the join it needs).")
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for column, value in filters:
+        grouped[column].append(value)
+    for column, values in grouped.items():
+        if tree is None or not _uses_filter(tree, column, values):
+            label = f"{column} = '{values[0]}'" if len(values) == 1 else f"{column} IN {values}"
+            problems.append(f"The question was resolved to the filter {label}, but the query does not enforce "
+                            "it on the contributing rows. Put the exact filter in WHERE (with the join it needs).")
+    if frame is None or frame.empty:
+        return problems
     if frame.duplicated().any():
         problems.append(f"{int(frame.duplicated().sum())} result rows repeat exactly: a join probably duplicated "
                         "rows or a GROUP BY column is missing. Aggregate the many side in its own CTE first.")

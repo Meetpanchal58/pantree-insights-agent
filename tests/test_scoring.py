@@ -11,7 +11,7 @@ GOLD = pd.DataFrame({"category": ["Apparel", "Footwear"], "return_rate": [0.231,
 
 
 def test_same_answer_with_other_names_order_and_extra_columns():
-    agent = pd.DataFrame({"cat": ["footwear", "Apparel"], "delivered": [9, 8], "rate": [0.2531, 0.2309]})
+    agent = pd.DataFrame({"cat": ["Footwear", "Apparel"], "delivered": [9, 8], "rate": [0.2531, 0.2309]})
     assert score(GOLD, agent, ["category"], ["return_rate"]) == (True, "match")
 
 
@@ -72,9 +72,9 @@ def test_a_key_column_that_splits_rows_is_still_required():
 def test_computed_labels_match_on_their_words():
     gold = pd.DataFrame({"day_type": ["Normal day", "Sale event"], "discount": [0.1, 0.3]})
     agent = pd.DataFrame({"day_type": ["normal day", "sale-event day"], "discount": [0.1, 0.3]})
-    assert score(gold, agent, ["day_type"], ["discount"]) == (True, "match")
+    assert score(gold, agent, ["day_type"], ["discount"], label_columns={"day_type"}) == (True, "match")
     wrong = pd.DataFrame({"day_type": ["normal day", "sale-event day"], "discount": [0.3, 0.1]})
-    assert not score(gold, wrong, ["day_type"], ["discount"])[0]
+    assert not score(gold, wrong, ["day_type"], ["discount"], label_columns={"day_type"})[0]
 
 
 def test_unrequested_top_n_size_compares_the_top_rows():
@@ -90,3 +90,17 @@ def test_unrequested_top_n_size_compares_the_top_rows():
     other = pd.DataFrame({"city": ["A", "C", "B"], "rate": [0.5, 0.45, 0.4]})
     trimmed = trim_top_n(other, gold, ranked, "Which cities have the highest rate?")
     assert not score(gold, trimmed, ["city"], ["rate"])[0]
+
+
+def test_named_wrong_metric_cannot_borrow_a_supporting_column():
+    gold = pd.DataFrame({"category": ["Apparel"], "net_sales": [100.]})
+    actual = pd.DataFrame({"category": ["Apparel"], "net_sales": [999.], "unrelated": [100.]})
+    assert not score(gold, actual, ["category"], ["net_sales"])[0]
+
+
+def test_case_distinct_brands_stay_distinct_in_evaluation():
+    gold = pd.DataFrame({"brand": ["ADIDAS", "Adidas"], "orders": [10, 20]})
+    assert score(gold, gold.copy(), ["brand"], ["orders"])[0]
+    assert not score(gold, gold.assign(orders=[20, 10]), ["brand"], ["orders"])[0]
+    single = gold.iloc[[0]]
+    assert not score(single, single.assign(brand="Adidas"), ["brand"], ["orders"])[0]

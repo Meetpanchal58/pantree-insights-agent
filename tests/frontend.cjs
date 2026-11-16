@@ -89,6 +89,38 @@ const path = require('node:path');
       await drawChart({figure:{data:[],layout:{}}});
     });
     assert.equal(await page.locator('#chart').getAttribute('data-drawn'),'yes');
+    assert(!await page.evaluate(()=>fmtNum(247,'lost_sales_units').includes('₹')));
+    assert(await page.evaluate(()=>fmtNum(100,'net_sales').includes('₹')));
+    // A settled clarification must stop displaying an unresolved question marker.
+    await page.evaluate(()=>{
+      newTimeline('Clarification',false);
+      onEvent({type:'step',step:'understand',status:'started'},null);
+      onEvent({type:'step',step:'understand',status:'needs_input',detail:{readback:'Orders by city'}},null);
+    });
+    assert.equal(await page.locator('#steps .dot').innerText(),'…');
+    await page.evaluate(()=>onEvent({type:'answered'},null));
+    assert.equal(await page.locator('#steps .dot').innerText(),'✓');
+    // Both JSON and HTML errors must leave the shell usable with a visible recovery button.
+    for (const status of [429,504,200]) {
+      let first=true;
+      await page.route('**/api/me',async route=>{
+        if (!first) return route.fallback();
+        first=false;
+        await route.fulfill({status,contentType:'text/html',body:'upstream rate/timeout error'});
+      });
+      await page.evaluate(()=>init());
+      assert.equal(await page.locator('#messages [role="alert"]').count(),1);
+      assert.equal(await page.locator('.new-chat').isVisible(),true);
+      await page.locator('[data-action="retry-start"]').click();
+      await page.waitForSelector('[data-action="replay"]');
+      await page.unroute('**/api/me');
+    }
+    await page.route('**/api/slow',async route=>{
+      await new Promise(resolve=>setTimeout(resolve,50));await route.fulfill({json:{}});
+    });
+    const timeoutMessage=await page.evaluate(()=>api('/api/slow',{timeoutMs:5}).catch(error=>error.message));
+    assert.match(timeoutMessage,/timed out/);
+    await page.waitForTimeout(100);
     assert.deepEqual(errors,[]);
     console.log('PASS: chat races, cached revisits, stream cleanup, busy reset, metadata caching, sidebar requests, dialog dismissal, batched timeline and lazy chart navigation.');
   } finally { await browser.close(); }

@@ -26,13 +26,46 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 
 /* ---------------------------------------------------------------- helpers */
 async function api(path, opts = {}) {
-  const init = { method: opts.method || "GET", headers: {}, credentials: "same-origin", signal: opts.signal };
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  if (opts.signal?.aborted) controller.abort();
+  opts.signal?.addEventListener("abort", cancel, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, opts.timeoutMs ?? 30000);
+  const init = { method: opts.method || "GET", headers: {}, credentials: "same-origin", signal: controller.signal };
   if (opts.body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
-  const res = await fetch(path, init);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
-  return data;
+  try {
+    const res = await fetch(path, init);
+    let data;
+    try { data = await res.json(); }
+    catch (error) {
+      if (error.name === "AbortError") throw error;
+      if (res.ok) throw new Error("The server returned an unreadable response. Please retry loading.");
+      data = {};
+    }
+    if (res.ok && (!data || typeof data !== "object")) throw new Error("The server returned an unexpected response.");
+    if (!res.ok) {
+      const message = res.status === 429 ? (typeof data.detail === "string" ? data.detail : "Too many requests. Please wait and try again; existing chats are kept.")
+        : [502, 503, 504].includes(res.status) ? "The server is temporarily unavailable. Your chat is saved; try again."
+        : (typeof data.detail === "string" ? data.detail : `Request failed (${res.status})`);
+      const error = new Error(message); error.status = res.status;
+      throw error;
+    }
+    return data;
+  } catch (error) {
+    if (timedOut) throw new Error("The request timed out. Your chat is saved. Reopen it to check the result before retrying.");
+    throw error;
+  } finally {
+    clearTimeout(timer); opts.signal?.removeEventListener("abort", cancel);
+  }
 }
+function recoveryCard(message, action = "reopen-chat") {
+  const el = document.createElement("div"); el.className = "msg";
+  el.innerHTML = `<div class="answer error-box" role="alert"><h3>Could not finish loading</h3><p>${esc(message)}</p>
+    <button class="btn small" data-action="${action}">${action === "retry-start" ? "Retry loading" : "Reopen chat"}</button></div>`;
+  return el;
+}
+
 function toast(msg, ms = 2600) {
   const t = $("#toast"); t.textContent = msg; t.hidden = false;
   clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.hidden = true), ms);
@@ -41,7 +74,8 @@ function fmtNum(v, col = "") {
   if (v === null || v === undefined || v === "") return "";
   if (typeof v !== "number") return esc(v);
   if (/rate|share|pct|ctr|conversion|margin|lift|growth/.test(col) && Math.abs(v) <= 1.5) return (v * 100).toFixed(1) + "%";
-  if (/revenue|sales|spend|aov|amount|cost|cac|value|price/.test(col)) return "₹" + v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  const volume = /(^|_)(orders?|lines?|sessions|count|units|quantity|qty|customers|buyers|tickets|reviews|impressions|contacts|visits)(_|$)/.test(col);
+  if (!volume && /revenue|sales|spend|aov|amount|cost|cac|value|price/.test(col)) return "₹" + v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
   return v.toLocaleString("en-IN", { maximumFractionDigits: Math.abs(v) < 10 ? 3 : 1 });
 }
 function download(name, blob) {
@@ -79,7 +113,8 @@ function loadScript(url, globalName) {
 /* ---------------------------------------------------------------- start */
 async function init() {
   if (window.innerWidth <= 1180) $("#app").classList.add("panel-closed");
-  try { S.me = await api("/api/me"); } catch (e) { toast(e.message); return; }
+  try { S.me = await api("/api/me"); }
+  catch (e) { $("#messages").replaceChildren(recoveryCard(e.message, "retry-start")); return; }
   if (new URLSearchParams(location.search).get("signin") === "failed") toast("Sign-in did not complete. Please try again.");
   if (!S.me.user) { showSignin(); renderWelcome(); renderUser(); return; }
   $("#signin").hidden = true;
@@ -194,8 +229,7 @@ async function openChat(id) {
   } catch (e) {
     if (view !== S.view || e.name === "AbortError") return;
     S.busy = false; $(".send").disabled = false;
-    $("#messages").textContent = "Could not load this chat. Select it again to retry.";
-    toast(e.message);
+    $("#messages").replaceChildren(recoveryCard(e.message));
   } finally { if (S.chatRequest === controller) S.chatRequest = null; }
 }
 
@@ -223,7 +257,8 @@ function answerCard(run, replay = false) {
   const el = document.createElement("div"); el.className = "msg";
   if (run.status !== "done") {
     el.innerHTML = `<div class="answer error-box"><h3>${run.status === "declined" ? "I can't answer that" : "Something went wrong"}</h3>
-      <div>${esc(run.message || "")}</div></div>`;
+      <div>${esc(run.message || "")}</div>
+      ${run.status === "failed" && run.question ? `<button class="btn small" data-action="edit-question" data-q="${esc(run.question)}">Edit and retry</button>` : ""}</div>`;
     return el;
   }
   const a = run.analysis || {};
@@ -261,7 +296,9 @@ async function ask(question) {
   } catch (e) {
     if (view !== S.view) return;
     toast(e.message, 4500); S.busy = false; $(".send").disabled = false;
+    if (!$("#question").value) { $("#question").value = question; autosize(); }
     document.querySelectorAll(".status-line").forEach((n) => n.closest(".msg").remove());
+    $("#messages").appendChild(recoveryCard(e.message));
   }
 }
 
@@ -275,7 +312,10 @@ function openPanelIfWide() { if (window.innerWidth > 1180) openPanel(); }
 
 function onEvent(e, status) {
   if (!S.run) return;
-  if (e.type === "step") {
+  if (e.type === "answered") {
+    for (const item of S.run.steps) if (item.status === "needs_input") item.status = "done";
+    if (!S.run.restoring) renderSteps();
+  } else if (e.type === "step") {
     const label = STEP_LABELS[e.step] || e.step;
     if (e.status === "started") S.run.steps.push({ step: e.step, status: "running", detail: {}, t: e.t });
     else {
@@ -291,6 +331,8 @@ function onEvent(e, status) {
   } else if (e.type === "final") {
     if (S.chatId) S.chatCache.delete(S.chatId);
     if (status) status.remove();
+    for (const item of S.run.steps) if (item.status === "needs_input") item.status = "done";
+    renderSteps();
     $("#messages").appendChild(answerCard(e, S.run && S.run.replay)); scrollDown();
     showResult(e);
     S.busy = false; $(".send").disabled = false;
@@ -314,7 +356,9 @@ function streamRun(runId, since, status) {
     onEvent(e, status);
     if (e.type === "clarify" || e.type === "final") es.close();
   };
-  es.onerror = () => { es.close(); if (view !== S.view || S.stream !== es) return; if (S.busy) { toast("Connection lost. Reopen the chat to see the result."); S.busy = false; $(".send").disabled = false; } };
+  es.onerror = () => { es.close(); if (view !== S.view || S.stream !== es) return; if (S.busy) { if (status) status.remove();
+    $("#messages").appendChild(recoveryCard("The connection was interrupted. Reopen this chat to check whether the analysis finished."));
+    S.busy = false; $(".send").disabled = false; } };
 }
 
 const clean = (o) => String(o).replace(/\s*\((recommended|default)\)\s*/gi, " ").trim();
@@ -399,7 +443,8 @@ function renderSteps() {
   ol.innerHTML = S.run.steps.map((s, i) => {
     const detail = stepDetail(s);
     const open = s.open ?? (s.status === "running" || ["retry", "failed", "warning", "needs_input"].includes(s.status));
-    return `<li class="step ${s.status}"><span class="dot">${STATUS_ICON[s.status] ?? "·"}</span>
+    const label = s.status === "needs_input" ? "Waiting for your confirmation or answer" : s.status;
+    return `<li class="step ${s.status}"><span class="dot" title="${esc(label)}" aria-label="${esc(label)}">${s.status === "needs_input" ? "…" : STATUS_ICON[s.status] ?? "·"}</span>
       <div class="step-head" data-action="toggle-step" data-i="${i}"><span class="step-name">${esc(STEP_LABELS[s.step] || s.step)}</span>
       <span class="step-time">${s.detail && s.detail.seconds !== undefined ? s.detail.seconds + "s" : s.status === "running" ? "…" : ""}</span></div>
       ${detail ? `<div class="step-detail" ${open ? "" : "hidden"}>${detail}</div>` : ""}</li>`;
@@ -409,7 +454,7 @@ function renderSteps() {
 function showRunInPanel(run) {
   newTimeline(run.question || $("#chat-title").textContent, false);
   S.run.restoring = true;
-  for (const e of run.events || []) if (e.type === "step") onEvent(e, null);
+  for (const e of run.events || []) if (["step", "answered"].includes(e.type)) onEvent(e, null);
   renderSteps();
   showResult(run);
   S.run.restoring = false;
@@ -664,6 +709,9 @@ document.addEventListener("click", async (ev) => {
   const a = t.dataset.action, id = t.dataset.id;
   if (["chat-menu", "edit-project"].includes(a)) ev.stopPropagation();
   switch (a) {
+    case "edit-question": $("#question").value = t.dataset.q; autosize(); $("#question").focus(); break;
+    case "retry-start": init(); break;
+    case "reopen-chat": if (S.chatId) openChat(S.chatId); else renderWelcome(); break;
     case "new-chat": S.pendingProject = t.dataset.project || null; closeSidebarMobile(); renderWelcome(); $("#question").focus(); break;
     case "open-chat": openChat(id); break;
     case "chat-menu": chatMenu(id); break;

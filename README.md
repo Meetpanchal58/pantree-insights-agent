@@ -343,3 +343,10 @@ node tests/frontend.cjs
 
 Recorded answers use `/api/demos/{name}/stream?instant=true` to skip replay pauses.
 The existing stream endpoint without that parameter retains animated timing.
+
+### Validate changes before rollout
+
+See [the evaluation walkthrough](evals/VALIDATION.md) for free regressions, retrieval checks, a budgeted
+live-model run, independent stakeholder questions, and deployment smoke tests. The review-derived flow
+suite is a regression set, not an unseen holdout. Validation failures now stop the analysis; unsupported
+recomputation stays unverified, and only independently verified insights enter durable business memory.

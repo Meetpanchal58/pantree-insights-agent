@@ -28,6 +28,8 @@ class ClarifyingQuestion(BaseModel):
 
 class Mention(BaseModel):
     text: str = Field(description="The word or phrase exactly as the user wrote it, e.g. 'Mumbai', 'footwear'")
+    role: Literal["filter", "comparison"] = Field(
+        "filter", description="Comparison members are groups to compare, not filters that remove the baseline")
     concept: str = Field(description="A concept name from the list (city, category, brand, ...), or one of: "
                          "id, metric, period, other")
 
@@ -43,6 +45,8 @@ class QuestionFrame(BaseModel):
     time_meaning: str | None = Field(None, description="Which date of the subject, from its time meanings "
                                      "(e.g. 'delivered'); empty = the subject's default date")
     comparison: str | None = Field(None, description="Baseline to compare with, if any")
+    ranking: Literal["highest", "lowest"] | None = Field(None, description="Only for a requested ranking")
+    row_limit: int | None = Field(None, ge=1, le=500, description="Requested top/bottom N; ranking without N = 10")
     open_points: list[ClarifyingQuestion] = Field(default_factory=list, description="Everything still unclear "
                                                   "that changes the numbers; empty when the question is clear")
 
@@ -193,11 +197,16 @@ def plan(llm: LLM, question: str, context: str, memory: str, data: dict, history
         _section("Context (tables, metrics, values, examples)", context),
     )
     result = llm.ask("planner", AnalysisPlan, system, user)
-    if answers or use_defaults or understanding:   # the understanding step already asked everything needed
-        if result.decision == "clarify":           # never ask twice
-            result.decision = "proceed"
+    if result.decision == "clarify":
+        # Previously answered questions can be suppressed; new business ambiguities must reach the user.
+        answered = {q.strip().casefold() for q in (answers or {})}
+        result.clarifying_questions = [q for q in result.clarifying_questions
+                                      if q.question.strip().casefold() not in answered]
+        if use_defaults:
             result.assumptions += [f"Assumed '{q.default}' for: {q.question}" for q in result.clarifying_questions]
-        result.clarifying_questions = []
+            result.clarifying_questions = []
+        if not result.clarifying_questions:
+            result.decision = "proceed"
     return result
 
 
@@ -236,7 +245,8 @@ def validate(llm: LLM, question: str, the_plan: AnalysisPlan, sql: str, preview:
 
 
 def analyse(llm: LLM, question: str, the_plan: AnalysisPlan, sql: str, frame: pd.DataFrame, memory: str,
-            metric_notes: str, data: dict, fix_numbers: list[str] | None = None) -> Analysis:
+            metric_notes: str, data: dict, fix_numbers: list[str] | None = None,
+            concerns: list[str] | None = None) -> Analysis:
     retry = ""
     if fix_numbers:
         retry = ("Your previous answer failed the claim check:\n" + "\n".join(f"- {p}" for p in fix_numbers)
@@ -249,6 +259,8 @@ def analyse(llm: LLM, question: str, the_plan: AnalysisPlan, sql: str, frame: pd
         _section("SQL that produced it", sql),
         _section("Data", f"Data runs from {data['first_day']} to {data['last_day']} ({data['size']} shop, simulated)."),
         _section("Metric notes", metric_notes),
+        _section("Validation concerns (explain limitations; do not make confident recommendations)",
+                 "\n".join(concerns or [])),
         _section("What you already know (memory)", memory),
         _section("Correction needed", retry),
     )

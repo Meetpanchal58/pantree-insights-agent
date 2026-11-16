@@ -85,9 +85,14 @@ def test_glossary_alias_finds_the_stored_value():
     assert r.subjects[0].filters[0].value == "COD"
 
 
-def test_unknown_value_is_a_note_not_a_filter():
+def test_unknown_value_must_be_clarified_before_filtering():
     r = run(frame(subjects=["orders"], mentions=[Mention(text="Mumbay", concept="city")]))
-    assert not r.subjects[0].filters and "Mumbay" in r.notes[0]
+    assert not r.subjects[0].filters
+    point, = r.open_points
+    assert point.required and "Mumbay" in point.question and "Mumbai" in point.options
+    fixed = run(frame(subjects=["orders"], mentions=[Mention(text="Mumbay", concept="city")]),
+                choices={point.key: "Mumbai"})
+    assert fixed.subjects[0].filters[0].value == "Mumbai" and not fixed.open_points
 
 
 # ----------------------------------------------------------------------------- cuts, time, joins
@@ -156,3 +161,29 @@ def test_readback_for_an_unknown_measure_shows_the_words_used():
 
     f = frame(subjects=["browsing"], measures=["average pages per visit"])
     assert "average pages per visit" in readback(f, run(f), CONCEPTS, load_metrics())
+
+
+def test_case_collision_requires_an_explicit_value_choice():
+    values = {"ADIDAS": ["product_master.brand_name"], "Adidas": ["product_master.brand_name"]}
+    f = frame(subjects=["orders"], mentions=[Mention(text="adidas", concept="brand")])
+    res = resolve(f, CONCEPTS, GRAPH, values, [])
+    point, = res.open_points
+    assert point.required and {"ADIDAS", "Adidas"} <= set(point.options)
+    fixed = resolve(f, CONCEPTS, GRAPH, values, [], choices={point.key: "ADIDAS"})
+    assert fixed.subjects[0].filters[0].value == "ADIDAS" and not fixed.open_points
+
+
+def test_unknown_literal_can_be_used_explicitly_without_widening_scope():
+    f = frame(subjects=["orders"], mentions=[Mention(text="Mumbay", concept="city")])
+    point, = run(f).open_points
+    fixed = run(f, choices={point.key: "Mumbay"})
+    assert not fixed.open_points and fixed.subjects[0].filters[0].value == "Mumbay"
+
+
+def test_cod_comparison_does_not_filter_out_prepaid_baseline():
+    f = frame(subjects=["orders"], measures=["rto_rate"], breakdowns=["payment_method"], comparison="COD vs prepaid",
+              mentions=[Mention(text="COD", concept="payment_method"),
+                        Mention(text="prepaid", concept="payment_method")])
+    res = run(f)
+    assert not res.subjects[0].filters and not res.open_points
+    assert any("prepaid" in note for note in res.notes)

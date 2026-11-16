@@ -41,6 +41,9 @@ jobs:
       - name: Test
         run: uv run pytest -q
 
+      - name: Validate evaluation gold SQL (no model calls)
+        run: DATA_SIZE=small uv run python evals/run_eval.py --suite all --dry-run
+
   frontend:
     runs-on: ubuntu-latest
     steps:
