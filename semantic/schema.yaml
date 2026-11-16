@@ -10,7 +10,8 @@ tables:
       product_id: text - primary key
       source_product_id: integer
       product_name: text
-      brand_name: text
+      brand_name: text - 13 brands are stored in two spellings (e.g. 'ADIDAS' and 'Adidas', 'PUMA' and 'Puma'), so
+        results by brand list them separately; keep the stored values and mention it when such a brand appears
       gender: text
       category: text
       sub_category: text
