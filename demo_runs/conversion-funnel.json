@@ -1,10 +1,10 @@
 {
   "slug": "conversion-funnel",
   "topic": "Conversion funnel",
-  "question": "Where do sessions drop out between product view, add to cart, checkout and purchase from 1 January 2026 to 2026-11-16, and which step should we investigate first?",
+  "question": "Where do sessions drop out between product view, add to cart, checkout and purchase from 1 January 2026 to 2026-11-17, and which step should we investigate first?",
   "order": 3,
   "data_size": "small",
-  "data_as_of": "2026-11-16",
+  "data_as_of": "2026-11-17",
   "seconds": 0,
   "offline": true,
   "provenance": {
@@ -12,31 +12,123 @@
       "size": "small",
       "seed": 42,
       "first_day": "2025-01-01",
-      "last_day": "2026-11-16",
+      "last_day": "2026-11-17",
       "package_version": "1.0.0",
       "n_products": 1500,
       "n_sellers": 80,
       "traffic_scale": 0.17,
       "daily_new_visitors": 30.0
     },
-    "sql_sha256": "d0907f22ace5908badb87da63e6d4c23a8033546d325b0fc4d991522b0ef8ad8"
+    "sql_sha256": "14b456ff078e39e3e53aa2ea83c321e307b3a95d43b3d98c63d776580e323dde"
   },
   "events": [
     {
       "type": "step",
-      "step": "offline_demo",
+      "step": "check_input",
       "status": "done",
       "detail": {
-        "understood": "Where do sessions drop out between product view, add to cart, checkout and purchase from 1 January 2026 to 2026-11-16, and which step should we investigate first?",
-        "reason": "Saved SQL results and editorial insights; no live model was run."
+        "reason": "Educational offline sample, not a live model run."
+      }
+    },
+    {
+      "type": "step",
+      "step": "retrieve",
+      "status": "done",
+      "detail": {
+        "tables": [
+          "clickstream"
+        ],
+        "reason": "Approved tables used by the saved SQL."
+      }
+    },
+    {
+      "type": "step",
+      "step": "understand",
+      "status": "done",
+      "detail": {
+        "understood": "Where do sessions drop out between product view, add to cart, checkout and purchase from 1 January 2026 to 2026-11-17, and which step should we investigate first?",
+        "reason": "This example uses a predefined question and data period."
+      }
+    },
+    {
+      "type": "step",
+      "step": "write_sql",
+      "status": "done",
+      "detail": {
+        "sql": "WITH events AS (\n  SELECT\n    session_id,\n    event_type,\n    event_at\n  FROM clickstream\n  WHERE\n    event_at >= CAST('2026-01-01' AS TIMESTAMP)\n    AND event_at < CAST('2026-11-17' AS DATE) + INTERVAL '1' DAY\n), views AS (\n  SELECT\n    session_id,\n    MIN(event_at) AS viewed_at\n  FROM events\n  WHERE\n    event_type = 'pdp_view'\n  GROUP BY\n    1\n), carts AS (\n  SELECT\n    e.session_id,\n    MIN(e.event_at) AS carted_at\n  FROM events AS e\n  JOIN views AS v\n    USING (session_id)\n  WHERE\n    e.event_type = 'add_to_cart' AND e.event_at >= v.viewed_at\n  GROUP BY\n    1\n), checkouts AS (\n  SELECT\n    e.session_id,\n    MIN(e.event_at) AS checked_at\n  FROM events AS e\n  JOIN carts AS c\n    USING (session_id)\n  WHERE\n    e.event_type = 'checkout_start' AND e.event_at >= c.carted_at\n  GROUP BY\n    1\n), purchases AS (\n  SELECT\n    e.session_id\n  FROM events AS e\n  JOIN checkouts AS c\n    USING (session_id)\n  WHERE\n    e.event_type = 'purchase' AND e.event_at >= c.checked_at\n  GROUP BY\n    1\n), counts AS (\n  SELECT\n    1 AS position,\n    'Observed sessions' AS stage,\n    COUNT(DISTINCT session_id) AS sessions\n  FROM events\n  UNION ALL\n  SELECT\n    2,\n    'Product view',\n    COUNT(*)\n  FROM views\n  UNION ALL\n  SELECT\n    3,\n    'Add to cart',\n    COUNT(*)\n  FROM carts\n  UNION ALL\n  SELECT\n    4,\n    'Checkout',\n    COUNT(*)\n  FROM checkouts\n  UNION ALL\n  SELECT\n    5,\n    'Purchase',\n    COUNT(*)\n  FROM purchases\n)\nSELECT\n  position,\n  stage,\n  sessions,\n  sessions * 1.0 / NULLIF(FIRST_VALUE(sessions) OVER (ORDER BY position), 0) AS share_of_sessions,\n  sessions * 1.0 / NULLIF(LAG(sessions) OVER (ORDER BY position), 0) AS step_conversion_rate,\n  COALESCE(LAG(sessions) OVER (ORDER BY position) - sessions, 0) AS lost_sessions\nFROM counts\nORDER BY\n  position",
+        "reason": "Saved, validated, deterministic query."
+      }
+    },
+    {
+      "type": "step",
+      "step": "run_query",
+      "status": "done",
+      "detail": {
+        "rows": 5,
+        "columns": [
+          "position",
+          "stage",
+          "sessions",
+          "share_of_sessions",
+          "step_conversion_rate",
+          "lost_sessions"
+        ],
+        "query_seconds": 0.069,
+        "sample_rows": [
+          {
+            "position": 1,
+            "stage": "Observed sessions",
+            "sessions": 279061,
+            "share_of_sessions": 1.0,
+            "step_conversion_rate": null,
+            "lost_sessions": 0
+          },
+          {
+            "position": 2,
+            "stage": "Product view",
+            "sessions": 233168,
+            "share_of_sessions": 0.8355449167,
+            "step_conversion_rate": 0.8355449167,
+            "lost_sessions": 45893
+          },
+          {
+            "position": 3,
+            "stage": "Add to cart",
+            "sessions": 27267,
+            "share_of_sessions": 0.0977098197,
+            "step_conversion_rate": 0.1169414328,
+            "lost_sessions": 205901
+          }
+        ]
+      }
+    },
+    {
+      "type": "step",
+      "step": "analyse",
+      "status": "done",
+      "detail": {
+        "findings": [
+          "Of 279,061 observed sessions, 12,510 completed the measured sequence through purchase (4.5%).",
+          "The add to cart step retained 11.7% of sessions reaching the previous stage.",
+          "Checkout completion was 98.5%; 193 sessions reached checkout without a subsequent measured purchase."
+        ],
+        "reason": "Saved editorial insights."
+      }
+    },
+    {
+      "type": "step",
+      "step": "chart",
+      "status": "done",
+      "detail": {
+        "reason": "Visualization is computed from the saved result table."
       }
     },
     {
       "type": "final",
       "status": "done",
-      "question": "Where do sessions drop out between product view, add to cart, checkout and purchase from 1 January 2026 to 2026-11-16, and which step should we investigate first?",
+      "question": "Where do sessions drop out between product view, add to cart, checkout and purchase from 1 January 2026 to 2026-11-17, and which step should we investigate first?",
       "replay": true,
-      "sql": "WITH events AS (\n  SELECT\n    session_id,\n    event_type,\n    event_at\n  FROM clickstream\n  WHERE\n    event_at >= CAST('2026-01-01' AS TIMESTAMP)\n    AND event_at < CAST('2026-11-16' AS DATE) + INTERVAL '1' DAY\n), views AS (\n  SELECT\n    session_id,\n    MIN(event_at) AS viewed_at\n  FROM events\n  WHERE\n    event_type = 'pdp_view'\n  GROUP BY\n    1\n), carts AS (\n  SELECT\n    e.session_id,\n    MIN(e.event_at) AS carted_at\n  FROM events AS e\n  JOIN views AS v\n    USING (session_id)\n  WHERE\n    e.event_type = 'add_to_cart' AND e.event_at >= v.viewed_at\n  GROUP BY\n    1\n), checkouts AS (\n  SELECT\n    e.session_id,\n    MIN(e.event_at) AS checked_at\n  FROM events AS e\n  JOIN carts AS c\n    USING (session_id)\n  WHERE\n    e.event_type = 'checkout_start' AND e.event_at >= c.carted_at\n  GROUP BY\n    1\n), purchases AS (\n  SELECT\n    e.session_id\n  FROM events AS e\n  JOIN checkouts AS c\n    USING (session_id)\n  WHERE\n    e.event_type = 'purchase' AND e.event_at >= c.checked_at\n  GROUP BY\n    1\n), counts AS (\n  SELECT\n    1 AS position,\n    'Observed sessions' AS stage,\n    COUNT(DISTINCT session_id) AS sessions\n  FROM events\n  UNION ALL\n  SELECT\n    2,\n    'Product view',\n    COUNT(*)\n  FROM views\n  UNION ALL\n  SELECT\n    3,\n    'Add to cart',\n    COUNT(*)\n  FROM carts\n  UNION ALL\n  SELECT\n    4,\n    'Checkout',\n    COUNT(*)\n  FROM checkouts\n  UNION ALL\n  SELECT\n    5,\n    'Purchase',\n    COUNT(*)\n  FROM purchases\n)\nSELECT\n  position,\n  stage,\n  sessions,\n  sessions * 1.0 / NULLIF(FIRST_VALUE(sessions) OVER (ORDER BY position), 0) AS share_of_sessions,\n  sessions * 1.0 / NULLIF(LAG(sessions) OVER (ORDER BY position), 0) AS step_conversion_rate,\n  COALESCE(LAG(sessions) OVER (ORDER BY position) - sessions, 0) AS lost_sessions\nFROM counts\nORDER BY\n  position",
+      "sql": "WITH events AS (\n  SELECT\n    session_id,\n    event_type,\n    event_at\n  FROM clickstream\n  WHERE\n    event_at >= CAST('2026-01-01' AS TIMESTAMP)\n    AND event_at < CAST('2026-11-17' AS DATE) + INTERVAL '1' DAY\n), views AS (\n  SELECT\n    session_id,\n    MIN(event_at) AS viewed_at\n  FROM events\n  WHERE\n    event_type = 'pdp_view'\n  GROUP BY\n    1\n), carts AS (\n  SELECT\n    e.session_id,\n    MIN(e.event_at) AS carted_at\n  FROM events AS e\n  JOIN views AS v\n    USING (session_id)\n  WHERE\n    e.event_type = 'add_to_cart' AND e.event_at >= v.viewed_at\n  GROUP BY\n    1\n), checkouts AS (\n  SELECT\n    e.session_id,\n    MIN(e.event_at) AS checked_at\n  FROM events AS e\n  JOIN carts AS c\n    USING (session_id)\n  WHERE\n    e.event_type = 'checkout_start' AND e.event_at >= c.carted_at\n  GROUP BY\n    1\n), purchases AS (\n  SELECT\n    e.session_id\n  FROM events AS e\n  JOIN checkouts AS c\n    USING (session_id)\n  WHERE\n    e.event_type = 'purchase' AND e.event_at >= c.checked_at\n  GROUP BY\n    1\n), counts AS (\n  SELECT\n    1 AS position,\n    'Observed sessions' AS stage,\n    COUNT(DISTINCT session_id) AS sessions\n  FROM events\n  UNION ALL\n  SELECT\n    2,\n    'Product view',\n    COUNT(*)\n  FROM views\n  UNION ALL\n  SELECT\n    3,\n    'Add to cart',\n    COUNT(*)\n  FROM carts\n  UNION ALL\n  SELECT\n    4,\n    'Checkout',\n    COUNT(*)\n  FROM checkouts\n  UNION ALL\n  SELECT\n    5,\n    'Purchase',\n    COUNT(*)\n  FROM purchases\n)\nSELECT\n  position,\n  stage,\n  sessions,\n  sessions * 1.0 / NULLIF(FIRST_VALUE(sessions) OVER (ORDER BY position), 0) AS share_of_sessions,\n  sessions * 1.0 / NULLIF(LAG(sessions) OVER (ORDER BY position), 0) AS step_conversion_rate,\n  COALESCE(LAG(sessions) OVER (ORDER BY position) - sessions, 0) AS lost_sessions\nFROM counts\nORDER BY\n  position",
       "result": {
         "columns": [
           "position",
@@ -50,7 +142,7 @@
           [
             1,
             "Observed sessions",
-            278184,
+            279061,
             1.0,
             null,
             0
@@ -58,41 +150,41 @@
           [
             2,
             "Product view",
-            232459,
-            0.8356303741,
-            0.8356303741,
-            45725
+            233168,
+            0.8355449167,
+            0.8355449167,
+            45893
           ],
           [
             3,
             "Add to cart",
-            27190,
-            0.0977410635,
-            0.116966863,
-            205269
+            27267,
+            0.0977098197,
+            0.1169414328,
+            205901
           ],
           [
             4,
             "Checkout",
-            12670,
-            0.0455453944,
-            0.4659801398,
-            14520
+            12703,
+            0.0455205134,
+            0.4658745003,
+            14564
           ],
           [
             5,
             "Purchase",
-            12477,
-            0.044851609,
-            0.9847671665,
+            12510,
+            0.0448289084,
+            0.9848067386,
             193
           ]
         ]
       },
       "analysis": {
-        "headline": "The largest measured funnel loss is before add to cart: 205,269 sessions drop out at that step.",
+        "headline": "The largest measured funnel loss is before add to cart: 205,901 sessions drop out at that step.",
         "findings": [
-          "Of 278,184 observed sessions, 12,477 completed the measured sequence through purchase (4.5%).",
+          "Of 279,061 observed sessions, 12,510 completed the measured sequence through purchase (4.5%).",
           "The add to cart step retained 11.7% of sessions reaching the previous stage.",
           "Checkout completion was 98.5%; 193 sessions reached checkout without a subsequent measured purchase."
         ],
@@ -118,14 +210,14 @@
           "Purchase"
         ],
         "values": [
-          278184,
-          232459,
-          27190,
-          12670,
-          12477
+          279061,
+          233168,
+          27267,
+          12703,
+          12510
         ]
       },
-      "data_as_of": "2026-11-16",
+      "data_as_of": "2026-11-17",
       "data_size": "small",
       "attempts": 1,
       "warnings": [],
