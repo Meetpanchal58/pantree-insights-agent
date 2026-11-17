@@ -14,7 +14,7 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 # Production-only durable LangGraph checkpoint backend. Kept out of the locked
 # developer dependency set so local/test installs stay minimal.
-RUN uv pip install --python .venv/bin/python "langgraph-checkpoint-postgres>=3.0,<4"
+RUN uv pip install --python .venv/bin/python "langgraph-checkpoint-postgres==3.2.1"
 
 # App code and the files it reads
 COPY src ./src
