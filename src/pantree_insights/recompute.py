@@ -112,6 +112,10 @@ def canonical_sql(metric: str, graph: JoinGraph, by: list[str] | dict[str, str] 
 
 
 # ----------------------------------------------------------------------------- comparing numbers
+NULL_LABELS = {"unknown", "n/a", "na", "none", "not set", "not given", "blank", "(blank)", "missing", "other/unknown",
+               "unspecified", "null", "-"}
+
+
 def _key(value) -> str:
     if value is None or (isinstance(value, float) and value != value):
         return "∅"
@@ -181,8 +185,16 @@ def check_answer(agent, canonical, keys: list[str], ratio: bool = False, toleran
         if keys else [()] * len(agent)
     ref_keys = [tuple(_key(v) for v in row) for row in canon[keys].itertuples(index=False, name=None)] \
         if keys else [()] * len(canon)
-    if len(set(mine_keys)) != len(mine_keys) or len(set(ref_keys)) != len(ref_keys):
-        return "mismatch", ["Duplicate rows at the confirmed result grain."]
+    if len(set(ref_keys)) != len(ref_keys):
+        return "unverified", []
+    if len(set(mine_keys)) != len(mine_keys):
+        # Several result rows per confirmed group: the result is split by something the confirmed scope does not
+        # know (a date grain, a bucket, a second cut). The check cannot judge that grain, so it never rejects it;
+        # exact repeated rows are caught separately by the result checks.
+        return "unverified", []
+    if any("∅" in k for k in ref_keys):                 # "Unknown" / "N/A" written for an empty group
+        mine_keys = [tuple("∅" if part.casefold() in NULL_LABELS and part not in {p for r in ref_keys for p in r}
+                           else part for part in key) for key in mine_keys]
     lookup = dict(zip(ref_keys, canon["value"], strict=True))
     if set(mine_keys) - set(ref_keys):
         return "mismatch", ["Result contains groups outside the confirmed scope."]

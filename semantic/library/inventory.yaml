@@ -169,14 +169,14 @@ queries:
     tags: [pricing, events]
     metrics: []
     sql: |
-      SELECT e.name AS sale_event, p.category,
+      SELECT e.name AS sale_event, CAST(e.start_date AS DATE) AS start_date, p.category,
              COUNT(DISTINCT ph.product_id) AS products_on_offer,
              AVG(1 - ph.selling_price / NULLIF(ph.mrp, 0)) AS avg_discount_off_mrp
       FROM price_history ph
       JOIN sale_events e ON e.event_id = ph.event_id
       JOIN product_master p ON p.product_id = ph.product_id
-      GROUP BY 1, 2
-      ORDER BY 1, 2
+      GROUP BY 1, 2, 3
+      ORDER BY 2, 3
 
   - id: lib-inv-11
     question: How many active products does each type of seller list, and how well rated are those sellers?

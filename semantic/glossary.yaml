@@ -65,6 +65,14 @@ terms:
     marks a line sold at a sale-event price.
   last-click revenue: SUM(marketing_attribution.credit_last_click * order_revenue) - booked order revenue
     credited to a campaign or channel (metric last_click_revenue).
+  on sale: A product that is on sale = listed in the catalogue today (product_master.is_active = true). Products
+    sold at a festival price are "in a sale event" (sale_events), not "on sale".
+  active product: A product listed in the catalogue today (product_master.is_active = true).
+  right now: The current state, with no date filter - stock from inventory_live, listing from product_master.is_active.
+  out of stock: For current stock, inventory_live.on_hand_qty <= 0; for past days, inventory_history.stock_status.
+  most common: Rank by count (most first) and give each group's share of the total count.
+  event performance: Measure a sale event by its date window (sales.placed_at from start_date to the end of end_date)
+    over all sale lines, not by sales.event_id (events overlap; event_id only says which price applied).
 
 # Phrases that need a table retrieval might not rank highly; these tables are added to the context first.
 term_tables:

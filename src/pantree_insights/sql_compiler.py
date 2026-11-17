@@ -23,7 +23,7 @@ def compile_standard(scope: dict | None, graph: JoinGraph) -> str | None:
     sql = canonical_sql(metric, graph, by=scope.get("by") or {},
                         filters=[tuple(f) for f in scope.get("filters") or []],
                         period=tuple(scope["period"]) if scope.get("period") else None,
-                        time_column=scope.get("time"))
+                        time_column=scope.get("time"), conditions=scope.get("conditions"))
     if not sql:
         return None
     # The canonical builder owns metric logic, cardinality-safe joins and period predicates.

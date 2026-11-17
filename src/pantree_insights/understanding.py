@@ -24,7 +24,7 @@ from difflib import get_close_matches
 
 from .joins import JoinGraph
 from .profile import IdFormat
-from .semantic import Concepts
+from .semantic import ConceptEntry, Concepts
 
 
 # ----------------------------------------------------------------------------- IDs
@@ -81,6 +81,10 @@ class Filter:
     concept: str
     column: str
     value: str
+    expression: str | None = None   # derived cut (COD vs Prepaid): filter on the expression, not the column
+
+    def sql(self) -> str:
+        return f"{self.expression or self.column} = '{self.value}'"
 
 
 @dataclass
@@ -95,6 +99,12 @@ class SubjectView:
     id_filters: list[IdMatch] = field(default_factory=list)
     joins: str = ""
     event_required: bool = False
+    expressions: dict[str, str] = field(default_factory=dict)          # concept -> derived breakdown expression
+
+    def breakdown_sql(self) -> dict[str, str]:
+        """Result column name -> SQL for each breakdown (derived cuts are named after their concept)."""
+        return {(concept if concept in self.expressions else column.split(".")[1]):
+                self.expressions.get(concept, column) for concept, column in self.breakdowns}
 
 
 @dataclass
@@ -125,7 +135,7 @@ class Resolution:
             out += [i.column.split(".")[0] for i in s.id_filters]
         return list(dict.fromkeys(out))
 
-    def to_prompt(self, period: str | None = None) -> str:
+    def to_prompt(self, period: str | None = None, time_grain: str | None = None) -> str:
         if not self.subjects:
             return ""
         lines = ["Resolved in code from the data and the concept map. Follow it exactly."]
@@ -137,14 +147,21 @@ class Resolution:
             where = f"; always filter {s.where}" if s.where else ""
             lines.append(f"\nSubject: {s.name} (table {s.table}{where})")
             lines.append(f"Time column: {s.time_column} ({s.time_label})")
+            if time_grain:
+                lines.append(f"Time grain: one row per {time_grain}: date_trunc('{time_grain}', {s.time_column}) "
+                             f"AS {time_grain}, ordered by {time_grain}")
             if s.event_required:
                 lines.append(f"Required event filter: {s.time_column} IS NOT NULL (also for all data)")
             for f in s.filters:
-                lines.append(f"Filter: {f.column} = '{f.value}'  (\"{f.text}\" = {f.concept.replace('_', ' ')})")
+                lines.append(f"Filter: {f.sql()}  (\"{f.text}\" = {f.concept.replace('_', ' ')})")
             for i in s.id_filters:
                 lines.append(f"Filter: {i.column.split('.')[1]} = '{i.value}'  (\"{i.text}\")")
             for concept, column in s.breakdowns:
-                lines.append(f"Breakdown: {concept.replace('_', ' ')} -> {column}")
+                if concept in s.expressions:
+                    lines.append(f"Breakdown: {concept.replace('_', ' ')} -> {s.expressions[concept]} AS {concept} "
+                                 "(one row per value of this expression, not per stored value)")
+                else:
+                    lines.append(f"Breakdown: {concept.replace('_', ' ')} -> {column}")
             lines.append("Join path (built from the approved joins; use these joins):\n" + s.joins)
         if self.notes:
             lines.append("\nNotes:\n" + "\n".join(f"- {n}" for n in self.notes))
@@ -167,10 +184,11 @@ def _find_value(text: str, value_columns: dict[str, list[str]], aliases: dict[st
 
 def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str, list[str]],
             ids: list[IdMatch], choices: dict[str, str] | None = None,
-            aliases: dict[str, str] | None = None) -> Resolution:
+            aliases: dict[str, str] | None = None, terms: dict[str, str] | None = None) -> Resolution:
     """`frame`: agents.QuestionFrame. `choices`: earlier answers, key -> chosen meaning (concept or subject).
     `aliases`: lowercased alias -> stored value (glossary value_aliases)."""
     choices, aliases = choices or {}, aliases or {}
+    terms = {t.casefold(): (t, meaning) for t, meaning in (terms or {}).items()}
     open_points: list[OpenPoint] = []
     notes: list[str] = []
 
@@ -196,16 +214,46 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
                            if subj.time_meanings else f"{name} by {time_column.split('.')[1]}",
                            event_required=time_column != subj.time)
 
+        derived = {c: e[name] for c, e in concepts.concepts.items() if name in e and e[name].expression}
+        breakdowns = list(frame.breakdowns)
+        def is_member(mention) -> bool:                  # a group being compared, never a filter
+            return mention.role == "comparison" or bool(
+                frame.comparison and mention.concept in frame.breakdowns
+                and sum(m.concept == mention.concept for m in frame.mentions) > 1)
+
+        members = [m.text for m in frame.mentions if is_member(m)]
+        for concept, entry in derived.items():          # "COD versus prepaid": the comparison IS the derived cut
+            labels = {lab.casefold(): lab for lab in entry.labels()}
+            if members and sum(t.strip().casefold() in labels for t in members) >= 2 and concept not in breakdowns:
+                stored = [c for c in breakdowns if (concepts.column(c, name) or ConceptEntry(column="")).column
+                          == entry.column]
+                breakdowns = [c for c in breakdowns if c not in stored] + [concept]
+                notes.append(f"Comparison {' vs '.join(members)} is the {concepts.label(concept)} cut: "
+                             f"{entry.expression}")
+
         for mention in frame.mentions:
             if mention.concept in ("id", "metric", "period"):    # "other" = the LLM was unsure: resolve it here
                 continue
-            comparison_member = mention.role == "comparison" or (
-                frame.comparison and mention.concept in frame.breakdowns
-                and sum(m.concept == mention.concept for m in frame.mentions) > 1)
-            if comparison_member:
+            label = next(((c, e, lab) for c, e in derived.items() for lab in e.labels()
+                          if lab.casefold() == mention.text.strip().casefold()), None)
+            if label and not is_member(mention) and not (label[2] in value_columns
+                                                              and label[1].column in value_columns[label[2]]):
+                concept, entry, lab = label                 # "prepaid orders": a value of a derived cut
+                view.filters.append(Filter(mention.text, concept, entry.column, lab, entry.expression))
+                continue
+            if is_member(mention):
                 notes.append(f"Comparison group: {mention.text} ({mention.concept}); keep the other comparison groups.")
+                member_entry = concepts.column(mention.concept, name)
+                if member_entry and member_entry.note:
+                    note = f"{concepts.label(mention.concept)} for {name}: {member_entry.note}"
+                    if note not in notes:
+                        notes.append(note)
                 continue
             value = _find_value(mention.text, value_columns, aliases)
+            term = terms.get(mention.text.strip().strip("'\"").casefold())
+            if value is None and term:                      # business vocabulary, not a stored value
+                notes.append(f"'{term[0]}' is a business term: {term[1]}")
+                continue
             value_key = f"value:{name}:{mention.concept}:{mention.text}"
             entry = concepts.column(mention.concept, name)
             literal_choice = f"Use exactly '{mention.text}' (may return no rows)"
@@ -257,10 +305,12 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
             if concepts.column(pick, name).note:
                 notes.append(f"{concepts.label(pick)} for {name}: {concepts.column(pick, name).note}")
 
-        for concept in frame.breakdowns:
+        for concept in breakdowns:
             entry = concepts.column(concept, name)
             if entry:
                 view.breakdowns.append((concept, entry.column))
+                if entry.expression:
+                    view.expressions[concept] = entry.expression
                 if entry.note:
                     notes.append(f"{concepts.label(concept)} for {name}: {entry.note}")
                 continue
@@ -277,6 +327,9 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
                     key, f"{subj.about.split(',')[0].capitalize()} cannot be split by {concepts.label(concept)}. "
                     "What should I use instead?", list(options), next(iter(options)),
                     f"the data has no {concepts.label(concept)} for {name}", options))
+            else:                                           # never drop a requested split silently
+                notes.append(f"'{concept.replace('_', ' ')}' is not a known cut of {name}; group by the column that "
+                             "the question means, from the tables in the context, and name the result column after it")
 
         for match in ids:
             id_col = match.column.split(".")[1]
@@ -309,7 +362,7 @@ def readback(frame, res: Resolution, concepts: Concepts, metrics) -> str:
     lines.append("**Measure:** " + "; ".join(measures))
     for v in res.subjects:
         about = concepts.subjects[v.name].about.split(",")[0]
-        cuts = [concepts.label(c) for c, _ in v.breakdowns]
+        cuts = [concepts.label(c) for c, _ in v.breakdowns] + ([frame.time_grain] if frame.time_grain else [])
         lines.append(f"**About:** {about}" + (f", split by {', '.join(cuts)}" if cuts else ""))
         lines.append(f"**Period:** {frame.period or 'all data'}, {v.time_label}")
         filters = [f"{concepts.label(f.concept)} = {f.value}" for f in v.filters] + \

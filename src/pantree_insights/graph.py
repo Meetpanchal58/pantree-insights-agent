@@ -30,7 +30,7 @@ from langgraph.types import Command, interrupt
 from . import agents
 from .catalog import value_columns as catalog_values
 from .charts import build_chart
-from .checks import result_problems
+from .checks import label_grain_problems, result_problems
 from .config import get_settings
 from .db import QueryTimeout, connect, manifest, run_query, snapshot_signature
 from .grounding import verify
@@ -266,11 +266,21 @@ class Agent:
         rounds = state.get("clarify_rounds", 0)
         frame = agents.understand(self.llm(state), state["question"], state["context"], self.data, self.concepts,
                                   state.get("history", ""), answers)
+        grains = [b for b in frame.breakdowns if b in ("day", "week", "month", "quarter", "year")]
+        if grains:                                         # "month" given as a cut is the date grain
+            frame.time_grain = frame.time_grain or grains[0]
+            frame.breakdowns = [b for b in frame.breakdowns if b not in grains]
+        if frame.decline_reason and frame.decline_category == "raw_dump":
+            # Too many valid lists ("out-of-stock SKUs of active products") look like dumps to this step; the
+            # planner (whose rule allows lists of up to 100 items) and the SQL guardrails decide those.
+            return {"frame": frame.model_dump(), "route": "plan",
+                    "_detail": {"decision": "planner decides", "reason": frame.decline_reason}}
         if frame.decline_reason:                           # decided first, before the question is resolved
             return {"status": "declined", "message": frame.decline_reason, "route": "finish", "_status": "declined",
                     "_detail": {"decision": "decline", "reason": frame.decline_reason}}
         ids = self.ids.find(state["question"])
-        res = resolve(frame, self.concepts, self.joins, self.value_columns, ids, choices, self.aliases)
+        res = resolve(frame, self.concepts, self.joins, self.value_columns, ids, choices, self.aliases,
+                      self.retriever.glossary.terms)
         asked = {q.strip().lower() for q in answers}
         pending = [OpenPoint(f"llm:{q.question}", q.question, q.options, q.default, q.why)
                    for q in frame.open_points if q.question.strip().lower() not in asked] + \
@@ -315,8 +325,8 @@ class Agent:
                          "metric_names": context.metrics}
         else:
             refreshed = {}
-        text = res.to_prompt(period=frame.period)
-        filters = [[f.column, f.value] for v in res.subjects for f in v.filters] + \
+        text = res.to_prompt(period=frame.period, time_grain=frame.time_grain)
+        filters = [[f.column, f.value] for v in res.subjects for f in v.filters if not f.expression] + \
                   [[i.column, i.value] for v in res.subjects for i in v.id_filters]
         columns = {c for v in res.subjects for c in [v.time_column, *(c for _, c in v.breakdowns),
                                                     *(f.column for f in v.filters)]}
@@ -334,9 +344,14 @@ class Agent:
                     period_valid = date.fromisoformat(dates[0]) <= date.fromisoformat(dates[1])
                 except ValueError:
                     period_valid = False
+            by = v.breakdown_sql()
+            if frame.time_grain:                           # a date split is part of the grain the check recomputes
+                by[frame.time_grain] = f"date_trunc('{frame.time_grain}', {v.time_column})"
             scope = {"table": v.table, "metrics": [m for m in frame.measures if m in self.metrics.metrics],
-                     "by": {c.split(".")[1]: c for _, c in v.breakdowns},
-                     "filters": [[f.column, f.value] for f in v.filters] + [[i.column, i.value] for i in v.id_filters],
+                     "by": by,
+                     "filters": [[f.column, f.value] for f in v.filters if not f.expression]
+                     + [[i.column, i.value] for i in v.id_filters],
+                     "conditions": [f.sql() for f in v.filters if f.expression],
                      "period": dates if len(dates) == 2 else None, "time": v.time_column,
                      "supported": period_valid and not frame.comparison, "ranking": frame.ranking,
                      "limit": (frame.row_limit or 10) if frame.ranking else None}
@@ -477,6 +492,9 @@ class Agent:
         verdict = check_sql(state["sql"])
         if not verdict.ok:
             return self._retry_or_fail(state, verdict.errors, "safety checks")
+        merged = label_grain_problems(verdict.sql)          # names several IDs share must not be the grain
+        if merged:
+            return self._retry_or_fail(state, merged, "safety checks")
         return {"sql": verdict.sql, "route": "run_query", "_detail": {"tables": sorted(verdict.tables)}}
 
     @step("run_query")
@@ -512,6 +530,11 @@ class Agent:
         if not self.features.understand or not scope or not scope.get("metrics") or not scope.get("supported", True):
             return {"status": "unverified", "metrics": {}, "problems": []}
         statuses, problems = {}, []
+        grain = (state.get("frame") or {}).get("time_grain")
+        if grain and grain in scope["by"] and grain not in frame:   # the date column under another name
+            dated = [c for c in frame.columns if pd.api.types.is_datetime64_any_dtype(frame[c]) or grain in c.lower()]
+            if len(dated) == 1:
+                frame = frame.rename(columns={dated[0]: grain})
         for metric in scope["metrics"]:
             m = self.metrics.metrics[metric]
             if self.metrics.sources[m.source].from_.split()[0] != scope["table"]:
@@ -519,7 +542,7 @@ class Agent:
                 continue
             period = tuple(scope["period"]) if scope.get("period") else None
             sql = canonical_sql(metric, self.joins, by=scope["by"], filters=[tuple(f) for f in scope["filters"]],
-                                period=period, time_column=scope["time"])
+                                period=period, time_column=scope["time"], conditions=scope.get("conditions"))
             if sql is None:
                 statuses[metric] = "unverified"
                 continue
@@ -662,7 +685,9 @@ class Agent:
                 if mode == "custom":
                     yield chunk
                 elif "__interrupt__" in chunk:
-                    yield {"type": "clarify", "run_id": run_id, **chunk["__interrupt__"][0].value}
+                    llm = self._llms.get(run_id)            # spend so far (the run stays open for the answer)
+                    yield {"type": "clarify", "run_id": run_id, **chunk["__interrupt__"][0].value,
+                           "cost": llm.tracker.summary() if llm else None}
                     return
         except BudgetExceeded as error:
             final = self.final(run_id)

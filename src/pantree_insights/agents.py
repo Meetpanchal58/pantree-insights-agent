@@ -37,12 +37,17 @@ class Mention(BaseModel):
 class QuestionFrame(BaseModel):
     decline_reason: str | None = Field(None, description="Only if the request must be declined: why, plus an "
                                        "aggregated alternative. Decided before anything else.")
+    decline_category: Literal["personal_data", "raw_dump", "change_data", "instructions", "off_topic"] | None = Field(
+        None, description="Only with decline_reason: which rule it breaks")
     restated_question: str = Field(description="The question as you understand it, precise and self-contained")
     subjects: list[str] = Field(default_factory=list, description="Subject names from the list: usually one; two "
                                 "when the question compares them (e.g. sign-ups vs orders)")
     measures: list[str] = Field(default_factory=list, description="What to measure: metric names or exact words")
     mentions: list[Mention] = Field(default_factory=list, description="Every value-like word in the question")
     breakdowns: list[str] = Field(default_factory=list, description="Concept names to split the result by")
+    time_grain: Literal["day", "week", "month", "quarter", "year"] | None = Field(
+        None, description="Split by date: 'monthly', 'by month', 'trend', 'over time' (= month unless another grain "
+        "is named), 'daily', 'weekly'. Empty when the result is not split by date")
     period: str = Field("all data", description="Explicit dates (YYYY-MM-DD to YYYY-MM-DD) or 'all data'")
     time_meaning: str | None = Field(None, description="Which date of the subject, from its time meanings "
                                      "(e.g. 'delivered'); empty = the subject's default date")

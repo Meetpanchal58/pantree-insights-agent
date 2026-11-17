@@ -184,12 +184,15 @@ def ask(agent, item: dict, tries: int = 2, wait: float = 20, memory=None) -> lis
     return None
 
 
-def run(items: list[dict], variant: str, repeats: int, offset: int = 0) -> list[dict]:
+def run(items: list[dict], variant: str, repeats: int, offset: int = 0, live: Path | None = None) -> list[dict]:
     with TemporaryDirectory(prefix="pantree-eval-") as folder:
-        return _run(items, variant, repeats, offset, Path(folder))
+        return _run(items, variant, repeats, offset, Path(folder), live)
 
 
-def _run(items: list[dict], variant: str, repeats: int, offset: int, memory_dir: Path) -> list[dict]:
+def _run(items: list[dict], variant: str, repeats: int, offset: int, memory_dir: Path,
+         live: Path | None = None) -> list[dict]:
+    """`live`: every row is appended there (JSON lines) as soon as it is scored, so a stopped run keeps its rows
+    and each failure's full trace (understanding, plan, every SQL attempt and every rejection)."""
     from pantree_insights.graph import VARIANTS, Agent
     from pantree_insights.memory import Memory
 
@@ -227,7 +230,8 @@ def _run(items: list[dict], variant: str, repeats: int, offset: int, memory_dir:
                    "cost": (final.get("cost") or {}).get("usd", 0.0), "attempts": final.get("attempts") or 0,
                    "sql": final.get("sql"), "warnings": final.get("warnings", []),
                    "diagnostics": [e for e in events if e.get("type") == "step"
-                                   and e.get("step") in {"understand", "plan", "write_sql", "check_sql", "run_query"}
+                                   and e.get("step") in {"retrieve", "understand", "plan", "write_sql", "check_sql",
+                                                         "run_query", "validate"}
                                    and e.get("status") != "started"],
                    "grounded": final.get("grounded"), "claims": (final.get("analysis") or {}).get("claims"),
                    "context_tables": (writes[0].get("detail") or {}).get("context_tables") if writes else None,
@@ -238,9 +242,15 @@ def _run(items: list[dict], variant: str, repeats: int, offset: int, memory_dir:
             else:
                 row.update(judge(con, item, final, events))
             rows.append(row)
+            if live is not None:
+                with live.open("a") as fh:
+                    fh.write(json.dumps(row, default=str) + "\n")
             label = "ERR " if row["passed"] is None else "PASS" if row["passed"] else "FAIL"
             print(f"{label} r{repeat} {row['set'][:8]:8s} {row['id']:7s} "
                   f"{row['seconds']:5.1f}s ${row['cost']:.3f}  {row['reason'][:55]}", flush=True)
+            if row["passed"] is False:                      # the whole reason, not the 55-character summary
+                print(f"     why: {row['reason']}" + (f" | {row['message'][:400]}" if row.get("message") else ""),
+                      flush=True)
     return rows
 
 
@@ -400,15 +410,18 @@ def main() -> None:
     settings = get_settings()
     original_budget = settings.daily_budget_usd
     settings.daily_budget_usd = min(original_budget, spent_today() + args.max_cost_usd)
-    try:
-        rows = run(items, args.variant, args.repeats, args.repeat_offset)
-    finally:
-        settings.daily_budget_usd = original_budget
     out = args.output_dir
     out.mkdir(parents=True, exist_ok=True)
     stamp = (f"e2e_{args.suite}_{args.variant}_r{args.repeat_offset}-{args.repeat_offset + args.repeats - 1}_"
              f"{datetime.now():%Y-%m-%d_%H%M}")
+    live = out / f"{stamp}.partial.jsonl"
+    print(f"Rows are saved as they finish: {live}", flush=True)
+    try:
+        rows = run(items, args.variant, args.repeats, args.repeat_offset, live)
+    finally:
+        settings.daily_budget_usd = original_budget
     (out / f"{stamp}.json").write_text(json.dumps(rows, indent=1, default=str))
+    live.unlink(missing_ok=True)                            # the full report replaces the running file
     text = summary(rows)
     (out / f"{stamp}.md").write_text(text + "\n")
     print("\n" + text)

@@ -172,3 +172,48 @@ def result_problems(frame: pd.DataFrame, sql: str, filters: list[tuple[str, str]
         if values.min() < 0 and not MAY_BE_NEGATIVE.search(str(col)):
             problems.append(f"Column {col} has negative values (min {values.min():.3g}), which a rate cannot have.")
     return problems
+
+
+# ----------------------------------------------------------------------------- names that are not unique
+def label_grain_problems(sql: str, labels: dict[str, str] | None = None) -> list[str]:
+    """GROUP BY a name that several IDs share (product_name, campaign_name, sale_events.name, agent_name) merges
+    different things into one row. Grouping it together with its ID, or with another column of the same table
+    that tells the rows apart (an event's start_date), is fine. `labels`: 'table.column' -> id column."""
+    from .catalog import label_columns
+
+    labels = label_columns() if labels is None else labels
+    if not labels:
+        return []
+    try:
+        tree = sqlglot.parse_one(sql, read="duckdb")
+    except sqlglot.errors.ParseError:
+        return []
+    columns = {t: set(info.columns) for t, info in load_schema().tables.items()}
+    problems = []
+    for select in tree.find_all(exp.Select):
+        group = select.args.get("group")
+        if not group:
+            continue
+        sources = [select.args.get("from_").this] if select.args.get("from_") else []
+        sources += [j.this for j in select.args.get("joins") or []]
+        alias = {t.alias_or_name.lower(): t.name.lower() for t in sources if isinstance(t, exp.Table)}
+        single = next(iter(alias.values())) if len(alias) == 1 else None
+        grouped = []
+        for g in group.expressions:
+            if isinstance(g, exp.Literal) and g.is_int and int(g.this) <= len(select.selects):
+                g = select.selects[int(g.this) - 1]
+            g = g.this if isinstance(g, exp.Alias) else g
+            inner = list(g.find_all(exp.Column))           # CAST(e.start_date AS DATE), date_trunc(...)
+            g = inner[0] if len(inner) == 1 else g
+            if isinstance(g, exp.Column):
+                table = alias.get((g.table or "").lower()) if g.table else single or next(
+                    (t for t in alias.values() if g.name.lower() in columns.get(t, ())), None)
+                if table:
+                    grouped.append((table, g.name.lower()))
+        for table, column in grouped:
+            id_column = labels.get(f"{table}.{column}")
+            if id_column and not any((t == table and c != column) or c == id_column for t, c in grouped):
+                problems.append(f"{table}.{column} is not unique (several {id_column} values share a name), so "
+                                f"GROUP BY {column} merges different rows. Group by {table}.{id_column} and show "
+                                f"{column} as its label.")
+    return list(dict.fromkeys(problems))

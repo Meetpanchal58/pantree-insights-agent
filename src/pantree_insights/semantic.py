@@ -222,8 +222,18 @@ class Subject(BaseModel):
 
 
 class ConceptEntry(BaseModel):
-    column: str                                  # "table.column"
+    column: str                                  # "table.column" (the stored column; decides the join path)
     note: str | None = None
+    expression: str | None = None                # derived cut, e.g. COD vs Prepaid from payment_method
+
+    def sql(self) -> str:
+        return self.expression or self.column
+
+    def labels(self) -> list[str]:
+        """The values a derived cut can take ('COD', 'Prepaid'): the string literals its expression returns."""
+        if not self.expression:
+            return []
+        return list(dict.fromkeys(re.findall(r"(?:THEN|ELSE)\s+'([^']*)'", self.expression, re.I)))
 
 
 class ConceptInfo(BaseModel):
@@ -280,7 +290,34 @@ def _read(path: Path) -> dict:
 
 @lru_cache
 def load_concepts(folder: Path | None = None) -> Concepts:
-    return Concepts.model_validate(_read((folder or get_settings().semantic_dir) / "concepts.yaml"))
+    folder = folder or get_settings().semantic_dir
+    return Concepts.model_validate(with_catalog_concepts(_read(folder / "concepts.yaml"), folder))
+
+
+def with_catalog_concepts(raw: dict, folder: Path) -> dict:
+    """Every category or yes/no column of a subject's own table is a cut of that subject, even when concepts.yaml
+    does not list it (order status, cancel reason, list surface, colour ...): without it, a split by that column
+    would be silently dropped from the understanding, the read-back and the number check. Hand-written concepts
+    win; these only fill the gaps, named after the column."""
+    from .catalog import load_catalog  # catalog.py imports this module
+
+    catalog = load_catalog(folder)
+    if not catalog:
+        return raw
+    concepts = {name: dict(entries) for name, entries in (raw.get("concepts") or {}).items()}
+    info = dict(raw.get("concept_info") or {})
+    for subject, spec in (raw.get("subjects") or {}).items():
+        table = spec["table"]
+        mapped = {(e if isinstance(e, str) else e["column"]) for entries in concepts.values()
+                  for s, e in entries.items() if s == subject}
+        for column, entry in (catalog.get(table) or {}).get("columns", {}).items():
+            qualified = f"{table}.{column}"
+            if (entry["role"] not in ("category", "flag") or qualified in mapped
+                    or "not for analysis" in entry["meaning"]):
+                continue
+            concepts.setdefault(column, {})[subject] = {"column": qualified, "note": entry["meaning"]}
+            info.setdefault(column, {"label": column.replace("_", " "), "group": column})
+    return {**raw, "concepts": concepts, "concept_info": info}
 
 
 def load_library(folder: Path | None = None) -> list[Example]:

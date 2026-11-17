@@ -161,6 +161,9 @@ concepts:
     support: support_contacts.channel
   payment_method:
     orders: sales.payment_method
+  payment_type:
+    orders: {column: sales.payment_method, expression: "CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END",
+      note: COD versus prepaid (every method other than COD)}
   coupon:
     orders: sales.coupon_code
   # ---- product
@@ -242,6 +245,10 @@ concepts:
     reviews: product_reviews.aspect
   sentiment:
     reviews: product_reviews.sentiment
+  list_position:
+    listings: {column: impressions.position, note: 1 = first slot of the list; one row per position}
+  star_rating:
+    reviews: {column: product_reviews.rating, note: review stars 1-5}
 
 # Labels shown in clarifying questions, and groups: a value that fits concepts in DIFFERENT groups is
 # ambiguous ("Mumbai": a customer city, a seller's city, a warehouse, or a brand) and the user is asked;
@@ -264,6 +271,7 @@ concept_info:
   campaign: {label: campaign, group: marketing}
   support_channel: {label: support channel (how the customer contacted us), group: support}
   payment_method: {label: payment method, group: payment}
+  payment_type: {label: payment type (COD or prepaid), group: payment}
   coupon: {label: coupon code, group: payment}
   category: {label: product category, group: product}
   sub_category: {label: product sub-category, group: product}
@@ -282,6 +290,8 @@ concept_info:
   issue: {label: support issue, group: support}
   review_aspect: {label: review aspect, group: reviews}
   sentiment: {label: review sentiment, group: reviews}
+  list_position: {label: position in the list, group: listing}
+  star_rating: {label: review star rating, group: reviews}
 
 # Words for identifiers: "order 12345" -> sales.order_id = 'OD000012345' (format measured by pantree-profile).
 id_entities:

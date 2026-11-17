@@ -203,16 +203,17 @@ queries:
     verify:
     - metric: marketing_spend
       column: spend
-      by: {sale_event: sale_events.name, channel_group: campaigns.channel_group}
+      by: {sale_event: sale_events.name, start_date: CAST(sale_events.start_date AS DATE),
+           channel_group: campaigns.channel_group}
     sql: |
-      SELECT e.name AS sale_event, cp.channel_group,
+      SELECT e.name AS sale_event, CAST(e.start_date AS DATE) AS start_date, cp.channel_group,
              SUM(m.spend) AS spend,
-             SUM(m.spend) / SUM(SUM(m.spend)) OVER (PARTITION BY e.name) AS share_of_event_spend
+             SUM(m.spend) / SUM(SUM(m.spend)) OVER (PARTITION BY e.event_id) AS share_of_event_spend
       FROM marketing_spend m
       JOIN campaigns cp ON cp.campaign_id = m.campaign_id
       JOIN sale_events e ON e.event_id = cp.event_id
-      GROUP BY 1, 2
-      ORDER BY 1, spend DESC
+      GROUP BY e.event_id, 1, 2, 3
+      ORDER BY 2, spend DESC
     notes: Spend is linked to an event through the campaign that was run for it.
 
   - id: lib-mkt-11
@@ -325,11 +326,11 @@ queries:
     tags: [promotions, events]
     metrics: []
     sql: |
-      SELECT e.name AS sale_event, pr.offer_type,
+      SELECT e.name AS sale_event, CAST(e.start_date AS DATE) AS start_date, pr.offer_type,
              COUNT(*) AS coupons,
              AVG(pr.value) AS avg_offer_value,
              MAX(pr.max_discount) AS largest_max_discount,
              AVG(pr.min_order_value) AS avg_min_order_value
       FROM promotions pr JOIN sale_events e ON e.event_id = pr.event_id
-      GROUP BY 1, 2
-      ORDER BY 1, coupons DESC
+      GROUP BY 1, 2, 3
+      ORDER BY 2, coupons DESC
