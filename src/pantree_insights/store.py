@@ -165,9 +165,11 @@ class Store:
             c.execute(stmt)
 
     # ------------------------------------------------------------------ run tracking and opt-in feedback
-    def create_run(self, run_id: str, user_id: str, chat_id: str, question: str) -> None:
+    def create_run(self, run_id: str, user_id: str, chat_id: str, question: str,
+                   snapshot: str | None = None) -> None:
         self._exec(insert(run_records).values(id=run_id, user_id=user_id, chat_id=chat_id,
-                                               question=question, status="running", events=[]))
+                                               question=question, status="running", events=[],
+                                               summary={"snapshot": snapshot}))
 
     def save_run(self, run_id: str, status: str, events: list[dict], summary: dict | None = None) -> None:
         values = {"status": status, "events": to_json(events), "updated_at": _now()}

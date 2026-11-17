@@ -148,7 +148,7 @@ class Runner:
                                           use_defaults=use_defaults, memory=scope)
         run = Run(run_id, user, chat, question, agent=agent)
         self.runs[run_id] = run
-        store.create_run(run_id, user["id"], chat["id"], question)
+        store.create_run(run_id, user["id"], chat["id"], question, snapshot=snapshot_signature())
         self._consume(store, run, events)
         return run
 
@@ -159,6 +159,15 @@ class Runner:
             return run
         saved = store.run_record(user["id"], run_id)
         if not saved or saved["status"] != "paused":
+            return None
+        if get_settings().checkpoint_backend != "postgres":
+            # An InMemorySaver checkpoint cannot survive a process restart.
+            store.save_run(run_id, "interrupted", saved.get("events") or [])
+            return None
+        old_snapshot = (saved.get("summary") or {}).get("snapshot")
+        if old_snapshot and old_snapshot != snapshot_signature():
+            store.save_run(run_id, "interrupted", saved.get("events") or [],
+                           {"reason": "The dataset changed during a paused analysis"})
             return None
         chat = store.chat(user["id"], saved["chat_id"])
         if chat is None:
@@ -333,7 +342,8 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "Chat not found")
         pending = store.pending_run(user["id"], chat_id)
         active = runner.runs.get(pending["id"]) if pending else None
-        resumable = bool(active or (pending and pending["status"] == "paused"))
+        resumable = bool(active or (pending and pending["status"] == "paused"
+                                    and settings.checkpoint_backend == "postgres"))
         if pending and not resumable:
             store.save_run(pending["id"], "interrupted", pending.get("events") or [],
                            {"reason": "The service restarted while a model call was active"})
