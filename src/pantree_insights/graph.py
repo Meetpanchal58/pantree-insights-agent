@@ -29,8 +29,8 @@ from langgraph.types import Command, interrupt
 from . import agents
 from .charts import build_chart
 from .checkpoint import build_checkpointer
-from .compiler import compile_metric_query
 from .checks import result_problems
+from .compiler import compile_metric_query
 from .config import get_settings
 from .db import QueryTimeout, connect, manifest, run_query, snapshot_signature
 from .grounding import verify
