@@ -108,6 +108,36 @@ def failure_details(error: Exception) -> dict:
             "error_code": "analysis_failed", "retryable": True}
 
 
+def run_telemetry(run: Run, final: dict) -> dict:
+    starts: dict[str, float] = {}
+    step_seconds: dict[str, float] = {}
+    step_retries: dict[str, int] = {}
+    for event in run.events:
+        if event.get("type") != "step":
+            continue
+        step, status, at = event.get("step"), event.get("status"), event.get("t")
+        if not step or not isinstance(at, (int, float)):
+            continue
+        if status == "started":
+            starts[step] = at
+        elif step in starts:
+            step_seconds[step] = round(step_seconds.get(step, 0.0) + max(0.0, at - starts.pop(step)), 3)
+        if status == "retry":
+            step_retries[step] = step_retries.get(step, 0) + 1
+    return {
+        "event": "analysis_run",
+        "run_id": run.id,
+        "status": final.get("status"),
+        "seconds": round(time.time() - run.started, 3),
+        "attempts": final.get("attempts") or 0,
+        "cost_usd": (final.get("cost") or {}).get("usd", 0.0),
+        "verification": (final.get("verification") or {}).get("status"),
+        "step_seconds": step_seconds,
+        "step_retries": step_retries,
+        "error_code": final.get("error_code"),
+    }
+
+
 class Runner:
     """Owns active workers while durable graph/run state lives in Postgres."""
 
@@ -205,9 +235,7 @@ class Runner:
         if final.get("cost"):
             store.add_cost(run.user["id"], final["cost"].get("usd", 0.0))
         store.update_run(run.id, status="finished", events=run.events)
-        log.info("analysis_run run_id=%s status=%s seconds=%.2f attempts=%s cost_usd=%s verification=%s",
-                 run.id, final.get("status"), time.time() - run.started, final.get("attempts"),
-                 (final.get("cost") or {}).get("usd", 0.0), (final.get("verification") or {}).get("status"))
+        log.info("%s", json.dumps(run_telemetry(run, final), sort_keys=True))
         run.agent = None
 
 
