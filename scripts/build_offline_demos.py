@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from pantree_insights.config import ROOT, get_settings
+from pantree_insights.config import ROOT
 from pantree_insights.db import connect, manifest, run_query
 from pantree_insights.guardrails import check_sql
 
@@ -27,7 +27,7 @@ def change(new, old):
 
 
 def build():
-    settings, info, con = get_settings(), manifest(), connect()
+    info, con = manifest(), connect()
     start, end = "2026-01-01", info["last_day"]
     # Date bounds are explicit in these three questions, independent of moving wall-clock time.
     period = f"1 January 2026 to {end}"
@@ -80,16 +80,24 @@ def build():
             {"type": "step", "step": "understand", "status": "done",
              "detail": {"resolved": question}},
             {"type": "step", "step": "plan", "status": "done",
-             "detail": {"plan": "Use the documented metric definitions and the pinned date range; aggregate only the business grain requested."}},
+             "detail": {"plan": (
+                 "Use the documented metric definitions and the pinned date range; "
+                 "aggregate only the business grain requested."
+             )}},
             {"type": "step", "step": "write_sql", "status": "done",
-             "detail": {"attempt": 1, "sql": verdict.sql, "explanation": "Saved, guardrail-validated SQL used to make this demo reproducible."}},
+             "detail": {"attempt": 1, "sql": verdict.sql, "explanation": (
+                 "Saved, guardrail-validated SQL used to make this demo reproducible."
+             )}},
             {"type": "step", "step": "check_sql", "status": "done",
              "detail": {"reason": "Read-only SQL, approved tables/columns and approved joins."}},
             {"type": "step", "step": "run_query", "status": "done",
              "detail": {"rows": len(result.frame), "columns": list(result.frame.columns),
                         "query_seconds": round(result.seconds, 3), "truncated": result.truncated}},
             {"type": "step", "step": "analyse", "status": "done",
-             "detail": {"reason": "Findings below are derived from the saved result table; they are not a live LLM response."}},
+             "detail": {"reason": (
+                 "Findings below are derived from the saved result table; "
+                 "they are not a live LLM response."
+             )}},
             {"type": "step", "step": "chart", "status": "done",
              "detail": {"reason": analysis["chart_title"]}},
             final,
@@ -207,11 +215,17 @@ def build():
             ],
             "recommendations": [
                 "Review stock, margin and return rate for the category leaders before increasing inventory.",
-                "Use the category-aware product view to avoid a single category dominating every product recommendation.",
+                (
+                    "Use the category-aware product view to avoid a single category dominating "
+                    "every product recommendation."
+                ),
             ],
             "caveats": [
                 "Product rows are category leaders within the top five brands, not the global top-five products.",
-                "One order can contain several brands/products. Stored brand spelling is preserved; simulated revenue is not profit.",
+                (
+                    "One order can contain several brands/products. Stored brand spelling is preserved; "
+                    "simulated revenue is not profit."
+                ),
             ],
             "chart_title": "Top five brands by realized revenue",
         }
