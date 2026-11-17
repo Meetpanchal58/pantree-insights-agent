@@ -169,6 +169,12 @@ class Resolution:
         return "\n".join(lines)
 
 
+def _numeric(graph: JoinGraph, column: str) -> bool:
+    table, _, name = column.partition(".")
+    kind = graph.schema.tables.get(table).columns.get(name, "") if table in graph.schema.tables else ""
+    return kind.split(" - ")[0].strip() in ("number", "integer")
+
+
 def _plain(text: str) -> str:
     """'Sale-event days' -> 'sale event day': case, hyphens and plurals do not change a label."""
     return " ".join(w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
@@ -198,7 +204,10 @@ def _find_value(text: str, value_columns: dict[str, list[str]], aliases: dict[st
     if len(matches) > 1:
         return None
     alias = aliases.get(text.casefold())
-    return alias if alias in value_columns else None
+    if alias in value_columns:
+        return alias
+    plain = [v for v in value_columns if _plain(v) == _plain(text)]   # 'organic search' -> organic_search
+    return plain[0] if len(plain) == 1 else None
 
 
 def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str, list[str]],
@@ -274,6 +283,12 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
                         notes.append(note)
                 continue
             value = _find_value(mention.text, value_columns, aliases)
+            entry_now = concepts.column(mention.concept, name)
+            numeric = entry_now and not entry_now.expression and _numeric(graph, entry_now.column)
+            if value is None and (numeric or (re.search(r"\d", mention.text) and mention.concept == "other")):
+                notes.append(f"'{mention.text}' is a numeric condition"
+                             + (f" on {entry_now.column}" if numeric else "") + ": apply it as stated")
+                continue                                    # "top 5 positions": a range, not a stored value
             term = _term(mention.text, terms)
             if value is None and term:                      # business vocabulary, not a stored value
                 notes.append(f"'{term[0]}' is a business term: {term[1]}")

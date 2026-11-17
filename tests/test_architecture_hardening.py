@@ -194,3 +194,17 @@ def test_query_filters_the_scope_does_not_know_make_the_check_unverified():
            "GROUP BY 1")
     assert extra_filter_columns(sql, {"date_hour"}) == {"channel_group"}
     assert not extra_filter_columns(sql, {"date_hour", "channel_group"})
+
+
+def test_code_like_values_and_numeric_conditions_need_no_question():
+    values = {**VALUES, "home_recs": ["impressions.surface"], "organic_search": ["sales.traffic_source"]}
+    f = frame(subjects=["listings"], measures=["ctr"], breakdowns=["list_position"],
+              mentions=[Mention(text="home page recommendations", concept="surface"),
+                        Mention(text="top 5 positions", concept="list_position")])
+    res = resolve(f, CONCEPTS, GRAPH, values, [], {}, {"home page recommendations": "home_recs"}, TERMS)
+    assert not res.open_points
+    assert [(x.column, x.value) for x in res.subjects[0].filters] == [("impressions.surface", "home_recs")]
+    assert any("numeric condition" in n for n in res.notes)
+    plain = resolve(frame(subjects=["orders"], mentions=[Mention(text="organic search", concept="traffic_source")]),
+                    CONCEPTS, GRAPH, values, [], {}, {}, TERMS)
+    assert plain.subjects[0].filters[0].value == "organic_search"

@@ -36,6 +36,10 @@ value_aliases:
   Fit Issue: [bad fit, does not fit]
   Out of Stock: [stockout, stock out, sold out]
   Prime: [prime members, loyalty members, paid members]
+  home_recs: [home page recommendations, homepage recommendations, home recommendations, recommended on home]
+  plp: [product listing page, listing page, category page, product lists]
+  search_results: [search result page, search page]
+  pdp_similar: [similar products, similar items, more like this]
 
 terms:
   GMV: Gross merchandise value = gross_sales (everything ordered at selling price, before coupons and returns).
