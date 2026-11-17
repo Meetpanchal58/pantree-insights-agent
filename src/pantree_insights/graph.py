@@ -286,7 +286,7 @@ class Agent:
                          "metric_names": context.metrics}
         else:
             refreshed = {}
-        text = res.to_prompt()
+        text = res.to_prompt(period=frame.period)
         filters = [[f.column, f.value] for v in res.subjects for f in v.filters] + \
                   [[i.column, i.value] for v in res.subjects for i in v.id_filters]
         columns = {c for v in res.subjects for c in [v.time_column, *(c for _, c in v.breakdowns),
@@ -316,7 +316,7 @@ class Agent:
                "resolved_filters": filters, "references": self.references.render(refs),
                "answers": answers, "choices": choices, "open_points": [], "warnings": warnings, "route": "plan"}
         detail = {"understood": frame.restated_question, "rounds": rounds, "subjects": [v.name for v in res.subjects],
-                  "notes": res.notes, "resolved": text, "references": [e.id for e in refs]}
+                  "notes": res.notes, "resolved": text, "references": [e.id for e in refs], "verify_scope": scope}
         # read back what will be computed and wait for the user's confirmation (defaults: confirmed automatically)
         if not state.get("use_defaults") and not state.get("confirmed") and res.subjects:
             if rounds < MAX_CLARIFY_ROUNDS:

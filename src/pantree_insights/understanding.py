@@ -94,6 +94,7 @@ class SubjectView:
     breakdowns: list[tuple[str, str]] = field(default_factory=list)      # (concept, column)
     id_filters: list[IdMatch] = field(default_factory=list)
     joins: str = ""
+    event_required: bool = False
 
 
 @dataclass
@@ -124,14 +125,20 @@ class Resolution:
             out += [i.column.split(".")[0] for i in s.id_filters]
         return list(dict.fromkeys(out))
 
-    def to_prompt(self) -> str:
+    def to_prompt(self, period: str | None = None) -> str:
         if not self.subjects:
             return ""
         lines = ["Resolved in code from the data and the concept map. Follow it exactly."]
+        if period:
+            lines.append(f"Period: {period}")
+            if period.strip().lower() == "all data":
+                lines.append("All data means no date bounds; do not substitute the manifest's first/last day.")
         for s in self.subjects:
             where = f"; always filter {s.where}" if s.where else ""
             lines.append(f"\nSubject: {s.name} (table {s.table}{where})")
             lines.append(f"Time column: {s.time_column} ({s.time_label})")
+            if s.event_required:
+                lines.append(f"Required event filter: {s.time_column} IS NOT NULL (also for all data)")
             for f in s.filters:
                 lines.append(f"Filter: {f.column} = '{f.value}'  (\"{f.text}\" = {f.concept.replace('_', ' ')})")
             for i in s.id_filters:
@@ -186,7 +193,8 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
         label = next((k for k, v in subj.time_meanings.items() if v == time_column), "date") if time_column \
             else "date"
         view = SubjectView(name, subj.table, subj.where, time_column, f"{name} by the date they were {label}"
-                           if subj.time_meanings else f"{name} by {time_column.split('.')[1]}")
+                           if subj.time_meanings else f"{name} by {time_column.split('.')[1]}",
+                           event_required=time_column != subj.time)
 
         for mention in frame.mentions:
             if mention.concept in ("id", "metric", "period"):    # "other" = the LLM was unsure: resolve it here

@@ -519,6 +519,32 @@ def test_happy_path_numbers_are_verified_against_the_data(con, retriever, tmp_pa
     assert final["verification"] == {"status": "verified", "metrics": {"realized_revenue": "verified"}}
 
 
+@pytest.mark.parametrize("milestone", [None, "shipped", "delivered"])
+def test_all_time_city_counts_verify_for_the_selected_milestone(con, retriever, tmp_path, milestone):
+    frame = {"restated_question": "Count orders by city across all dates", "subjects": ["orders"],
+             "measures": ["orders"], "breakdowns": ["city"], "period": "all data", "time_meaning": milestone,
+             "mentions": [{"text": city, "concept": "city"} for city in ("Mumbai", "Pune")]}
+    sql = ("SELECT ship_city, COUNT(DISTINCT order_id) AS orders FROM sales "
+           "WHERE line_type = 'Sale' AND ship_city IN ('Mumbai', 'Pune')")
+    if milestone:
+        sql += f" AND {milestone}_at IS NOT NULL"
+    sql += " GROUP BY 1"
+    agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(
+        understander=[frame], planner=[{**PLAN, "metrics": ["orders"], "breakdowns": ["city"]}],
+        sql_writer=[{"sql": sql, "explanation": "Count the selected orders by city"}],
+        validator=[{"ok": True}], analyst=[{"headline": "Order counts by city.", "findings": []}]))
+    _, events = run(agent, "Count orders by city across all dates", use_defaults=True)
+    final = events[-1]
+    assert final["status"] == "done", final
+    assert final["attempts"] == 1 and final["verification"]["status"] == "verified"
+    prompt = next(u for a, _, u in fakes[0].prompts if a == "sql_writer")
+    assert "All data means no date bounds" in prompt
+    if milestone:
+        assert f"Required event filter: sales.{milestone}_at IS NOT NULL" in prompt
+    understood = next(e for e in events if e.get("step") == "understand" and e.get("status") == "done")
+    assert understood["detail"]["verify_scope"]["period"] is None
+
+
 def test_numbers_that_disagree_with_the_definition_are_sent_back(con, retriever, tmp_path):
     """Forgetting to exclude cancelled lines: the recomputation disagrees, the writer gets the numbers."""
     agent, fakes, _ = make_agent(con, retriever, tmp_path, Script(

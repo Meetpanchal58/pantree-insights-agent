@@ -144,7 +144,8 @@ def judge(con, item: dict, final: dict, events: list[dict]) -> dict:
         return {**out, "passed": True, "reason": "answered", "failure_type": None}
     if status != "done" or not final.get("sql"):
         message = final.get("message") or ""
-        kind = "sql_error" if "Database error" in message or "attempts" in message else "no_sql"
+        kind = "verification_mismatch" if "(number check)" in message else (
+            "sql_error" if "Database error" in message or "attempts" in message else "no_sql")
         return {**out, "passed": False, "reason": f"no answer ({status}: {message})"[:200], "failure_type": kind}
     gold, keys, metrics = gold_frame(con, item)
     agent = trim_top_n(run_query(con, final["sql"]).frame, gold, item["gold_sql"], item.get("question", ""))
@@ -217,8 +218,12 @@ def _run(items: list[dict], variant: str, repeats: int, offset: int, memory_dir:
                    "set": item["set"], "expect": item["expect"], "difficulty": item.get("difficulty"),
                    "tuned": bool(item.get("tuned_on")), "question": item["question"],
                    "seconds": round(time.time() - started, 1), "status": final.get("status") or final["type"],
+                   "message": final.get("message"),
                    "cost": (final.get("cost") or {}).get("usd", 0.0), "attempts": final.get("attempts") or 0,
                    "sql": final.get("sql"), "warnings": final.get("warnings", []),
+                   "diagnostics": [e for e in events if e.get("type") == "step"
+                                   and e.get("step") in {"understand", "plan", "write_sql", "check_sql", "run_query"}
+                                   and e.get("status") != "started"],
                    "grounded": final.get("grounded"), "claims": (final.get("analysis") or {}).get("claims"),
                    "context_tables": (writes[0].get("detail") or {}).get("context_tables") if writes else None,
                    "required_tables": item.get("required_tables")}

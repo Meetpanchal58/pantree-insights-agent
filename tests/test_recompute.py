@@ -41,6 +41,38 @@ def test_left_joins_keep_rows_without_a_partner():
     assert "LEFT JOIN product_reviews ON" in sql
 
 
+def test_shipment_event_and_destination_counts_use_different_populations():
+    """All-time means no bounds: keep shipments outside order-date coverage, exclude unshipped orders."""
+    import duckdb
+
+    con = duckdb.connect()
+    try:
+        con.execute("""CREATE TABLE sales AS SELECT * FROM (VALUES
+            ('A', 'Sale', 'Mumbai', TIMESTAMP '2025-01-01', TIMESTAMP '2026-11-18'),
+            ('B', 'Sale', 'Mumbai', TIMESTAMP '2025-01-02', NULL),
+            ('C', 'Exchange', 'Mumbai', TIMESTAMP '2025-01-02', TIMESTAMP '2026-11-18'),
+            ('D', 'Sale', 'Pune', TIMESTAMP '2025-01-03', TIMESTAMP '2026-11-14'),
+            ('E', 'Sale', 'Delhi', TIMESTAMP '2025-01-03', TIMESTAMP '2026-11-14')
+        ) AS t(order_id, line_type, ship_city, placed_at, shipped_at)""")
+        options = {"by": ["sales.ship_city"], "filters": [("sales.ship_city", "Mumbai"),
+                                                          ("sales.ship_city", "Pune")]}
+        shipped = canonical_sql("orders", GRAPH, time_column="sales.shipped_at", **options)
+        destination = canonical_sql("orders", GRAPH, **options)
+        counts = lambda sql: dict(con.execute(sql).fetchall())  # noqa: E731
+        assert counts(shipped) == {"Mumbai": 1, "Pune": 1}
+        assert counts(destination) == {"Mumbai": 2, "Pune": 1}
+        from run_eval import load_suite
+
+        cases = {item["id"]: item for item in load_suite("flow")}
+        assert counts(cases["flow-values"]["gold_sql"]) == {"Mumbai": 1, "Pune": 1}
+        assert counts(cases["flow-destinations"]["gold_sql"]) == {"Mumbai": 2, "Pune": 1}
+        bounded = canonical_sql("orders", GRAPH, time_column="sales.shipped_at",
+                                period=("2026-11-14", "2026-11-14"), **options)
+        assert counts(bounded) == {"Pune": 1}
+    finally:
+        con.close()
+
+
 @pytest.mark.data
 @pytest.mark.parametrize(("example", "metric", "by"), [
     ("e06", "realized_revenue", []),

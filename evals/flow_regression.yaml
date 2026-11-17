@@ -71,7 +71,25 @@ questions:
     tuned_on: true
     author: self
     question: Count orders shipped to Mumbai or Pune, separately for each city, across all available dates.
-    intent: selected cities are alternatives, not mutually exclusive equalities
+    intent: selected cities are alternatives, and shipped orders require a shipment event
+    required_tables: [sales]
+    required_metrics: [orders]
+    required_joins: []
+    filter_values: [{value: Mumbai, column: sales.ship_city}, {value: Pune, column: sales.ship_city}]
+    result_grain: one row per ship_city
+    key_columns: [ship_city]
+    metric_columns: [orders]
+    gold_sql: |
+      SELECT ship_city, COUNT(DISTINCT order_id) AS orders
+      FROM sales WHERE line_type='Sale' AND ship_city IN ('Mumbai', 'Pune')
+        AND shipped_at IS NOT NULL GROUP BY 1
+
+  - id: flow-destinations
+    expect: answer
+    tuned_on: true
+    author: self
+    question: Count orders whose delivery city is Mumbai or Pune, separately for each city, across all available dates, whether or not they have shipped.
+    intent: destination cities alone must not exclude orders without shipment events
     required_tables: [sales]
     required_metrics: [orders]
     required_joins: []
