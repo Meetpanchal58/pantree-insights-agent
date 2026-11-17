@@ -140,7 +140,9 @@ class Context:
         if self.terms:
             terms = "\n".join(f"- {t}: {m}" for t, m in self.terms.items())
             parts.append("## Business terms in the question\n" + terms)
-        parts.append("## Tables\n" + schema.describe(self.tables))
+        from .catalog import describe as describe_tables
+        parts.append("## Tables (meaning of every column; values, formats and ranges from the data)\n"
+                     + describe_tables(self.tables, schema=schema))
         if self.joins:
             parts.append("## How these tables join\n" + "\n".join(f"- {j}" for j in self.joins))
         if self.metrics:
