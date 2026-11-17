@@ -234,7 +234,7 @@ uv run pantree-web                            # the app at http://127.0.0.1:8000
 ```
 
 ```bash
-uv run pantree-demo record "Why are footwear returns so high?"   # save a run visitors can replay
+DATA_SIZE=small uv run python scripts/build_offline_demos.py   # rebuild the four saved demos; no model calls
 ```
 
 ```bash
@@ -341,8 +341,21 @@ npx playwright install chromium
 node tests/frontend.cjs
 ```
 
-Recorded answers use `/api/demos/{name}/stream?instant=true` to skip replay pauses.
-The existing stream endpoint without that parameter retains animated timing.
+The home screen has exactly four offline demos: Diwali sale comparison, brand/product sales,
+conversion funnel, and marketing spend/last-click ROAS. Results come from the pinned sample snapshot,
+with readable questions, SQL, findings, recommendations and limitations. They are bundled in
+`static/offline-demos.js`; clicking a demo makes no model, chat API, SSE or chart-CDN requests. Once the
+page assets are loaded, playback and Copy/PNG/CSV/SQL exports work without network access. Demo playback
+does not write chat history or memory and cannot silently submit a live follow-up. Use New chat for live questions.
+The original demo stream endpoint remains available for API clients.
+
+The app renders the demos before waiting for sign-in/chat services. Safe GET requests retry transient
+HTTP 429/502/503/504 responses at most twice within the existing request timeout, respecting Retry-After.
+Long cooldowns show a disabled retry button instead of sending requests early. Recent chats are cached
+briefly, and failed refreshes preserve cached conversations. Paid POST requests are never retried automatically.
+Application responses include X-Request-ID; app-generated 429/503/504 responses log `request_busy` with
+that reference. Upstream/Cloud Run failures can happen before the app and still require platform logs;
+these recovery changes do not increase provider quotas or Cloud Run capacity.
 
 ### Validate changes before rollout
 

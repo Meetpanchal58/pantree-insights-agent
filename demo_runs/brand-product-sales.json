@@ -1,0 +1,197 @@
+{
+  "slug": "brand-product-sales",
+  "topic": "Brand and product sales",
+  "question": "Which five brands and five products generated the most realized revenue from 1 January 2026 to 2026-11-16, and how concentrated were brand sales?",
+  "order": 2,
+  "data_size": "small",
+  "data_as_of": "2026-11-16",
+  "seconds": 0,
+  "offline": true,
+  "provenance": {
+    "manifest": {
+      "size": "small",
+      "seed": 42,
+      "first_day": "2025-01-01",
+      "last_day": "2026-11-16",
+      "package_version": "1.0.0",
+      "n_products": 1500,
+      "n_sellers": 80,
+      "traffic_scale": 0.17,
+      "daily_new_visitors": 30.0
+    },
+    "sql_sha256": "b3f59820b06d9813b6629379232070347fa878a0cb0cc8abae882aa502aab77b"
+  },
+  "events": [
+    {
+      "type": "step",
+      "step": "offline_demo",
+      "status": "done",
+      "detail": {
+        "understood": "Which five brands and five products generated the most realized revenue from 1 January 2026 to 2026-11-16, and how concentrated were brand sales?",
+        "reason": "Saved SQL results and editorial insights; no live model was run."
+      }
+    },
+    {
+      "type": "final",
+      "status": "done",
+      "question": "Which five brands and five products generated the most realized revenue from 1 January 2026 to 2026-11-16, and how concentrated were brand sales?",
+      "replay": true,
+      "sql": "WITH lines AS (\n  SELECT\n    p.brand_name,\n    p.product_id,\n    p.product_name,\n    s.order_id,\n    CASE\n      WHEN NOT s.delivered_at IS NULL\n      THEN s.net_amount - COALESCE(s.refund_amount, 0)\n      ELSE 0\n    END AS revenue\n  FROM sales AS s\n  JOIN product_master AS p\n    ON p.product_id = s.product_id\n  WHERE\n    s.line_type = 'Sale'\n    AND s.placed_at >= CAST('2026-01-01' AS TIMESTAMP)\n    AND s.placed_at < CAST('2026-11-16' AS DATE) + INTERVAL '1' DAY\n), ranked AS (\n  SELECT\n    'Brand' AS view,\n    brand_name,\n    NULL AS product_id,\n    NULL AS product_name,\n    SUM(revenue) AS realized_revenue,\n    COUNT(DISTINCT order_id) AS orders,\n    ROW_NUMBER() OVER (ORDER BY SUM(revenue) DESC, brand_name) AS position\n  FROM lines\n  GROUP BY\n    brand_name\n  UNION ALL\n  SELECT\n    'Product',\n    brand_name,\n    product_id,\n    product_name,\n    SUM(revenue),\n    COUNT(DISTINCT order_id),\n    ROW_NUMBER() OVER (ORDER BY SUM(revenue) DESC, product_id)\n  FROM lines\n  GROUP BY\n    brand_name,\n    product_id,\n    product_name\n)\nSELECT\n  view,\n  brand_name,\n  product_id,\n  product_name,\n  realized_revenue,\n  orders,\n  position,\n  (\n    SELECT\n      SUM(revenue)\n    FROM lines\n  ) AS total_revenue\nFROM ranked\nWHERE\n  position <= 5\nORDER BY\n  view,\n  position",
+      "result": {
+        "columns": [
+          "view",
+          "brand_name",
+          "product_id",
+          "product_name",
+          "realized_revenue",
+          "orders",
+          "position",
+          "total_revenue"
+        ],
+        "data": [
+          [
+            "Brand",
+            "Puma",
+            null,
+            null,
+            1121800.1099999994,
+            919,
+            1,
+            16858972.789999913
+          ],
+          [
+            "Brand",
+            "Nike",
+            null,
+            null,
+            750470.9299999996,
+            579,
+            2,
+            16858972.789999913
+          ],
+          [
+            "Brand",
+            "Catwalk",
+            null,
+            null,
+            644077.2799999994,
+            379,
+            3,
+            16858972.789999913
+          ],
+          [
+            "Brand",
+            "United",
+            null,
+            null,
+            545676.6399999998,
+            534,
+            4,
+            16858972.789999913
+          ],
+          [
+            "Brand",
+            "ADIDAS",
+            null,
+            null,
+            494709.51,
+            482,
+            5,
+            16858972.789999913
+          ],
+          [
+            "Product",
+            "HM",
+            "P000166",
+            "HM Women Black Heels",
+            236419.2100000001,
+            143,
+            1,
+            16858972.789999913
+          ],
+          [
+            "Product",
+            "U.S.",
+            "P001419",
+            "U.S. Polo Assn. Men Printed Ivory Tshirt",
+            205537.5,
+            217,
+            2,
+            16858972.789999913
+          ],
+          [
+            "Product",
+            "Myntra",
+            "P001216",
+            "Myntra Men Grey T-shirt",
+            169472.0,
+            318,
+            3,
+            16858972.789999913
+          ],
+          [
+            "Product",
+            "Lee",
+            "P001005",
+            "Lee Men's Ten Minutes to Midnight T-shirt",
+            168429.77,
+            130,
+            4,
+            16858972.789999913
+          ],
+          [
+            "Product",
+            "Gini",
+            "P000516",
+            "Gini and Jony Boys Printed Red T-shirt",
+            165829.06,
+            118,
+            5,
+            16858972.789999913
+          ]
+        ]
+      },
+      "analysis": {
+        "headline": "Puma leads brand revenue; the top five brands contribute 21.1% of realized revenue.",
+        "findings": [
+          "Puma generated Rs 1,121,800 from 919 distinct orders containing that brand.",
+          "The leading product was HM Women Black Heels (HM), with Rs 236,419 and 143 orders.",
+          "The top five brands produced Rs 3,556,734 of the shop's Rs 16,858,973 realized revenue in the period."
+        ],
+        "recommendations": [
+          "Prioritize availability checks for the leading products, then assess margin and return rates before increasing stock.",
+          "Monitor concentration in the leading brands and test alternative brands rather than assuming revenue leaders are the most profitable."
+        ],
+        "caveats": [
+          "Brand and product rankings are separate views; do not add their revenue or order counts together.",
+          "One order can contain several brands/products. Exact stored brand spelling is preserved; simulated revenue does not establish demand or profit."
+        ],
+        "chart_title": "Top five brands by realized revenue"
+      },
+      "chart": {
+        "kind": "offline_bar",
+        "title": "Top five brands by realized revenue",
+        "metric": "realized_revenue",
+        "labels": [
+          "Puma",
+          "Nike",
+          "Catwalk",
+          "United",
+          "ADIDAS"
+        ],
+        "values": [
+          1121800.1099999994,
+          750470.9299999996,
+          644077.2799999994,
+          545676.6399999998,
+          494709.51
+        ]
+      },
+      "data_as_of": "2026-11-16",
+      "data_size": "small",
+      "attempts": 1,
+      "warnings": [],
+      "offline": true
+    }
+  ]
+}

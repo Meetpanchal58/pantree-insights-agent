@@ -47,14 +47,35 @@ const path = require('node:path');
     await page.evaluate(()=>{openChat('A');openChat('B');});
     await page.waitForTimeout(400);
     assert.deepEqual(await page.evaluate(()=>[S.chatId,$('#chat-title').textContent,$('#messages').innerText]),['B','B','Message B']);
-    // A revisit shows cached content immediately, but still fetches fresh history.
+    // A recent completed chat uses the cache without another server read.
+    const chatReads=requests.filter(x=>x==='/api/chats/B').length;
     await page.evaluate(()=>{openChat('B');});
     assert.equal(await page.locator('#messages').innerText(),'Message B');
+    assert.equal(requests.filter(x=>x==='/api/chats/B').length,chatReads);
     await page.evaluate(()=>{openChat('A');renderWelcome();});
     await page.waitForTimeout(350);
     assert.equal(await page.locator('#chat-title').innerText(),'New chat');
-    await page.locator('[data-action="replay"]').click();
-    assert(await page.evaluate(()=>streams.at(-1).url.endsWith('?instant=true')));
+    assert.equal(await page.locator('[data-action="replay"]').count(),4);
+    assert.equal(await page.locator('[data-action="example"]').count(),0);
+    const beforeOffline=requests.length;
+    await page.context().setOffline(true);
+    for (let i=0;i<4;i++) {
+      const expected=await page.evaluate(i=>PANTREE_DEMOS[i].question,i);
+      await page.locator('[data-action="replay"]').nth(i).click();
+      assert.equal(await page.locator('#panel-sub').innerText(),expected);
+      assert.equal(await page.locator('#offline-chart').count(),1);
+      assert.equal(await page.locator('#messages .answer').count(),1);
+      assert.equal(await page.locator('#question').isDisabled(),true);
+      assert.equal(await page.locator('[data-kind="ppt"]').count(),0);
+      assert.match(await page.evaluate(()=>chartPng()),/^data:image\/png;base64,/);
+      await page.locator('.new-chat').click();
+    }
+    await page.context().setOffline(false);
+    assert.equal(requests.length,beforeOffline,'offline playback must make no network requests');
+    assert.equal(await page.evaluate(()=>streams.length),0,'offline playback must not open SSE');
+    const longQuestion='Which five brands and five products generated the most realized revenue during the selected sale period, and how concentrated were brand sales?';
+    await page.evaluate(q=>streamRun('sample',0,null,q),longQuestion);
+    assert.equal(await page.locator('#panel-sub').innerText(),longQuestion);
     await page.locator('.new-chat').click();
     await page.evaluate(()=>streams.at(-1).emit({type:'step',step:'plan',status:'started'}));
     assert.deepEqual(await page.evaluate(()=>[streams.at(-1).closed,S.busy,S.run]),[true,false,null]);
@@ -102,26 +123,67 @@ const path = require('node:path');
     assert.equal(await page.locator('#steps .dot').innerText(),'✓');
     // Both JSON and HTML errors must leave the shell usable with a visible recovery button.
     for (const status of [429,504,200]) {
-      let first=true;
       await page.route('**/api/me',async route=>{
-        if (!first) return route.fallback();
-        first=false;
         await route.fulfill({status,contentType:'text/html',body:'upstream rate/timeout error'});
       });
       await page.evaluate(()=>init());
       assert.equal(await page.locator('#messages [role="alert"]').count(),1);
       assert.equal(await page.locator('.new-chat').isVisible(),true);
-      await page.locator('[data-action="retry-start"]').click();
-      await page.waitForSelector('[data-action="replay"]');
+      assert.equal(await page.locator('[data-action="replay"]').count(),4,'demos survive startup API failure');
       await page.unroute('**/api/me');
+      await page.locator('[data-action="retry-start"]').click();
+      await page.locator('#messages [role="alert"]').waitFor({state:'detached'});
+      await page.waitForSelector('[data-action="replay"]');
     }
+    // Bounded GET retries recover transient limits; write requests are never replayed.
+    let transient=0, writes=0;
+    await page.route('**/api/transient',async route=>{
+      transient++;
+      await route.fulfill(transient===1?{status:429,headers:{'Retry-After':'0'},json:{detail:'busy'}}:{json:{ok:true}});
+    });
+    assert.equal(await page.evaluate(()=>api('/api/transient').then(x=>x.ok)),true);
+    assert.equal(transient,2);
+    await page.route('**/api/write',async route=>{writes++;await route.fulfill({status:429,json:{detail:'busy'}});});
+    await page.evaluate(()=>api('/api/write',{method:'POST',body:{}}).catch(()=>{}));
+    assert.equal(writes,1);
+    // A failed refresh must retain the already loaded conversation and offer a cooldown.
+    await page.evaluate(()=>openChat('B',true));
+    let failedReads=0;
+    await page.route('**/api/chats/B',async route=>{
+      failedReads++;
+      await route.fulfill({status:429,headers:{'Retry-After':'20'},body:'busy'});
+    });
+    await page.evaluate(()=>openChat('B',true));
+    assert.equal(await page.locator('#chat-title').innerText(),'B');
+    assert.equal(await page.locator('.read-warning').count(),1);
+    assert.equal(await page.locator('[data-action="reopen-chat"]').isDisabled(),true);
+    assert.equal(failedReads,1,'respect a long Retry-After without hammering the server');
+    assert.equal(await page.evaluate(()=>S.busy),false);
+    await page.unroute('**/api/chats/B');
     await page.route('**/api/slow',async route=>{
       await new Promise(resolve=>setTimeout(resolve,50));await route.fulfill({json:{}});
     });
     const timeoutMessage=await page.evaluate(()=>api('/api/slow',{timeoutMs:5}).catch(error=>error.message));
     assert.match(timeoutMessage,/timed out/);
     await page.waitForTimeout(100);
+    // Offline demos appear before the account API responds, and a late failure cannot replace one.
+    let releaseStartup;
+    await page.route('**/api/me',async route=>{
+      await new Promise(resolve=>{releaseStartup=resolve;});
+      await route.fulfill({status:429,headers:{'Retry-After':'20'},body:'busy'});
+    });
+    await page.reload({waitUntil:'domcontentloaded'});
+    await page.waitForSelector('[data-action="replay"]');
+    await page.waitForFunction(()=>S.me && !S.me.user);
+    await page.locator('[data-action="replay"]').first().click();
+    const offlineQuestion=await page.locator('#panel-sub').innerText();
+    while (!releaseStartup) await new Promise(resolve=>setTimeout(resolve,10));
+    releaseStartup();
+    await page.waitForTimeout(100);
+    assert.equal(await page.locator('#panel-sub').innerText(),offlineQuestion);
+    assert.equal(await page.locator('#offline-chart').count(),1);
+    if (process.env.SCREENSHOT_PATH) await page.screenshot({path:process.env.SCREENSHOT_PATH,fullPage:true});
     assert.deepEqual(errors,[]);
-    console.log('PASS: chat races, cached revisits, stream cleanup, busy reset, metadata caching, sidebar requests, dialog dismissal, batched timeline and lazy chart navigation.');
+    console.log('PASS: four offline demos and PNG exports, full questions, startup failures, chat races/cache, GET retry/cooldown, single POST, stream cleanup and live charts.');
   } finally { await browser.close(); }
 })().catch(error=>{console.error(error);process.exitCode=1;});
