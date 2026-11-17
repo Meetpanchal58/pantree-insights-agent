@@ -182,7 +182,8 @@ class Agent:
             self.references = ReferenceIndex(list(self.retriever.examples.values()))
         self._llms: dict[str, LLM] = {}
         self._memories: dict[str, Any] = {}          # run_id -> memory scope for that question
-        self.graph = self._build().compile(checkpointer=InMemorySaver())
+        self._checkpoint = build_checkpointer()
+        self.graph = self._build().compile(checkpointer=self._checkpoint.saver)
 
     def llm(self, state: State) -> LLM:
         if state["run_id"] not in self._llms:
@@ -625,8 +626,19 @@ class Agent:
                  "use_defaults": use_defaults, "exclude_examples": list(exclude_examples or [])}
         return run_id, self._stream(run_id, state)
 
+    def attach_memory(self, run_id: str, memory: Any) -> None:
+        """Reattach web memory after a process restart; graph state lives in the checkpointer."""
+        self._memories[run_id] = memory
+
     def resume(self, run_id: str, answers: dict[str, str] | None) -> Iterator[dict]:
         return self._stream(run_id, Command(resume=answers or {}))
+
+    def continue_run(self, run_id: str) -> Iterator[dict]:
+        """Continue from the latest durable checkpoint after an interrupted worker."""
+        return self._stream(run_id, None)
+
+    def close(self) -> None:
+        self._checkpoint.close()
 
     def _stream(self, run_id: str, payload: Any) -> Iterator[dict]:
         config = {"configurable": {"thread_id": run_id}, "recursion_limit": 100}
