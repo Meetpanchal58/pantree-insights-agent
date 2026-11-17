@@ -22,13 +22,14 @@ from functools import wraps
 from typing import Any, TypedDict
 
 import pandas as pd
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from . import agents
 from .charts import build_chart
+from .checkpoint import build_checkpointer
+from .compiler import compile_metric_query
 from .checks import result_problems
 from .config import get_settings
 from .db import QueryTimeout, connect, manifest, run_query, snapshot_signature
@@ -407,17 +408,29 @@ class Agent:
     @step("write_sql")
     def write_sql(self, state: State) -> dict:
         plan = agents.AnalysisPlan.model_validate(state["plan"])
+        attempt = state.get("attempts", 0) + 1
+
+        # First choice: deterministic SQL for a single supported metric with a fully
+        # confirmed scope. The model interprets intent; code owns standard metric SQL.
+        if attempt == 1 and self.features.understand:
+            compiled = compile_metric_query(state.get("verify_scope"), self.joins)
+            if compiled:
+                return {"sql": compiled.sql, "explanation": compiled.reason, "attempts": attempt,
+                        "feedback": [], "_detail": {"attempt": attempt, "sql": compiled.sql,
+                                                    "explanation": compiled.reason,
+                                                    "mode": "deterministic_metric_compiler"}}
+
         first = state.get("attempts", 0) == 0 and self.features.narrow
-        # first attempt: only the plan's tables; retries get the full context so recovery stays possible
+        # Complex queries and retries keep the LLM writer as a fallback.
         context, tables = self.narrowed_context(state, plan) if first else (
             state["context"], list((state.get("retrieved") or {}).get("tables", [])))
         draft = agents.write_sql(self.llm(state), state["question"], plan, context,
                                  state.get("feedback") or None, state.get("sql"), state.get("understanding", ""),
                                  state.get("references", ""))
-        attempt = state.get("attempts", 0) + 1
         return {"sql": draft.sql.strip().rstrip(";"), "explanation": draft.explanation, "attempts": attempt,
                 "feedback": [], "_detail": {"attempt": attempt, "sql": draft.sql.strip(),
-                                            "explanation": draft.explanation, "context_tables": tables}}
+                                            "explanation": draft.explanation, "context_tables": tables,
+                                            "mode": "llm_fallback"}}
 
     def _retry_or_fail(self, state: State, problems: list[str], step_name: str) -> dict:
         if state.get("attempts", 0) < get_settings().max_sql_attempts:
