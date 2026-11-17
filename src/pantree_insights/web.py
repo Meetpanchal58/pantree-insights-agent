@@ -65,6 +65,14 @@ class AnswerIn(BaseModel):
     answers: dict[str, str] = {}
 
 
+class FeedbackIn(BaseModel):
+    chat_id: str = Field(min_length=1, max_length=32)
+    run_id: str = Field(min_length=1, max_length=32)
+    rating: str = Field(pattern="^(positive|negative)$")
+    category: str = Field("other", max_length=40)
+    comment: str = Field("", max_length=1000)
+
+
 class PreferencesIn(BaseModel):
     text: str = Field("", max_length=4000)
 
@@ -134,6 +142,7 @@ class Runner:
                                           use_defaults=use_defaults, memory=scope)
         run = Run(run_id, user, chat, question, agent=agent)
         self.runs[run_id] = run
+        store.create_run(run_id, user["id"], chat["id"], question)
         self._consume(store, run, events)
         return run
 
@@ -150,6 +159,7 @@ class Runner:
                     run.events.append({**event, "t": event.get("t", time.time())})
                     if event["type"] == "clarify":
                         run.paused = True
+                        store.save_run(run.id, "paused", run.events)
                     elif event["type"] == "final":
                         self._save(store, run, event)
             except Exception as error:                      # never leave the browser waiting
@@ -167,6 +177,17 @@ class Runner:
         run.finished = True
         headline = ((final.get("analysis") or {}).get("headline") or final.get("message") or "")
         timeline = [{**e, "t": round(e["t"] - run.started, 2)} for e in run.events if e["type"] != "final"]
+        stage_times = {}
+        for event in run.events:
+            if event.get("type") == "step" and event.get("status") != "started":
+                detail = event.get("detail") or {}
+                if isinstance(detail.get("seconds"), (float, int)):
+                    stage_times[event["step"]] = round(stage_times.get(event["step"], 0) + detail["seconds"], 2)
+        calls = final.get("calls") or []
+        store.save_run(run.id, final.get("status", "failed"), run.events,
+                       {"stages": stage_times, "cost_usd": (final.get("cost") or {}).get("usd", 0),
+                        "llm_calls": len(calls), "sql_attempts": final.get("attempts", 0),
+                        "verification": (final.get("verification") or {}).get("status")})
         store.add_message(run.chat["id"], "assistant", headline, to_json({**final, "events": timeline}))
         if final.get("cost"):
             store.add_cost(run.user["id"], final["cost"].get("usd", 0.0))
@@ -282,8 +303,12 @@ def create_app() -> FastAPI:
         chat = store.chat(user["id"], chat_id)
         if not chat:
             raise HTTPException(404, "Chat not found")
-        pending = [r.id for r in runner.runs.values() if r.chat["id"] == chat_id and not r.finished]
-        return to_json({**chat, "messages": store.messages(chat_id), "pending_run": pending[-1] if pending else None})
+        pending = store.pending_run(user["id"], chat_id)
+        active = runner.runs.get(pending["id"]) if pending else None
+        resumable = bool(active or (pending and pending["status"] == "paused"))
+        return to_json({**chat, "messages": store.messages(chat_id),
+                        "pending_run": pending["id"] if resumable else None,
+                        "interrupted_run": bool(pending and not resumable)})
 
     @app.patch("/api/chats/{chat_id}")
     def patch_chat(chat_id: str, body: ChatPatch, user=Depends(require_user), store: Store = Depends(get_store)):
@@ -344,6 +369,24 @@ def create_app() -> FastAPI:
                 await asyncio.sleep(0.15)
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    # ------------------------------------------------------------------ feedback and operational metrics
+    @app.post("/api/feedback")
+    def submit_feedback(body: FeedbackIn, user=Depends(require_user), store: Store = Depends(get_store)):
+        try:
+            store.add_feedback(user["id"], body.chat_id, body.run_id, body.rating,
+                               body.category, body.comment)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"ok": True}
+
+    @app.get("/api/admin/feedback")
+    def export_feedback(user=Depends(require_admin), store: Store = Depends(get_store)):
+        return {"feedback": store.feedback_export()}
+
+    @app.get("/api/admin/metrics")
+    def run_metrics(user=Depends(require_admin), store: Store = Depends(get_store)):
+        return store.run_metrics()
 
     # ------------------------------------------------------------------ memory
 
