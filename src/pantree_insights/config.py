@@ -31,12 +31,17 @@ class Settings(BaseSettings):
     sql_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "medium"
     max_output_tokens: int = 4000
     llm_timeout_s: float = 60.0                  # a slow provider response is cut off ...
-    llm_max_retries: int = 1                     # ... and retried once (one planning call once took 86 s)
+    llm_max_retries: int = 1
+    max_parallel_llm_calls: int = 2  # bound concurrent provider requests per instance
     # Sampling temperature. None = provider default: OpenAI reasoning models (gpt-6.x) do not accept a
     # temperature, so it is only sent when set. Reports record the value used.
     temperature: float | None = None
+    enable_sql_compiler: bool = False  # gated until measured against full live evaluation
     max_sql_attempts: int = 3                    # SQL writer tries (guardrail / database / validator feedback)
     daily_budget_usd: float = 1.00               # live LLM calls stop for the day after this
+
+    # Durable LangGraph checkpoints; use Postgres on Cloud Run, memory only for tests.
+    checkpoint_backend: Literal["memory", "postgres"] = "memory"
 
     # Web app
     app_env: Literal["development", "production"] = "development"

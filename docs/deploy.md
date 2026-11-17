@@ -30,8 +30,22 @@ bash scripts/upload_data.sh
 ADMIN_EMAIL=you@gmail.com bash scripts/deploy_cloudrun.sh
 ```
 
-The script creates a service account that can only read the secrets and the data bucket, builds the image
-with Cloud Build, deploys, and prints the live URL.
+The script creates a service account that can read the permitted secrets and data bucket, builds the image,
+deploys, and prints the live URL. It sets `CHECKPOINT_BACKEND=postgres` for durable paused conversations,
+using the existing Neon Postgres secret, and limits parallel provider calls to two per Cloud Run instance.
+This does not increase the OpenAI organization's rate limits or prevent external 429 responses.
+
+**Before deployment:** pass GitHub CI and the model evaluation for the exact commit. If the Cloud Run
+home screen still displays "OR TRY" or older demos, it is running an older revision: a GitHub PR
+is not itself a deploy. Verify the Cloud Run revision traffic after redeploying. A run interrupted
+during an *active* model API request is reported as interrupted; only a paused checkpoint is resumable.
+
+**Diagnosing 429s:** note the response `X-Request-ID` when present. Check Cloud Run logs
+for `request_busy` and `run failed`, plus the provider's 429 and retry-after details.
+Distinguish login/session API 429, daily user quota 429, provider RPM/TPM 429, and
+Cloud Run upstream 429/503 before changing settings. One instance with 2 GiB and
+`min-instances=0` can still cold-start. For low-latency usage, `--min-instances=1`
+is an additional-cost option; do not infer an exact bill from previous examples.
 
 **5. Finish Google sign-in:** add the printed redirect URI (`<URL>/auth/google/callback`) to the OAuth client's
 "Authorized redirect URIs". Redeploy any time with the same command.

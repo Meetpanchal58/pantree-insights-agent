@@ -295,6 +295,9 @@ function renderChat(chat, connect = false) {
     if (m.role === "user") box.insertAdjacentHTML("beforeend", userBubble(m.content));
     else { box.appendChild(answerCard(m.run || {})); last = m.run; }
   }
+  if (chat.interrupted_run) {
+    box.appendChild(recoveryCard("The server restarted during this analysis. The unfinished response was not saved; you can submit a new question.", "reopen-chat"));
+  }
   if (connect && chat.pending_run) {
     const el = statusLine("Working on it…"); box.appendChild(el);
     const question = [...chat.messages].reverse().find((m) => m.role === "user")?.content;
@@ -325,15 +328,15 @@ function answerCard(run, replay = false) {
     <div class="row"><button class="btn small" data-action="show-run">View analysis, chart & SQL</button>
     ${replay ? `<span class="tag replay">${run.offline ? "Offline demo · saved results" : "Replay · recorded run"} · data as of ${esc(run.data_as_of)}</span>` : `<span class="tag">Data as of ${esc(run.data_as_of)}</span>`}
     ${run.verification && run.verification.status === "verified" ? `<span class="tag ok" title="Each metric was recomputed from its definition for the confirmed scope and matched">✓ Numbers verified against the data</span>` : run.verification && run.verification.status === "mismatch" ? `<span class="tag warn" title="The recomputed metric disagrees with this result; see the warnings">⚠ Numbers do not match the definition</span>` : run.verification ? `<span class="tag" title="This answer's metric could not be recomputed independently">Not independently verified</span>` : ""}
-    ${run.cost && run.cost.usd ? `<span class="tag">$${run.cost.usd.toFixed(3)}</span>` : ""}</div></div>`;
+    ${run.cost && run.cost.usd ? `<span class="tag">${run.cost.usd.toFixed(3)}</span>` : ""}
+    ${!replay && !run.offline && run.run_id && S.me?.user ? `<span class="feedback-actions"><span class="muted">Was this correct?</span> <button class="btn small" data-action="feedback" data-run="${esc(run.run_id)}" data-rating="positive">👍 Yes</button> <button class="btn small" data-action="feedback" data-run="${esc(run.run_id)}" data-rating="negative">👎 No</button></span>` : ""}</div></div>`;
   el.querySelector('[data-action="show-run"]').addEventListener("click", () => { showRunInPanel(run); openPanel(); });
   return el;
 }
 
 /* ---------------------------------------------------------------- asking */
 async function ask(question) {
-  if (S.run?.replay) return;
-  if (S.busy || !question.trim()) return;
+  if (S.run?.replay || S.busy || !question.trim()) return false;
   if (!S.me.user) { showSignin(); return; }
   const view = ++S.view;
   S.busy = true; $(".send").disabled = true;
@@ -400,7 +403,7 @@ function onEvent(e, status) {
   }
 }
 
-function streamRun(runId, since, status, question) {
+function streamRun(runId, since, status, question, retry = 0) {
   if (since === 0) newTimeline(question || $("#chat-title").textContent, false);
   S.stream?.close();
   const view = S.view;
@@ -416,9 +419,22 @@ function streamRun(runId, since, status, question) {
     onEvent(e, status);
     if (e.type === "clarify" || e.type === "final") es.close();
   };
-  es.onerror = () => { es.close(); if (view !== S.view || S.stream !== es) return; if (S.busy) { if (status) status.remove();
-    $("#messages").appendChild(recoveryCard("The connection was interrupted. Reopen this chat to check whether the analysis finished."));
-    S.busy = false; $(".send").disabled = false; } };
+  es.onerror = () => {
+    es.close();
+    if (view !== S.view || S.stream !== es) return;
+    if (retry < 2) {
+      if (status?.querySelector(".txt")) status.querySelector(".txt").textContent = "Reconnecting to analysis…";
+      setTimeout(() => {
+        if (view === S.view && S.stream === es) streamRun(runId, count, status, question, retry + 1);
+      }, 1500 * (2 ** retry));
+      return;
+    }
+    if (S.busy) {
+      if (status) status.remove();
+      $("#messages").appendChild(recoveryCard("The connection was interrupted. Reopen this chat to check whether the analysis finished."));
+      S.busy = false; $(".send").disabled = false;
+    }
+  };
 }
 
 const clean = (o) => String(o).replace(/\s*\((recommended|default)\)\s*/gi, " ").trim();
@@ -462,6 +478,28 @@ function clarifyCard(e) {
 }
 
 /* ---------------------------------------------------------------- demos */
+function educationalDemoEvents(demo) {
+  const steps = (demo.events || []).filter(e => e.type === "step");
+  // Older pinned demo fixtures contain only a summary step. Explain their actual
+  // saved SQL, output and chart in order; never pretend these are paid LLM calls.
+  if (steps.length >= 3) return demo.events;
+  const final = demo.events?.at(-1);
+  if (!final || final.type !== "final") return demo.events || [];
+  const detail = (step, extra) => ({ type: "step", step, status: "done", detail: extra });
+  const result = final.result || { columns: [], data: [] };
+  const sample_rows = (result.data || []).slice(0, 3).map(row =>
+    Object.fromEntries(row.map((value, i) => [result.columns[i], value])));
+  return [
+    detail("check_input", { reason: "This is a saved, model-free walkthrough using simulated data." }),
+    detail("understand", { understood: demo.question, reason: "The analysis scope was fixed when the snapshot was built." }),
+    detail("write_sql", { sql: final.sql, reason: "Read-only, validated SQL saved with the demo." }),
+    detail("run_query", { rows: result.data?.length || 0, columns: result.columns || [], sample_rows }),
+    detail("analyse", { findings: final.analysis?.findings || [], reason: "Saved findings, not live-generated answers." }),
+    detail("chart", { reason: "The chart and downloadable table visualize the saved SQL output." }),
+    final,
+  ];
+}
+
 function replayDemo(slug, question) {
   const demo = OFFLINE_DEMOS.find((item) => item.slug === slug);
   if (demo) question = demo.question;
@@ -478,7 +516,7 @@ function replayDemo(slug, question) {
   if (demo) {
     $("#question").disabled = true;
     $("#question").placeholder = "Offline demo. Start a new chat to ask your own question.";
-    for (const event of demo.events) {
+    for (const event of educationalDemoEvents(demo)) {
       if (view !== S.view) return;
       onEvent({ ...event, replay: true }, status);
     }
@@ -507,6 +545,8 @@ function stepDetail(s) {
   if (d.rows !== undefined) parts.push(`${d.rows} rows, ${(d.columns || []).length} columns in ${d.query_seconds}s${d.truncated ? " (truncated)" : ""}`);
   if (d.number_check) parts.push(`Number check: ${d.number_check}${d.rewritten ? " (after one rewrite)" : ""}`);
   if (d.reason) parts.push(esc(d.reason));
+  if (d.sample_rows?.length) parts.push("<b>Saved result preview:</b><pre>" + esc(JSON.stringify(d.sample_rows, null, 2)) + "</pre>");
+  if (d.findings?.length) parts.push("<b>Findings:</b> " + d.findings.map(esc).join(" · "));
   if (d.error) parts.push(`<div class="problem">${esc(d.error)}</div>`);
   if (d.gaps_closed) parts.push(`Explained ${d.gaps_closed} open gap(s)`);
   if (d.facts !== undefined) parts.push(`${d.facts} fact(s) saved`);
@@ -516,7 +556,7 @@ function renderSteps() {
   const ol = $("#steps"); if (!ol) return;
   ol.innerHTML = S.run.steps.map((s, i) => {
     const detail = stepDetail(s);
-    const open = s.open ?? (s.status === "running" || ["retry", "failed", "warning", "needs_input"].includes(s.status));
+    const open = s.open ?? (S.run?.replay || s.status === "running" || ["retry", "failed", "warning", "needs_input"].includes(s.status));
     const label = s.status === "needs_input" ? "Waiting for your confirmation or answer" : s.status;
     return `<li class="step ${s.status}"><span class="dot" title="${esc(label)}" aria-label="${esc(label)}">${s.status === "needs_input" ? "…" : STATUS_ICON[s.status] ?? "·"}</span>
       <div class="step-head" data-action="toggle-step" data-i="${i}"><span class="step-name">${esc(STEP_LABELS[s.step] || s.step)}</span>
@@ -810,13 +850,28 @@ document.addEventListener("click", async (ev) => {
     case "edit-question": $("#question").value = t.dataset.q; autosize(); $("#question").focus(); break;
     case "retry-start": init(); break;
     case "reopen-chat": if (S.chatId) openChat(S.chatId, true); else renderWelcome(); break;
+    case "feedback": {
+      if (!S.chatId || !t.dataset.run) break;
+      const negative = t.dataset.rating === "negative";
+      const category = negative ? prompt("What went wrong? metric / filter / period / SQL / data / interpretation / other", "interpretation") : "correct";
+      if (category === null) break;
+      const comment = negative ? prompt("Optional explanation (avoid personal information)", "") : "";
+      try {
+        await api("/api/feedback", { method: "POST", body: {
+          chat_id: S.chatId, run_id: t.dataset.run, rating: t.dataset.rating,
+          category: (category || "other").toLowerCase().slice(0, 40),
+          comment: (comment || "").slice(0, 1000)
+        } });
+        t.closest(".feedback-actions")?.replaceChildren(document.createTextNode("Feedback saved"));
+      } catch (e) { toast(e.message); }
+      break;
+    }
     case "new-chat": S.pendingProject = t.dataset.project || null; closeSidebarMobile(); renderWelcome(); $("#question").focus(); break;
     case "open-chat": openChat(id); break;
     case "chat-menu": chatMenu(id); break;
     case "toggle-project": S.expanded.has(id) ? S.expanded.delete(id) : S.expanded.add(id); renderSidebar(); break;
     case "new-project": if (!S.me.user) return showSignin(); projectDialog(null); break;
     case "edit-project": projectDialog(S.projects.find((p) => p.id === id)); break;
-    case "example": $("#question").value = t.dataset.q; ask(t.dataset.q); $("#question").value = ""; break;
     case "replay": replayDemo(t.dataset.slug, OFFLINE_DEMOS.find((d) => d.slug === t.dataset.slug)?.question || t.textContent.trim()); break;
     case "toggle-panel": $("#app").classList.toggle("panel-closed"); break;
     case "toggle-step": {
@@ -843,7 +898,14 @@ document.addEventListener("click", async (ev) => {
 });
 $("#dialog").addEventListener("click", (ev) => { if (ev.target.id === "dialog") closeDialog(); });
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !$("#dialog").hidden) closeDialog(); });
-$("#composer").addEventListener("submit", (ev) => { ev.preventDefault(); const q = $("#question").value; $("#question").value = ""; autosize(); ask(q); });
+$("#composer").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const q = $("#question").value.trim();
+  if (!q || S.run?.replay) return;
+  if (S.busy) { toast("The current chat is still loading. Your question stays in the input."); return; }
+  if (!S.me?.user) { showSignin(); return; }
+  $("#question").value = ""; autosize(); ask(q);
+});
 const autosize = () => { const ta = $("#question"); ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; };
 $("#question").addEventListener("input", autosize);
 $("#question").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); $("#composer").requestSubmit(); } });

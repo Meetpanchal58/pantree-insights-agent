@@ -28,7 +28,7 @@ from . import demos as demo_runs
 from .auth import current_user, methods, require_admin, require_user
 from .auth import router as auth_router
 from .config import get_settings
-from .db import snapshot_signature
+from .db import manifest, snapshot_signature
 from .store import MemoryScope, Store, get_store, to_json
 
 log = logging.getLogger("pantree.web")
@@ -63,6 +63,14 @@ class AskIn(BaseModel):
 
 class AnswerIn(BaseModel):
     answers: dict[str, str] = {}
+
+
+class FeedbackIn(BaseModel):
+    chat_id: str = Field(min_length=1, max_length=32)
+    run_id: str = Field(min_length=1, max_length=32)
+    rating: str = Field(pattern="^(positive|negative)$")
+    category: str = Field("other", max_length=40)
+    comment: str = Field("", max_length=1000)
 
 
 class PreferencesIn(BaseModel):
@@ -104,7 +112,7 @@ def failure_details(error: Exception) -> dict:
 
 
 class Runner:
-    """Owns the agent and the runs in progress (one Cloud Run instance, so in-memory is fine)."""
+    """Runs execute in one process; persisted paused checkpoints can be reattached after a restart."""
 
     def __init__(self, agent_factory=None):
         self._agent_factory = agent_factory
@@ -119,28 +127,66 @@ class Runner:
             signature = snapshot_signature() if self._agent_factory is None else None
             if self._agent is None or signature != self._snapshot:
                 from .graph import Agent
+                old = self._agent
                 self._agent = (self._agent_factory or Agent)()
                 self._snapshot = signature
+                if (old is not None and hasattr(old, "close")
+                        and not any(not r.finished and r.agent is old for r in self.runs.values())):
+                    old.close()
             return self._agent
 
     def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool) -> Run:
+        # Initialize the agent before writing a user question: a cold-start error should
+        # not leave behind a message that can never receive an analysis result.
+        agent = self.agent
         history = store.history(chat["id"])
         store.add_message(chat["id"], "user", question)
         if chat["title"] == "New chat":
             store.update_chat(user["id"], chat["id"], title=question[:80])
         scope = MemoryScope(store, user, chat)
-        agent = self.agent
         run_id, events = agent.start(question, chat_id=chat["id"], history=history,
                                           use_defaults=use_defaults, memory=scope)
         run = Run(run_id, user, chat, question, agent=agent)
         self.runs[run_id] = run
+        store.create_run(run_id, user["id"], chat["id"], question, snapshot=json.dumps(manifest(), sort_keys=True))
         self._consume(store, run, events)
+        return run
+
+    def restore(self, store: Store, user: dict, run_id: str) -> Run | None:
+        """Restore a paused user-owned checkpoint; never restart a pending LLM call."""
+        run = self.runs.get(run_id)
+        if run:
+            return run
+        saved = store.run_record(user["id"], run_id)
+        if not saved or saved["status"] != "paused":
+            return None
+        if get_settings().checkpoint_backend != "postgres":
+            # An InMemorySaver checkpoint cannot survive a process restart.
+            store.save_run(run_id, "interrupted", saved.get("events") or [])
+            return None
+        old_snapshot = (saved.get("summary") or {}).get("snapshot")
+        if old_snapshot and old_snapshot != json.dumps(manifest(), sort_keys=True):
+            store.save_run(run_id, "interrupted", saved.get("events") or [],
+                           {"reason": "The dataset changed during a paused analysis"})
+            return None
+        chat = store.chat(user["id"], saved["chat_id"])
+        if chat is None:
+            return None
+        agent = self.agent
+        run = Run(run_id, user, chat, saved["question"], agent=agent)
+        run.events = saved["events"] or []
+        run.started = min((e.get("t", time.time()) for e in run.events), default=time.time())
+        run.paused = True
+        agent.restore_memory(run_id, MemoryScope(store, user, chat))
+        self.runs[run_id] = run
         return run
 
     def answer(self, store: Store, run: Run, answers: dict[str, str]) -> None:
         run.paused = False
         run.segment_done.clear()
         run.events.append({"type": "answered", "answers": answers, "t": time.time()})
+        if store is not None:
+            store.save_run(run.id, "running", run.events)
         self._consume(store, run, (run.agent or self.agent).resume(run.id, answers))
 
     def _consume(self, store: Store, run: Run, events) -> None:
@@ -150,6 +196,7 @@ class Runner:
                     run.events.append({**event, "t": event.get("t", time.time())})
                     if event["type"] == "clarify":
                         run.paused = True
+                        store.save_run(run.id, "paused", run.events)
                     elif event["type"] == "final":
                         self._save(store, run, event)
             except Exception as error:                      # never leave the browser waiting
@@ -167,6 +214,17 @@ class Runner:
         run.finished = True
         headline = ((final.get("analysis") or {}).get("headline") or final.get("message") or "")
         timeline = [{**e, "t": round(e["t"] - run.started, 2)} for e in run.events if e["type"] != "final"]
+        stage_times = {}
+        for event in run.events:
+            if event.get("type") == "step" and event.get("status") != "started":
+                detail = event.get("detail") or {}
+                if isinstance(detail.get("seconds"), (float, int)):
+                    stage_times[event["step"]] = round(stage_times.get(event["step"], 0) + detail["seconds"], 2)
+        calls = final.get("calls") or []
+        store.save_run(run.id, final.get("status", "failed"), run.events,
+                       {"stages": stage_times, "cost_usd": (final.get("cost") or {}).get("usd", 0),
+                        "llm_calls": len(calls), "sql_attempts": final.get("attempts", 0),
+                        "verification": (final.get("verification") or {}).get("status")})
         store.add_message(run.chat["id"], "assistant", headline, to_json({**final, "events": timeline}))
         if final.get("cost"):
             store.add_cost(run.user["id"], final["cost"].get("usd", 0.0))
@@ -233,7 +291,6 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------ me
     @app.get("/api/me")
     def me(user: dict | None = Depends(current_user), store: Store = Depends(get_store)):
-        from .db import manifest
         info = manifest()
         base = {"signin": methods(), "data": {"size": info["size"], "first_day": info["first_day"],
                                               "last_day": info["last_day"]}}
@@ -282,8 +339,16 @@ def create_app() -> FastAPI:
         chat = store.chat(user["id"], chat_id)
         if not chat:
             raise HTTPException(404, "Chat not found")
-        pending = [r.id for r in runner.runs.values() if r.chat["id"] == chat_id and not r.finished]
-        return to_json({**chat, "messages": store.messages(chat_id), "pending_run": pending[-1] if pending else None})
+        pending = store.pending_run(user["id"], chat_id)
+        active = runner.runs.get(pending["id"]) if pending else None
+        resumable = bool(active or (pending and pending["status"] == "paused"
+                                    and settings.checkpoint_backend == "postgres"))
+        if pending and not resumable:
+            store.save_run(pending["id"], "interrupted", pending.get("events") or [],
+                           {"reason": "The service restarted while a model call was active"})
+        return to_json({**chat, "messages": store.messages(chat_id),
+                        "pending_run": pending["id"] if resumable else None,
+                        "interrupted_run": bool(pending and not resumable)})
 
     @app.patch("/api/chats/{chat_id}")
     def patch_chat(chat_id: str, body: ChatPatch, user=Depends(require_user), store: Store = Depends(get_store)):
@@ -316,7 +381,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/runs/{run_id}/answer")
     def answer(run_id: str, body: AnswerIn, user=Depends(require_user), store: Store = Depends(get_store)):
-        run = runner.runs.get(run_id)
+        run = runner.restore(store, user, run_id)
         if not run or run.user["id"] != user["id"]:
             raise HTTPException(404, "Run not found")
         if not run.paused:
@@ -325,13 +390,15 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/runs/{run_id}/stream")
-    async def stream(run_id: str, request: Request, since: int = 0, user=Depends(require_user)):
-        run = runner.runs.get(run_id)
+    async def stream(run_id: str, request: Request, since: int = 0,
+                     user=Depends(require_user), store: Store = Depends(get_store)):
+        run = runner.restore(store, user, run_id)
         if not run or run.user["id"] != user["id"]:
             raise HTTPException(404, "Run not found")
 
         async def events():
             index = since
+            heartbeat = time.monotonic()
             while True:
                 while index < len(run.events):
                     event = run.events[index]
@@ -341,9 +408,31 @@ def create_app() -> FastAPI:
                         return
                 if await request.is_disconnected():
                     return
+                if time.monotonic() - heartbeat >= 12:
+                    # SSE comments are ignored by EventSource but prevent idle proxy timeouts.
+                    yield ": heartbeat\n\n"
+                    heartbeat = time.monotonic()
                 await asyncio.sleep(0.15)
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    # ------------------------------------------------------------------ feedback and operational metrics
+    @app.post("/api/feedback")
+    def submit_feedback(body: FeedbackIn, user=Depends(require_user), store: Store = Depends(get_store)):
+        try:
+            store.add_feedback(user["id"], body.chat_id, body.run_id, body.rating,
+                               body.category, body.comment)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"ok": True}
+
+    @app.get("/api/admin/feedback")
+    def export_feedback(user=Depends(require_admin), store: Store = Depends(get_store)):
+        return {"feedback": store.feedback_export()}
+
+    @app.get("/api/admin/metrics")
+    def run_metrics(user=Depends(require_admin), store: Store = Depends(get_store)):
+        return store.run_metrics()
 
     # ------------------------------------------------------------------ memory
 

@@ -109,6 +109,28 @@ email_codes = Table(
     Column("expires_at", DateTime, nullable=False), Column("attempts", Integer, default=0),
     Column("sent_at", DateTime, default=_now),
 )
+run_records = Table(
+    "run_records", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("user_id", String(16), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("chat_id", String(16), ForeignKey("chats.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("question", Text, nullable=False),
+    Column("status", String(20), nullable=False, default="running"),
+    Column("events", JSON, default=list), Column("summary", JSON, default=dict),
+    Column("started_at", DateTime, default=_now),
+    Column("updated_at", DateTime, default=_now),
+)
+feedback = Table(
+    "feedback", metadata,
+    Column("id", String(16), primary_key=True, default=_id),
+    Column("user_id", String(16), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("chat_id", String(16), ForeignKey("chats.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("run_id", String(32), nullable=False, index=True),
+    Column("rating", String(10), nullable=False),
+    Column("category", String(40), nullable=False),
+    Column("comment", Text, default=""),
+    Column("created_at", DateTime, default=_now),
+)
 usage = Table(
     "usage", metadata,
     Column("user_id", String(16), primary_key=True), Column("day", String(10), primary_key=True),
@@ -141,6 +163,67 @@ class Store:
     def _exec(self, stmt) -> None:
         with self.engine.begin() as c:
             c.execute(stmt)
+
+    # ------------------------------------------------------------------ run tracking and opt-in feedback
+    def create_run(self, run_id: str, user_id: str, chat_id: str, question: str,
+                   snapshot: str | None = None) -> None:
+        self._exec(insert(run_records).values(id=run_id, user_id=user_id, chat_id=chat_id,
+                                               question=question, status="running", events=[],
+                                               summary={"snapshot": snapshot}))
+
+    def save_run(self, run_id: str, status: str, events: list[dict], summary: dict | None = None) -> None:
+        values = {"status": status, "events": to_json(events), "updated_at": _now()}
+        if summary is not None:
+            values["summary"] = to_json(summary)
+        self._exec(update(run_records).where(run_records.c.id == run_id).values(**values))
+
+    def run_record(self, user_id: str, run_id: str) -> dict | None:
+        return self._one(select(run_records).where(run_records.c.id == run_id,
+                                                      run_records.c.user_id == user_id))
+
+    def pending_run(self, user_id: str, chat_id: str) -> dict | None:
+        return self._one(select(run_records).where(run_records.c.user_id == user_id,
+                                                      run_records.c.chat_id == chat_id,
+                                                      run_records.c.status.in_(["running", "paused"]))
+                         .order_by(run_records.c.started_at.desc()).limit(1))
+
+    def add_feedback(self, user_id: str, chat_id: str, run_id: str, rating: str,
+                     category: str, comment: str) -> None:
+        chat = self.chat(user_id, chat_id)
+        if not chat:
+            raise ValueError("Chat not found")
+        valid = any((msg.get("run") or {}).get("run_id") == run_id
+                    for msg in self.messages(chat_id) if msg["role"] == "assistant")
+        if not valid:
+            raise ValueError("Completed answer not found in this chat")
+        existing = self._one(select(feedback).where(feedback.c.user_id == user_id,
+                                                     feedback.c.run_id == run_id))
+        if existing:
+            self._exec(update(feedback).where(feedback.c.id == existing["id"])
+                       .values(rating=rating, category=category, comment=comment))
+        else:
+            self._exec(insert(feedback).values(id=_id(), user_id=user_id, chat_id=chat_id,
+                                                      run_id=run_id, rating=rating,
+                                                      category=category, comment=comment))
+
+    def feedback_export(self) -> list[dict]:
+        """Only consented feedback; private user IDs and full questions are intentionally excluded."""
+        rows = self._all(select(feedback).order_by(feedback.c.created_at.desc()).limit(1000))
+        return [{"run_id": r["run_id"], "rating": r["rating"], "category": r["category"],
+                 "comment": r["comment"], "created_at": r["created_at"].isoformat()} for r in rows]
+
+    def run_metrics(self) -> dict:
+        rows = self._all(select(run_records.c.status, run_records.c.summary)
+                         .where(run_records.c.status.not_in(["running", "paused"]))
+                         .order_by(run_records.c.started_at.desc()).limit(200))
+        stages: dict[str, list[float]] = {}
+        for row in rows:
+            for step, seconds in (row["summary"] or {}).get("stages", {}).items():
+                stages.setdefault(step, []).append(float(seconds))
+        return {"completed_runs": len(rows),
+                "status_counts": {s: sum(r["status"] == s for r in rows)
+                                  for s in sorted({r["status"] for r in rows})},
+                "mean_stage_seconds": {k: round(sum(v) / len(v), 2) for k, v in stages.items()}}
 
     # ------------------------------------------------------------------ users
     def upsert_user(self, email: str, name: str | None = None, picture: str | None = None,

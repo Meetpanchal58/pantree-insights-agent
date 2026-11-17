@@ -75,15 +75,21 @@ def build():
             "offline": True,
         }
         events = [
-            {
-                "type": "step",
-                "step": "offline_demo",
-                "status": "done",
-                "detail": {
-                    "understood": question,
-                    "reason": "Saved SQL results and editorial insights; no live model was run.",
-                },
-            },
+            {"type": "step", "step": "check_input", "status": "done",
+             "detail": {"reason": "Educational offline sample, not a live model run."}},
+            {"type": "step", "step": "retrieve", "status": "done",
+             "detail": {"tables": sorted(verdict.tables), "reason": "Approved tables used by the saved SQL."}},
+            {"type": "step", "step": "understand", "status": "done",
+             "detail": {"understood": question, "reason": "This example uses a predefined question and data period."}},
+            {"type": "step", "step": "write_sql", "status": "done",
+             "detail": {"sql": verdict.sql, "reason": "Saved, validated, deterministic query."}},
+            {"type": "step", "step": "run_query", "status": "done",
+             "detail": {"rows": len(rows), "columns": list(result.frame.columns),
+                        "query_seconds": round(result.seconds, 3), "sample_rows": rows[:3]}},
+            {"type": "step", "step": "analyse", "status": "done",
+             "detail": {"findings": analysis["findings"], "reason": "Saved editorial insights."}},
+            {"type": "step", "step": "chart", "status": "done",
+             "detail": {"reason": "Visualization is computed from the saved result table."}},
             final,
         ]
         demos.append(
@@ -173,7 +179,8 @@ def build():
     def brands(rows):
         brand = [r for r in rows if r["view"] == "Brand"]
         products = [r for r in rows if r["view"] == "Product"]
-        top, product = brand[0], products[0]
+        top = min(brand, key=lambda row: row["position"])
+        product = max(products, key=lambda row: row["realized_revenue"])
         total = top["total_revenue"]
         share = sum(r["realized_revenue"] for r in brand) / total if total else 0
         return {
@@ -208,7 +215,8 @@ def build():
                 ),
             ],
             "caveats": [
-                "Brand and product rankings are separate views; do not add their revenue or order counts together.",
+                ("Products are ranked within each category of each leading brand. "
+                 "Do not double-count product and brand revenue."),
                 (
                     "One order can contain several brands/products. Exact stored brand spelling "
                     "is preserved; simulated revenue does not establish demand or profit."
@@ -221,25 +229,42 @@ def build():
         "brand-product-sales",
         "Brand and product sales",
         (
-            "Which five brands and five products generated the most realized revenue from "
-            f"{period}, and how concentrated were brand sales?"
+            "Which five brands generate the most realized revenue, and which five products lead "
+            f"within each category of those brands from {period}?"
         ),
         f"""WITH lines AS (
-           SELECT p.brand_name, p.product_id, p.product_name, s.order_id,
+           SELECT p.brand_name, p.category, p.product_id, p.product_name, s.order_id,
              CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END AS revenue
            FROM sales s JOIN product_master p ON p.product_id = s.product_id
            WHERE s.line_type = 'Sale' AND s.placed_at >= TIMESTAMP '{start}'
              AND s.placed_at < DATE '{end}' + INTERVAL 1 DAY
+         ), brand_totals AS (
+           SELECT brand_name, SUM(revenue) AS realized_revenue, COUNT(DISTINCT order_id) AS orders
+           FROM lines GROUP BY brand_name
+         ), top_brands AS (
+           SELECT brand_name, realized_revenue, orders,
+             ROW_NUMBER() OVER (ORDER BY realized_revenue DESC, brand_name) AS position FROM brand_totals
+           QUALIFY position <= 5
+         ), product_totals AS (
+           SELECT l.brand_name, l.category, l.product_id, l.product_name,
+             SUM(l.revenue) AS realized_revenue, COUNT(DISTINCT l.order_id) AS orders
+           FROM lines l JOIN top_brands b USING (brand_name)
+           GROUP BY l.brand_name, l.category, l.product_id, l.product_name
+         ), product_ranks AS (
+           SELECT brand_name, category, product_id, product_name, realized_revenue, orders,
+             ROW_NUMBER() OVER (
+             PARTITION BY brand_name, category ORDER BY realized_revenue DESC, product_id
+           ) AS position FROM product_totals
          ), ranked AS (
-           SELECT 'Brand' AS view, brand_name, NULL AS product_id, NULL AS product_name,
-             SUM(revenue) AS realized_revenue, COUNT(DISTINCT order_id) AS orders,
-             ROW_NUMBER() OVER (ORDER BY SUM(revenue) DESC, brand_name) AS position FROM lines GROUP BY brand_name
+           SELECT 'Brand' AS view, brand_name, CAST(NULL AS VARCHAR) AS category,
+             CAST(NULL AS VARCHAR) AS product_id, CAST(NULL AS VARCHAR) AS product_name,
+             realized_revenue, orders, position FROM top_brands
            UNION ALL
-           SELECT 'Product', brand_name, product_id, product_name, SUM(revenue), COUNT(DISTINCT order_id),
-             ROW_NUMBER() OVER (ORDER BY SUM(revenue) DESC, product_id)
-           FROM lines GROUP BY brand_name, product_id, product_name
-         ) SELECT view, brand_name, product_id, product_name, realized_revenue, orders, position,
-           (SELECT SUM(revenue) FROM lines) AS total_revenue FROM ranked WHERE position <= 5 ORDER BY view, position""",
+           SELECT 'Product', brand_name, category, product_id, product_name,
+             realized_revenue, orders, position FROM product_ranks WHERE position <= 5
+         ) SELECT view, brand_name, category, product_id, product_name, realized_revenue, orders, position,
+           (SELECT SUM(revenue) FROM lines) AS total_revenue FROM ranked
+           ORDER BY view, brand_name, category, position""",
         brands,
         "realized_revenue",
         lambda r: r["view"] == "Brand",

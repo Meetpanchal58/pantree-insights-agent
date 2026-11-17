@@ -181,7 +181,28 @@ class Agent:
             self.references = ReferenceIndex(list(self.retriever.examples.values()))
         self._llms: dict[str, LLM] = {}
         self._memories: dict[str, Any] = {}          # run_id -> memory scope for that question
-        self.graph = self._build().compile(checkpointer=InMemorySaver())
+        self._checkpoint_context = None
+        if settings.checkpoint_backend == "postgres":
+            from langgraph.checkpoint.postgres import PostgresSaver
+
+            dsn = settings.database_url.replace("postgresql+psycopg://", "postgresql://")
+            if not dsn.startswith(("postgresql://", "postgres://")):
+                raise RuntimeError("CHECKPOINT_BACKEND=postgres requires a PostgreSQL DATABASE_URL")
+            self._checkpoint_context = PostgresSaver.from_conn_string(dsn)
+            saver = self._checkpoint_context.__enter__()
+            saver.setup()
+        else:
+            saver = InMemorySaver()
+        self.graph = self._build().compile(checkpointer=saver)
+
+    def restore_memory(self, run_id: str, scope: Any) -> None:
+        """Reattach user/project memory to a paused persistent graph after a restart."""
+        self._memories[run_id] = scope
+
+    def close(self) -> None:
+        if self._checkpoint_context is not None:
+            self._checkpoint_context.__exit__(None, None, None)
+            self._checkpoint_context = None
 
     def llm(self, state: State) -> LLM:
         if state["run_id"] not in self._llms:
@@ -407,6 +428,17 @@ class Agent:
     @step("write_sql")
     def write_sql(self, state: State) -> dict:
         plan = agents.AnalysisPlan.model_validate(state["plan"])
+        if (get_settings().enable_sql_compiler and self.features.understand
+                and not state.get("attempts") and state.get("verify_scope")):
+            from .sql_compiler import compile_standard
+
+            compiled = compile_standard(state["verify_scope"], self.joins)
+            if compiled is not None:
+                return {"sql": compiled, "explanation": "Deterministic metric SQL from the semantic layer",
+                        "attempts": 1, "feedback": [],
+                        "_detail": {"attempt": 1, "sql": compiled,
+                                    "explanation": "Compiled without an LLM; metric and joins are code-defined.",
+                                    "context_tables": state.get("understood_tables") or []}}
         first = state.get("attempts", 0) == 0 and self.features.narrow
         # first attempt: only the plan's tables; retries get the full context so recovery stays possible
         context, tables = self.narrowed_context(state, plan) if first else (

@@ -32,6 +32,31 @@ def test_four_demo_assets_match_the_browser_bundle_and_have_explicit_provenance(
         assert "cost" not in final and "verification" not in final
 
 
+def test_brand_demo_keeps_five_brands_and_top_products_per_brand_category():
+    demo = DEMO_RUNS["brand-product-sales"]
+    final = demo["events"][-1]
+    columns = final["result"]["columns"]
+    rows = [dict(zip(columns, values, strict=True)) for values in final["result"]["data"]]
+    brands = [row for row in rows if row["view"] == "Brand"]
+    products = [row for row in rows if row["view"] == "Product"]
+    assert len(brands) == 5
+    assert len({row["brand_name"] for row in brands}) == 5
+    selected = {row["brand_name"] for row in brands}
+    assert products and all(row["brand_name"] in selected for row in products)
+    groups = {}
+    for row in products:
+        key = row["brand_name"], row["category"]
+        groups.setdefault(key, []).append(row)
+        assert 1 <= row["position"] <= 5
+    assert all(len(group) <= 5 for group in groups.values())
+    assert len({row["product_id"] for row in products}) == len(products)
+    assert [event["step"] for event in demo["events"][:-1]] == [
+        "check_input", "retrieve", "understand", "write_sql", "run_query", "analyse", "chart"
+    ]
+    assert demo["events"][4]["detail"]["sample_rows"]
+    assert demo["events"][5]["detail"]["findings"]
+
+
 @pytest.mark.data
 def test_saved_sql_results_match_the_pinned_sample_snapshot(con, shop_dir):
     """Only compare the immutable fixture date, not a newer nightly simulator snapshot."""
