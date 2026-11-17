@@ -161,7 +161,7 @@ def step(name: str):
 class Agent:
     def __init__(self, llm_factory: Callable[[], LLM] | None = None, retriever: Retriever | None = None,
                  memory: Memory | None = None, con=None, data: dict | None = None,
-                 features: Features | None = None):
+                 features: Features | None = None, compile_metrics: bool | None = None):
         settings = get_settings()
         self.features = features or Features()
         self.compile_metrics = (llm_factory is None) if compile_metrics is None else compile_metrics
