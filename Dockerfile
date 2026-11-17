@@ -11,7 +11,7 @@ WORKDIR /app
 
 # Dependencies first (cached layer)
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --no-dev --no-install-project
 
 # App code and the files it reads
 COPY src ./src
@@ -19,7 +19,7 @@ COPY semantic ./semantic
 COPY prompts ./prompts
 COPY memory ./memory
 COPY demo_runs ./demo_runs
-RUN uv sync --frozen --no-dev
+RUN uv sync --no-dev
 
 # Download the embedding model now, so cold starts do not fetch it
 RUN uv run --no-sync python -c "from fastembed import TextEmbedding; \

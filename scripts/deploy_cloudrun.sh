@@ -56,10 +56,12 @@ else
 fi
 
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format 'value(status.url)' 2>/dev/null || true)"
-ENV_VARS="APP_ENV=production,DATA_DIR=/data,DATA_SIZE=full,ADMIN_EMAILS=[\"${ADMIN_EMAIL}\"],DAILY_QUESTION_LIMIT=10,DAILY_BUDGET_USD=0.50${EMAIL_ENV}"
+ENV_VARS="APP_ENV=production,DATA_DIR=/data,DATA_SIZE=full,ADMIN_EMAILS=[\"${ADMIN_EMAIL}\"],DAILY_QUESTION_LIMIT=10,DAILY_BUDGET_USD=0.50,CHECKPOINT_BACKEND=postgres,MAX_PARALLEL_LLM_CALLS=2${EMAIL_ENV}"
 [ -n "$URL" ] && ENV_VARS+=",PUBLIC_URL=${URL}"
 
-# min-instances 0 and max-instances 1: free tier, and the app keeps runs in memory (one instance only).
+# Checkpoints are durable in the existing Neon Postgres. Active execution still runs
+# in one instance; interrupted in-flight model calls are not replayed after a restart.
+# Keep min-instances=0 for low idle cost; min=1 is an optional paid latency upgrade.
 gcloud run deploy "$SERVICE" --image "$IMAGE" --region "$REGION" \
   --service-account "$SA" --allow-unauthenticated \
   --min-instances 0 --max-instances 1 --concurrency 20 \
