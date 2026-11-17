@@ -1,0 +1,317 @@
+# COVERAGE SUITE: answer questions for the tables, columns and use cases the holdout and regression sets did not
+# reach (Nov 17 audit: warehouses, support agents, promotions, marketing plan, price history and logins had no
+# question; 101 of 305 columns were used). Written by the maintainer before any agent run on them, from
+# schema.yaml and metrics.yaml only; never copied into examples, prompts, the library or the knowledge base
+# (tests/test_eval_leakage.py checks). Reported as its own suite, not as independent holdout.
+# Same annotations as holdout.yaml.
+
+questions:
+  - id: c01
+    expect: answer
+    difficulty: medium
+    question: How full is each warehouse right now - units on hand compared with its storage capacity, by warehouse city?
+    required_tables: [inventory_live, warehouses]
+    key_columns: [city]
+    metric_columns: [units_on_hand, capacity_used]
+    gold_sql: |
+      SELECT w.city, SUM(il.on_hand_qty) AS units_on_hand,
+             SUM(il.on_hand_qty) / MAX(w.capacity_units) AS capacity_used
+      FROM inventory_live il JOIN warehouses w ON w.warehouse_id = il.warehouse_id
+      GROUP BY 1
+
+  - id: c02
+    expect: answer
+    difficulty: medium
+    question: How does the share of escalated support contacts differ between support teams in 2026?
+    required_tables: [support_contacts, agents]
+    key_columns: [team]
+    metric_columns: [escalated_share]
+    gold_sql: |
+      SELECT a.team, COUNT(*) FILTER (WHERE sc.resolution_status = 'Escalated') * 1.0 / COUNT(*) AS escalated_share
+      FROM support_contacts sc JOIN agents a ON a.agent_id = sc.agent_id
+      WHERE sc.contact_at >= TIMESTAMP '2026-01-01' AND sc.contact_at < TIMESTAMP '2027-01-01'
+      GROUP BY 1
+
+  - id: c03
+    expect: answer
+    difficulty: medium
+    question: For each language our support agents speak, how many contacts were handled in 2025 and what was the average CSAT?
+    required_tables: [support_contacts, agents]
+    key_columns: [language]
+    metric_columns: [contacts, avg_csat]
+    gold_sql: |
+      SELECT a.language, COUNT(*) AS contacts, AVG(sc.csat) AS avg_csat
+      FROM support_contacts sc JOIN agents a ON a.agent_id = sc.agent_id
+      WHERE sc.contact_at >= TIMESTAMP '2025-01-01' AND sc.contact_at < TIMESTAMP '2026-01-01'
+      GROUP BY 1
+
+  - id: c04
+    expect: answer
+    difficulty: easy
+    question: How many coupons are there for each eligible audience, and what is their average minimum order value?
+    required_tables: [promotions]
+    key_columns: [eligible_audience]
+    metric_columns: [coupons, avg_min_order_value]
+    gold_sql: |
+      SELECT eligible_audience, COUNT(*) AS coupons, AVG(min_order_value) AS avg_min_order_value
+      FROM promotions GROUP BY 1
+
+  - id: c05
+    expect: answer
+    difficulty: medium
+    question: What were the total planned spend and planned revenue for each marketing channel group in 2025?
+    required_tables: [marketing_plan, campaigns]
+    key_columns: [channel_group]
+    metric_columns: [planned_spend, target_revenue]
+    gold_sql: |
+      SELECT c.channel_group, SUM(mp.planned_spend) AS planned_spend, SUM(mp.target_revenue) AS target_revenue
+      FROM marketing_plan mp JOIN campaigns c ON c.campaign_id = mp.campaign_id
+      WHERE mp.date >= TIMESTAMP '2025-01-01' AND mp.date < TIMESTAMP '2026-01-01'
+      GROUP BY 1
+
+  - id: c06
+    expect: answer
+    difficulty: medium
+    question: How many clearance price changes started in 2026 in each product category?
+    required_tables: [price_history, product_master]
+    key_columns: [category]
+    metric_columns: [clearance_price_changes]
+    gold_sql: |
+      SELECT p.category, COUNT(*) AS clearance_price_changes
+      FROM price_history ph JOIN product_master p ON p.product_id = ph.product_id
+      WHERE ph.price_change_reason = 'Clearance'
+        AND ph.valid_from >= TIMESTAMP '2026-01-01' AND ph.valid_from < TIMESTAMP '2027-01-01'
+      GROUP BY 1
+
+  - id: c07
+    expect: answer
+    difficulty: easy
+    question: How many failed OTP attempts were there in each month of 2026?
+    required_tables: [auth_events]
+    key_columns: [month]
+    metric_columns: [otp_failures]
+    gold_sql: |
+      SELECT date_trunc('month', event_at) AS month, COUNT(*) AS otp_failures
+      FROM auth_events
+      WHERE event_type = 'otp_failed' AND event_at >= TIMESTAMP '2026-01-01' AND event_at < TIMESTAMP '2027-01-01'
+      GROUP BY 1 ORDER BY 1
+
+  - id: c08
+    expect: answer
+    difficulty: easy
+    question: How do average seller rating and fulfilment score compare between 1P, 3P-FBA and 3P-MFN sellers?
+    required_tables: [sellers]
+    key_columns: [seller_type]
+    metric_columns: [avg_rating, avg_fulfillment_score]
+    gold_sql: |
+      SELECT seller_type, AVG(rating) AS avg_rating, AVG(fulfillment_score) AS avg_fulfillment_score
+      FROM sellers GROUP BY 1
+
+  - id: c09
+    expect: answer
+    difficulty: medium
+    question: What was the cancellation rate of order lines in 2025 by the region the seller is based in?
+    required_tables: [sales, sellers]
+    required_metrics: [cancellation_rate]
+    key_columns: [region]
+    metric_columns: [cancellation_rate]
+    gold_sql: |
+      SELECT se.region, COUNT(*) FILTER (WHERE s.cancelled_at IS NOT NULL) * 1.0 / COUNT(*) AS cancellation_rate
+      FROM sales s JOIN sellers se ON se.seller_id = s.seller_id
+      WHERE s.line_type = 'Sale' AND s.placed_at >= TIMESTAMP '2025-01-01' AND s.placed_at < TIMESTAMP '2026-01-01'
+      GROUP BY 1
+
+  - id: c10
+    expect: answer
+    difficulty: medium
+    question: How many footwear units were sold in each size in 2026?
+    required_tables: [sales, product_skus, product_master]
+    required_metrics: [units_sold]
+    key_columns: [size]
+    metric_columns: [units_sold]
+    gold_sql: |
+      SELECT k.size, SUM(CASE WHEN s.cancelled_at IS NULL THEN s.quantity ELSE 0 END) AS units_sold
+      FROM sales s JOIN product_skus k ON k.sku_id = s.sku_id JOIN product_master p ON p.product_id = s.product_id
+      WHERE s.line_type = 'Sale' AND p.category = 'Footwear'
+        AND s.placed_at >= TIMESTAMP '2026-01-01' AND s.placed_at < TIMESTAMP '2027-01-01'
+      GROUP BY 1
+
+  - id: c11
+    expect: answer
+    difficulty: medium
+    question: How many SKUs are at or below their reorder point right now, in each product category?
+    required_tables: [inventory_live, product_master]
+    key_columns: [category]
+    metric_columns: [skus_to_reorder]
+    gold_sql: |
+      SELECT p.category, COUNT(*) AS skus_to_reorder
+      FROM inventory_live il JOIN product_master p ON p.product_id = il.product_id
+      WHERE il.on_hand_qty <= il.reorder_point
+      GROUP BY 1
+
+  - id: c12
+    expect: answer
+    difficulty: medium
+    question: What share of product reviews written in 2026 were rejected by moderation, for each review aspect?
+    required_tables: [product_reviews]
+    key_columns: [aspect]
+    metric_columns: [rejected_share]
+    gold_sql: |
+      SELECT aspect, COUNT(*) FILTER (WHERE moderation_status = 'Rejected') * 1.0 / COUNT(*) AS rejected_share
+      FROM product_reviews
+      WHERE reviewed_at >= TIMESTAMP '2026-01-01' AND reviewed_at < TIMESTAMP '2027-01-01'
+      GROUP BY 1
+
+  - id: c13
+    expect: answer
+    difficulty: medium
+    question: What is the average star rating of published reviews for Men, Women, Unisex, Boys and Girls products?
+    required_tables: [product_reviews, product_master]
+    key_columns: [gender]
+    metric_columns: [avg_rating]
+    gold_sql: |
+      SELECT p.gender, AVG(r.rating) AS avg_rating
+      FROM product_reviews r JOIN product_master p ON p.product_id = r.product_id
+      WHERE r.moderation_status = 'Published'
+      GROUP BY 1
+
+  - id: c14
+    expect: answer
+    difficulty: easy
+    question: How many customers in each age bracket are Prime members today?
+    required_tables: [customers]
+    key_columns: [age_bracket]
+    metric_columns: [prime_customers]
+    gold_sql: |
+      SELECT age_bracket, COUNT(*) AS prime_customers FROM customers WHERE is_prime GROUP BY 1
+
+  - id: c15
+    expect: answer
+    difficulty: medium
+    question: How many customer accounts are Active, Dormant or Deleted in each sign-up city tier?
+    required_tables: [customers]
+    key_columns: [city_tier, account_status]
+    metric_columns: [customers]
+    gold_sql: |
+      SELECT city_tier, account_status, COUNT(*) AS customers FROM customers GROUP BY 1, 2
+
+  - id: c16
+    expect: answer
+    difficulty: medium
+    question: How many order lines were cancelled in 2026 for each cancellation reason, split by who cancelled?
+    required_tables: [sales]
+    key_columns: [cancel_reason, cancelled_by]
+    metric_columns: [cancelled_lines]
+    gold_sql: |
+      SELECT cancel_reason, cancelled_by, COUNT(*) AS cancelled_lines
+      FROM sales
+      WHERE line_type = 'Sale' AND cancelled_at IS NOT NULL
+        AND placed_at >= TIMESTAMP '2026-01-01' AND placed_at < TIMESTAMP '2027-01-01'
+      GROUP BY 1, 2
+
+  - id: c17
+    expect: answer
+    difficulty: medium
+    question: Of the returns requested in 2025, what share ended as a refund, an exchange or store credit?
+    required_tables: [sales]
+    key_columns: [return_type]
+    metric_columns: [share]
+    gold_sql: |
+      SELECT return_type, COUNT(*) * 1.0 / SUM(COUNT(*)) OVER () AS share
+      FROM sales
+      WHERE line_type = 'Sale' AND return_requested_at >= TIMESTAMP '2025-01-01'
+        AND return_requested_at < TIMESTAMP '2026-01-01'
+      GROUP BY 1
+
+  - id: c18
+    expect: answer
+    difficulty: medium
+    question: For apparel delivered in 2026, what share of lines fitted, were too small or were too large?
+    required_tables: [sales, product_master]
+    key_columns: [size_fit]
+    metric_columns: [share]
+    gold_sql: |
+      SELECT s.size_fit, COUNT(*) * 1.0 / SUM(COUNT(*)) OVER () AS share
+      FROM sales s JOIN product_master p ON p.product_id = s.product_id
+      WHERE s.line_type = 'Sale' AND p.category = 'Apparel' AND s.delivered_at IS NOT NULL
+        AND s.delivered_at >= TIMESTAMP '2026-01-01' AND s.delivered_at < TIMESTAMP '2027-01-01'
+      GROUP BY 1
+
+  - id: c19
+    expect: answer
+    difficulty: easy
+    question: What was the average order value for each traffic source in 2026?
+    required_tables: [sales]
+    required_metrics: [aov]
+    key_columns: [traffic_source]
+    metric_columns: [aov]
+    gold_sql: |
+      SELECT traffic_source,
+             SUM(CASE WHEN cancelled_at IS NULL THEN net_amount ELSE 0 END)
+               / NULLIF(COUNT(DISTINCT CASE WHEN cancelled_at IS NULL THEN order_id END), 0) AS aov
+      FROM sales
+      WHERE line_type = 'Sale' AND placed_at >= TIMESTAMP '2026-01-01' AND placed_at < TIMESTAMP '2027-01-01'
+      GROUP BY 1
+
+  - id: c20
+    expect: answer
+    difficulty: easy
+    question: How many order lines are in each order status right now?
+    required_tables: [sales]
+    key_columns: [order_status]
+    metric_columns: [order_lines]
+    gold_sql: |
+      SELECT order_status, COUNT(*) AS order_lines FROM sales WHERE line_type = 'Sale' GROUP BY 1
+
+  - id: c21
+    expect: answer
+    difficulty: hard
+    question: In October 2026, how many visits viewed a product page, how many added to cart and how many purchased?
+    required_tables: [clickstream]
+    key_columns: []
+    metric_columns: [product_view_sessions, add_to_cart_sessions, purchase_sessions]
+    gold_sql: |
+      SELECT COUNT(DISTINCT session_id) FILTER (WHERE event_type = 'pdp_view') AS product_view_sessions,
+             COUNT(DISTINCT session_id) FILTER (WHERE event_type = 'add_to_cart') AS add_to_cart_sessions,
+             COUNT(DISTINCT session_id) FILTER (WHERE event_type = 'purchase') AS purchase_sessions
+      FROM clickstream
+      WHERE event_at >= TIMESTAMP '2026-10-01' AND event_at < TIMESTAMP '2026-11-01'
+
+  - id: c22
+    expect: answer
+    difficulty: medium
+    question: What share of products shown on each list surface were added to the cart in 2026?
+    required_tables: [impressions]
+    key_columns: [surface]
+    metric_columns: [add_to_cart_share]
+    gold_sql: |
+      SELECT surface, AVG(CASE WHEN added_to_cart THEN 1.0 ELSE 0 END) AS add_to_cart_share
+      FROM impressions
+      WHERE shown_at >= TIMESTAMP '2026-01-01' AND shown_at < TIMESTAMP '2027-01-01'
+      GROUP BY 1
+
+  - id: c23
+    expect: answer
+    difficulty: easy
+    question: How many sale events of each event type started in 2026, and what was their average demand uplift?
+    required_tables: [sale_events]
+    key_columns: [event_type]
+    metric_columns: [events, avg_demand_uplift]
+    gold_sql: |
+      SELECT event_type, COUNT(*) AS events, AVG(demand_uplift) AS avg_demand_uplift
+      FROM sale_events
+      WHERE start_date >= TIMESTAMP '2026-01-01' AND start_date < TIMESTAMP '2027-01-01'
+      GROUP BY 1
+
+  - id: c24
+    expect: answer
+    difficulty: medium
+    question: How was paid ad spend split across targeted regions in 2026, and what click-through rate did the ads get in each?
+    required_tables: [marketing_spend]
+    key_columns: [region]
+    metric_columns: [spend, ad_ctr]
+    gold_sql: |
+      SELECT region, SUM(spend) AS spend, SUM(clicks) * 1.0 / NULLIF(SUM(impressions), 0) AS ad_ctr
+      FROM marketing_spend
+      WHERE date_hour >= TIMESTAMP '2026-01-01' AND date_hour < TIMESTAMP '2027-01-01'
+      GROUP BY 1

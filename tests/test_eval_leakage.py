@@ -60,3 +60,19 @@ def test_holdout_answers_are_fully_annotated():
 def test_external_items_are_marked():
     external = yaml.safe_load((ROOT / "evals" / "holdout_external.yaml").read_text())["questions"] or []
     assert all(q.get("author") == "external" for q in external)
+
+
+def test_coverage_questions_are_unseen_and_not_in_the_library():
+    from pantree_insights.semantic import load_library
+
+    coverage = yaml.safe_load((ROOT / "evals" / "coverage.yaml").read_text())["questions"]
+    assert len({q["id"] for q in coverage}) == len(coverage)
+    seen = ([e.question for e in load_examples().examples] + [e.question for e in load_library()]
+            + [v for e in load_library() for v in e.variants] + [q["question"] for q in HOLDOUT + REGRESSION])
+    texts = [p.read_text(encoding="utf-8").lower() for p in [*(ROOT / "prompts").glob("*.yaml"),
+                                                            *(ROOT / "semantic").rglob("*.yaml")]]
+    for q in coverage:
+        close = [s for s in seen if jaccard(q["question"], s) > 0.6]
+        assert not close, f"{q['id']} is too close to a seen question: {close}"
+        assert not any(q["question"].lower() in t for t in texts), q["id"]
+        assert {"gold_sql", "key_columns", "metric_columns", "required_tables"} <= set(q), q["id"]

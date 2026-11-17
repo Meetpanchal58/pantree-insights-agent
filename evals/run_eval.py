@@ -72,6 +72,9 @@ def load_suite(suite: str) -> list[dict]:
         for q in annotated:                              # over-asking pass on clear questions
             if q["expect"] == "answer":
                 items.append({"suite": "holdout", "set": "overask", "exclude": [], **{**q, "id": f"o-{q['id']}"}})
+    if suite in ("coverage", "all"):                    # tables and columns the other sets do not reach
+        for q in _yaml("coverage.yaml"):
+            items.append({"suite": "coverage", "set": q["expect"], "exclude": [], "author": "maintainer", **q})
     if suite in ("flow", "all"):
         for q in _yaml("flow_regression.yaml"):
             items.append({"suite": "flow", "set": q["expect"], "exclude": [], **q})
@@ -268,7 +271,7 @@ def summary(rows: list[dict]) -> str:
            f"variant(s): {', '.join(variants)} · repeats: {max(r['repeat'] for r in rows) + 1 if rows else 0}",
            "", "Format: mean [95% bootstrap CI over questions] (n questions, k repeats, pass^k = correct in all k).",
            ""]
-    for suite in ("holdout", "regression", "flow"):
+    for suite in ("holdout", "regression", "coverage", "flow"):
         everything = [r for r in rows if r["suite"] == suite]
         if not everything:
             continue
@@ -368,7 +371,7 @@ def passes_gate(rows: list[dict], expected: int, minimum: float) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["holdout", "regression", "flow", "all"], default="holdout")
+    parser.add_argument("--suite", choices=["holdout", "regression", "coverage", "flow", "all"], default="holdout")
     parser.add_argument("--variant", default="full", help="full, no_understanding, full_no_memory, validator, "
                                                           "planner, retrieval, semantic or baseline")
     parser.add_argument("--repeats", type=int, default=1)
