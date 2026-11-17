@@ -31,3 +31,6 @@ Thumbs.db
 .cache/
 
 node_modules/
+
+# Generated evaluation runs are workflow/local artifacts
+evals/reports/
