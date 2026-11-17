@@ -3,24 +3,25 @@
 tables:
   product_master:
     group: Catalogue
+    entity: product (style)
     grain: one row per product style
     description: 'Products launched so far. Hierarchy: category -> sub_category -> article_type -> product -> SKU.'
     time_column: launch_date
     columns:
       product_id: text - primary key
-      source_product_id: integer
-      product_name: text
+      source_product_id: integer - id of the product in the source catalogue (not a business key)
+      product_name: text - product title shown in the shop
       brand_name: text - 13 brands are stored in two spellings (e.g. 'ADIDAS' and 'Adidas', 'PUMA' and 'Puma'), so
         results by brand list them separately; keep the stored values and mention it when such a brand appears
-      gender: text
-      category: text
-      sub_category: text
-      article_type: text
-      colour: text
-      season: text
-      usage: text
-      material: text
-      fit: text
+      gender: text - who the product is made for (Men, Women, Unisex, Boys, Girls)
+      category: text - top level - Apparel, Footwear or Accessories
+      sub_category: text - second level of the hierarchy (e.g. Topwear, Shoes)
+      article_type: text - third level (e.g. Tshirts, Casual Shoes)
+      colour: text - main colour of the product
+      season: text - season the product is designed for
+      usage: text - occasion (Casual, Formal, Sports, Ethnic, ...)
+      material: text - main fabric or material
+      fit: text - fit of garments (e.g. Regular, Slim)
       size_type: text - Apparel, Footwear or Free Size
       mrp: number - list price (Rs, GST included)
       unit_cost: number - what the shop pays the supplier
@@ -28,11 +29,12 @@ tables:
       seller_id: text - links to sellers
       launch_date: timestamp - first day on sale
       discontinue_date: timestamp - last day on sale (empty if still sold)
-      image_url: text
-      description: text
-      is_active: boolean
+      image_url: text - product image link (not for analysis)
+      description: text - product description text (not for analysis)
+      is_active: boolean - true if the product is on sale today
   product_skus:
     group: Catalogue
+    entity: product size (SKU)
     grain: one row per size of a product
     description: Sellable units. Stock, purchase orders and sales are kept per SKU.
     columns:
@@ -42,66 +44,71 @@ tables:
       barcode: text - EAN-13
   sellers:
     group: Catalogue
+    entity: seller
     grain: one row per seller
     description: Brands and marketplace sellers. 1P = own stock, 3P-FBA = seller's stock in our warehouse, 3P-MFN = seller
       ships.
     time_column: onboarding_date
     columns:
       seller_id: text - primary key
-      seller_name: text
-      seller_type: text
-      city: text
-      state: text
-      region: text
+      seller_name: text - seller's business name
+      seller_type: text - 1P (the shop itself), 3P-FBA (shop warehouse) or 3P-MFN (seller ships)
+      city: text - city where the seller is based
+      state: text - state where the seller is based
+      region: text - region where the seller is based
       home_warehouse_id: text - links to warehouses
-      onboarding_date: timestamp
-      rating: number
-      fulfillment_score: number
-      cancellation_rate: number
+      onboarding_date: timestamp - day the seller joined
+      rating: number - seller rating 1-5 (not a product review rating)
+      fulfillment_score: number - seller's fulfilment quality score 0-1
+      cancellation_rate: number - share of the seller's lines cancelled (0-1)
       lead_time_days: integer - days from purchase order to delivery
       commission_rate: number - marketplace fee
-      is_active: boolean
+      is_active: boolean - true if the seller is active today
   warehouses:
     group: Catalogue
+    entity: warehouse
     grain: one row per warehouse
     description: >-
       Fulfilment centres (warehouses) with their city and region; sales.warehouse_id says which warehouse
       shipped an order line.
     columns:
       warehouse_id: text - primary key
-      city: text
-      region: text
-      capacity_units: integer
+      city: text - city of the warehouse (one warehouse per city)
+      region: text - region of the warehouse
+      capacity_units: integer - storage capacity in units
   agents:
     group: Service
+    entity: support agent
     grain: one row per support agent
-    description: Customer support staff.
+    description: 'Customer-support agents: their team, location and language. Join from support_contacts.agent_id.'
     time_column: hire_date
     columns:
       agent_id: text - primary key
-      agent_name: text
+      agent_name: text - support agent's name (staff, not customers)
       team: text - Orders, Returns, Payments or Product Support
-      location: text
-      language: text
-      hire_date: timestamp
+      location: text - city the agent works from
+      language: text - language the agent supports
+      hire_date: timestamp - day the agent started
   sale_events:
     group: Events & offers
+    entity: sale event
     grain: one row per sale event
     description: Festivals and sales, live only between start_date and end_date (Prime members from prime_early_access_date).
     time_column: start_date
     columns:
       event_id: text - primary key
-      name: text
-      event_type: text
-      start_date: timestamp
-      end_date: timestamp
-      prime_early_access_date: timestamp
+      name: text - event name with year (e.g. Diwali 2026)
+      event_type: text - Festival, Mega Sale, Payday, Clearance or Season Sale
+      start_date: timestamp - first day of the event
+      end_date: timestamp - last day of the event (inclusive)
+      prime_early_access_date: timestamp - day Prime members could start buying
       categories_on_offer: text - All, Ethnic, Gifting, Women, Winter, Summer or Casual
       avg_extra_discount: number - average extra discount on covered products
       demand_uplift: number - how much busier the shop is during the event
       run_up_days: integer - days before the start when campaigns and browsing ramp up
   promotions:
     group: Events & offers
+    entity: coupon / promotion
     grain: one row per coupon
     description: 'Coupon codes: one or two per event plus always-on offers (FIRST100, BANK10, PRIME15).'
     time_column: start_date
@@ -110,16 +117,17 @@ tables:
       code: text - used in sales.coupon_code
       event_id: text - links to sale_events
       offer_type: text - % Off, Flat Off or Bank Offer
-      value: number
-      min_order_value: integer
-      max_discount: integer
-      eligible_audience: text
-      eligible_payment_method: text
+      value: number - offer value - a share for % Off and Bank Offer (0.10 = 10% off), Rs for Flat Off
+      min_order_value: integer - minimum order value in Rs to use the coupon
+      max_discount: integer - largest discount in Rs
+      eligible_audience: text - who may use the coupon
+      eligible_payment_method: text - payment method required, if any
       usage_limit_per_customer: integer - times one customer may use it
-      start_date: timestamp
-      end_date: timestamp
+      start_date: timestamp - first day the coupon is valid
+      end_date: timestamp - last day the coupon is valid
   campaigns:
     group: Marketing
+    entity: marketing campaign
     grain: one row per campaign
     description: 'Paid search, paid social, display, affiliate and CRM campaigns: monthly always-on ones and event ones.'
     time_column: start_date
@@ -128,38 +136,40 @@ tables:
       event_id: text - links to sale_events
       promo_code: text - links to promotions.code
       affiliate_partner: text - affiliate site (affiliate campaigns only)
-      affiliate_type: text
+      affiliate_type: text - kind of affiliate partner (cashback, coupon site, ...)
       payout_model: text - CPS (% of sale), CPA (per new customer) or CPC (per click)
-      payout_rate: number
-      utm_source: text
-      utm_medium: text
-      campaign_name: text
+      payout_rate: number - affiliate payout (share or Rs per order, see payout_model)
+      utm_source: text - UTM source tag of the campaign's links
+      utm_medium: text - UTM medium tag
+      campaign_name: text - campaign name
       channel_group: text - Paid Search, Paid Social, Display, Affiliate or CRM
-      channel: text
+      channel: text - marketing channel (Meta, Google Search, Email, ...)
       campaign_type: text - Brand, Generic, Performance, Prospecting, Retargeting, Event or Lifecycle
-      objective: text
-      audience: text
-      offer_type: text
-      start_date: timestamp
-      end_date: timestamp
-      total_budget: number
+      objective: text - campaign goal (e.g. conversions, awareness)
+      audience: text - target audience
+      offer_type: text - kind of offer advertised
+      start_date: timestamp - first day the campaign runs
+      end_date: timestamp - last day the campaign runs
+      total_budget: number - planned total budget in Rs
       utm_campaign: text - matches clickstream.utm_campaign
-      status: text
+      status: text - campaign status
   marketing_plan:
     group: Marketing
+    entity: campaign-day plan
     grain: one row per paid campaign per day
     description: Planned budget and targets, set when the campaign is created (may run past today).
     time_column: date
     columns:
-      date: timestamp
+      date: timestamp - planned day
       campaign_id: text - links to campaigns
-      planned_spend: number - Rs
-      target_impressions: integer
-      target_clicks: integer
-      target_orders: number
-      target_revenue: number
+      planned_spend: number - spend planned for the campaign on that day, in Rs
+      target_impressions: integer - planned ad impressions
+      target_clicks: integer - planned ad clicks
+      target_orders: number - planned orders (platform-reported basis)
+      target_revenue: number - planned revenue in Rs
   marketing_spend:
     group: Marketing
+    entity: campaign-hour ad delivery
     grain: one row per campaign per hour (per region for paid media)
     description: Actual delivery. platform_conversions are what the ad platform reports (more than the shop sees). Affiliate
       spend = commissions and per-click fees; CRM spend = message costs.
@@ -167,106 +177,112 @@ tables:
     columns:
       date_hour: timestamp - start of the hour
       campaign_id: text - links to campaigns
-      region: text
+      region: text - region the paid spend targeted; 'All' = not split by region (CRM, affiliates)
       spend: number - Rs spent in that hour
-      impressions: integer
-      clicks: integer
-      platform_conversions: integer
+      impressions: integer - ad impressions
+      clicks: integer - ad clicks
+      platform_conversions: integer - orders the ad platform claims
       platform_revenue: number - revenue the ad platform claims (over-reported)
   marketing_attribution:
     group: Marketing
+    entity: order touchpoint
     grain: one row per order per marketing touchpoint
     description: Campaign visits in the 30 days before an order, with credit under four models (each sums to 1 per order).
       Orders with no campaign visit get one 'Direct/Organic' row.
     time_column: order_at
     columns:
       order_id: text - links to sales
-      customer_id: text
-      order_at: timestamp
-      touch_number: integer
-      touch_at: timestamp
+      customer_id: text - customer who placed the order
+      order_at: timestamp - when the order was placed
+      touch_number: integer - position of this touchpoint in the order's path (1 = first)
+      touch_at: timestamp - when the touchpoint happened
       campaign_id: text - links to campaigns
-      channel_group: text
+      channel_group: text - channel group of the touchpoint (Direct/Organic when no campaign)
       credit_last_click: number - share of the order credited to this touch (last-click model)
-      credit_first_click: number
-      credit_linear: number
+      credit_first_click: number - share of the order credited under first-click (sums to 1 per order)
+      credit_linear: number - share credited under linear attribution (sums to 1 per order)
       credit_time_decay: number - half-life 7 days
       order_revenue: number - the order's revenue; multiply by a credit column to attribute it
   inventory_history:
     group: Inventory & price
+    entity: SKU-day stock movement
     grain: one row per SKU per day on which its stock moved
     description: Daily stock movements; closing = opening + received + returned_restocked - sold. Days without a row had no
       movement.
     time_column: date
     columns:
-      date: timestamp
+      date: timestamp - day of the stock movement
       sku_id: text - links to product_skus
-      product_id: text
-      warehouse_id: text
-      opening_stock: integer
-      received: integer
-      sold: integer
-      returned_restocked: integer
-      damaged: integer
+      product_id: text - product of the SKU
+      warehouse_id: text - warehouse holding the stock
+      opening_stock: integer - units at the start of the day
+      received: integer - units received that day
+      sold: integer - units sold that day
+      returned_restocked: integer - returned units put back into stock
+      damaged: integer - units written off as damaged
       closing_stock: integer - stock at end of that day for that SKU
       demand_units: integer - add-to-cart attempts, including when out of stock
       lost_sales_units: integer - demand that could not be served
       stock_status: text - Healthy, Low or Out of Stock
   inventory_live:
     group: Inventory & price
+    entity: SKU stock today
     grain: one row per SKU
-    description: Stock at the end of today.
+    description: 'Current stock per SKU (one row per size of a product): units on hand, inbound and the reorder point.'
     time_column: updated_at
     columns:
       sku_id: text - links to product_skus
-      product_id: text
-      warehouse_id: text
+      product_id: text - product of the SKU
+      warehouse_id: text - warehouse holding the stock
       on_hand_qty: integer - units in stock now
       inbound_qty: integer - on open purchase orders
       reorder_point: integer - stock level that triggers a reorder
-      updated_at: timestamp
+      updated_at: timestamp - time of the stock snapshot
   price_history:
     group: Inventory & price
+    entity: product price period
     grain: one row per product per period with the same price
     description: Selling price over time (valid_from .. valid_to; valid_to empty = current price).
     time_column: valid_from
     columns:
       product_id: text - links to product_master
-      valid_from: timestamp
-      valid_to: timestamp
-      mrp: number
-      selling_price: number
-      discount_pct: number
+      valid_from: timestamp - first day of this price
+      valid_to: timestamp - last day of this price
+      mrp: number - list price in Rs during the period
+      selling_price: number - price charged in Rs
+      discount_pct: number - discount off MRP as a share (0-1)
       price_change_reason: text - List Price, Everyday Markdown, Cost Change, Sale Event or Clearance
       event_id: text - links to sale_events
   customers:
     group: Customers
+    entity: customer
     grain: one row per customer
     description: 'Accounts (no personal data). account_status: Active, Dormant (not seen for 180 days) or Deleted.'
     time_column: signup_at
     columns:
       customer_id: text - primary key
-      signup_at: timestamp
+      signup_at: timestamp - when the customer signed up
       signup_channel: text - traffic source of the sign-up visit
       signup_campaign_id: text - links to campaigns
-      signup_method: text
-      signup_device: text
+      signup_method: text - how they signed up (Phone OTP, Email OTP)
+      signup_device: text - device used to sign up
       anonymous_id: text - visitor id before sign-up (-> clickstream)
-      city: text
-      state: text
-      region: text
-      city_tier: text
-      age_bracket: text
-      gender: text
+      city: text - city where the customer signed up (not the delivery city)
+      state: text - state at sign-up
+      region: text - region at sign-up
+      city_tier: text - city tier at sign-up (Tier 1 = metro)
+      age_bracket: text - customer age band
+      gender: text - customer gender (M, F or Other)
       is_prime: boolean - Prime (paid loyalty) member now
-      prime_start_date: timestamp
-      email_opt_in: boolean
-      sms_opt_in: boolean
-      push_opt_in: boolean
-      whatsapp_opt_in: boolean
-      account_status: text
+      prime_start_date: timestamp - day the customer joined Prime
+      email_opt_in: boolean - accepts marketing email
+      sms_opt_in: boolean - accepts SMS
+      push_opt_in: boolean - accepts app push
+      whatsapp_opt_in: boolean - accepts WhatsApp
+      account_status: text - Active, Dormant or Deleted
   customer_addresses:
     group: Customers
+    entity: delivery address
     grain: one row per address
     description: >-
       Delivery addresses and their geography (city, state, region, city tier, pincode). Join sales.address_id
@@ -275,72 +291,76 @@ tables:
     columns:
       address_id: text - primary key
       customer_id: text - links to customers
-      label: text
-      city: text
-      state: text
-      region: text
-      city_tier: text
-      pincode: text
-      is_default: boolean
+      label: text - address label (Home)
+      city: text - delivery city
+      state: text - delivery state
+      region: text - delivery region
+      city_tier: text - delivery city tier
+      pincode: text - delivery pincode
+      is_default: boolean - customer's default address
       nearest_warehouse_id: text - links to warehouses
-      created_at: timestamp
+      created_at: timestamp - when the address was added
   auth_events:
     group: Customers
+    entity: login / sign-up attempt
     grain: one row per sign-up / login attempt
-    description: signup, login and otp_failed events.
+    description: 'Every sign-up, login and failed OTP attempt, with the method and device used.'
     time_column: event_at
     columns:
-      event_at: timestamp
+      event_at: timestamp - time of the attempt
       customer_id: text - links to customers
-      event_type: text
-      method: text
-      device: text
-      success: boolean
+      event_type: text - signup, login or otp_failed
+      method: text - Phone OTP or Email OTP
+      device: text - device used
+      success: boolean - true if the attempt succeeded
       session_id: text - links to clickstream
   clickstream:
     group: Customers
+    entity: visit event
     grain: one row per event in a visit
     description: Every page view and action. Anonymous visitors have anonymous_id only; customer_id appears after sign-up.
     time_column: event_at
     columns:
       event_id: text - primary key
       session_id: text - one visit; a purchase event marks a converting visit
-      anonymous_id: text
+      anonymous_id: text - visitor id before sign-in
       customer_id: text - links to customers
-      event_at: timestamp
+      event_at: timestamp - time of the event
       event_type: text - session_start, home_view, plp_view, search, pdp_view, add_to_cart, checkout_start, payment_attempt,
         payment_failed, purchase, session_end, ...
-      page_type: text
+      page_type: text - kind of page (home, plp, pdp, cart, ...)
       product_id: text - links to product_master
       sku_id: text - links to product_skus
       list_position: number - position of the product when it was clicked from a list
-      search_query: text
-      device: text
-      traffic_source: text
-      utm_source: text
-      utm_medium: text
-      utm_campaign: text
+      search_query: text - text searched (search events only)
+      device: text - device of the visit
+      traffic_source: text - how the visit arrived (direct, paid_search, ...)
+      utm_source: text - UTM source of the landing link
+      utm_medium: text - UTM medium
+      utm_campaign: text - UTM campaign tag
       campaign_id: text - links to campaigns
       order_id: text - links to sales (purchase events)
-      dwell_seconds: number
+      dwell_seconds: number - seconds spent on the page
   impressions:
     group: Customers
+    entity: product shown in a list
     grain: one row per product shown in a list
     description: Products shown on home recommendations, listings, search results and 'similar products'.
     time_column: shown_at
     columns:
       page_event_id: text - links to clickstream.event_id (the page that showed it)
-      session_id: text
-      anonymous_id: text
-      customer_id: text
-      shown_at: timestamp
-      surface: text
+      session_id: text - visit the product was shown in
+      anonymous_id: text - visitor id
+      customer_id: text - customer if signed in
+      shown_at: timestamp - time it was shown
+      surface: text - list type (home_recs, plp, search_results, pdp_similar)
       position: integer - 1 = top
       product_id: text - links to product_master
       clicked: boolean - the visitor opened it
       added_to_cart: boolean - then added it to the cart
   sales:
     group: Sales
+    entity: order line
     grain: one row per transaction line (item in an order)
     description: Orders, payments, shipping, returns and refunds in one table. Each milestone has its own timestamp; order_status
       is the latest milestone reached today and updated_at the time of the last change. Exchange replacements are extra lines
@@ -355,102 +375,104 @@ tables:
       customer_id: text - links to customers
       session_id: text - links to clickstream
       address_id: text - links to customer_addresses (delivery region, state, city tier)
-      ship_city: text
-      ship_pincode: text
-      product_id: text
+      ship_city: text - delivery city (same as the delivery address city)
+      ship_pincode: text - delivery pincode
+      product_id: text - product bought
       sku_id: text - links to product_skus
-      seller_id: text
-      warehouse_id: text
-      quantity: integer
-      mrp: number
+      seller_id: text - seller of the line
+      warehouse_id: text - warehouse that shipped it
+      quantity: integer - units on the line
+      mrp: number - list price per unit in Rs
       unit_price: number - selling price per unit (after markdowns, before coupon)
       gross_amount: number - unit_price * quantity (before coupon)
-      coupon_code: text
-      coupon_discount: number
-      shipping_fee: number
+      coupon_code: text - coupon used, if any
+      coupon_discount: number - coupon discount in Rs
+      shipping_fee: number - shipping charged in Rs
       net_amount: number - gross_amount - coupon_discount + shipping_fee (GST included)
       tax_amount: number - GST included in net_amount
-      gst_rate: number
-      unit_cost: number
-      payment_method: text
+      gst_rate: number - tax rate applied
+      unit_cost: number - what the shop paid per unit
+      payment_method: text - COD, UPI, Credit Card, Debit Card, Net Banking or Wallet
       event_id: text - sale event whose price applied (NULL = normal day). Events overlap, so to measure one
         event use its date window (placed_at between start_date and end_date), not this column
       campaign_id: text - links to campaigns
-      traffic_source: text
-      device: text
-      affiliate_partner: text
+      traffic_source: text - how the ordering visit arrived
+      device: text - device the order was placed on
+      affiliate_partner: text - affiliate credited, if any
       affiliate_commission: number - payable to the affiliate for this line
       is_first_order: boolean - the customer's first ever order
-      courier: text
-      promised_delivery_date: timestamp
-      placed_at: timestamp
-      confirmed_at: timestamp
-      shipped_at: timestamp
-      out_for_delivery_at: timestamp
+      courier: text - delivery company
+      promised_delivery_date: timestamp - delivery date promised at checkout
+      placed_at: timestamp - when the order was placed
+      confirmed_at: timestamp - when the order was confirmed
+      shipped_at: timestamp - when it was shipped
+      out_for_delivery_at: timestamp - when it went out for delivery
       delivered_at: timestamp - set once delivered; NULL if not (yet) delivered
-      return_requested_at: timestamp
-      return_picked_up_at: timestamp
-      return_received_at: timestamp
-      exchanged_at: timestamp
-      refunded_at: timestamp
+      return_requested_at: timestamp - when a return was requested
+      return_picked_up_at: timestamp - when the return was picked up
+      return_received_at: timestamp - when the return reached the warehouse
+      exchanged_at: timestamp - when an exchange was completed
+      refunded_at: timestamp - when the refund was made
       cancelled_at: timestamp - set if the line was cancelled before shipping
-      rto_at: 'timestamp - returned to origin: parcel came back undelivered (mostly COD refusals)'
-      undelivered_at: timestamp
-      lost_at: timestamp
-      payment_collected_at: timestamp
-      cancel_reason: text
-      cancelled_by: text
-      return_reason: text
-      return_type: text
-      return_qc_result: text
+      rto_at: 'timestamp - returned to origin - parcel came back undelivered (mostly COD refusals)'
+      undelivered_at: timestamp - when delivery failed
+      lost_at: timestamp - when the parcel was declared lost
+      payment_collected_at: timestamp - when cash was collected (COD)
+      cancel_reason: text - reason for cancelling
+      cancelled_by: text - Customer or Seller
+      return_reason: text - reason given for the return
+      return_type: text - Refund, Exchange or Store Credit
+      return_qc_result: text - quality check of the returned item (Restocked or Damaged)
       refund_amount: number - money returned to the customer (refunds and store credit)
-      replacement_transaction_id: text
-      size_fit: text
+      replacement_transaction_id: text - exchange line that replaced it
+      size_fit: text - how the size fitted (Fits, Too Small, Too Large)
       order_status: text - Placed, Confirmed, Shipped, Out for Delivery, Delivered, Return Requested, Return Picked Up, Returned,
         Exchanged, Refunded, Cancelled, Returned to Origin, Undelivered or Lost
-      updated_at: timestamp
+      updated_at: timestamp - last change to the line
       payment_status: text - Paid, Pending (COD not yet collected), Not Collected, Refunded or Not Applicable
   product_reviews:
     group: Service
+    entity: product review
     grain: one row per review
-    description: Reviews written after delivery.
+    description: 'Product reviews left after delivery: rating 1-5, sentiment, the aspect discussed and moderation status. Only moderation_status = ''Published'' reviews count.'
     time_column: reviewed_at
     columns:
       review_id: text - primary key
       transaction_id: text - links to sales
-      order_id: text
-      customer_id: text
-      product_id: text
+      order_id: text - order reviewed
+      customer_id: text - reviewer
+      product_id: text - product reviewed
       rating: integer - 1-5 stars
-      title: text
-      review_text: text
-      aspect: 'text - what the review is about: Quality, Delivery, Look, Price, Size'
-      sentiment: text
-      verified_purchase: boolean
+      title: text - review title (text)
+      review_text: text - review text (not for analysis)
+      aspect: 'text - what the review is about - Quality, Delivery, Look, Price, Size'
+      sentiment: text - Positive, Neutral or Negative
+      verified_purchase: boolean - true if bought in the shop
       moderation_status: text - Published or Rejected
-      helpful_votes: integer
-      reviewed_at: timestamp
+      helpful_votes: integer - votes marking the review helpful
+      reviewed_at: timestamp - when the review was written
   support_contacts:
     group: Service
+    entity: support contact
     grain: one row per contact (a ticket can have several)
     description: Customer contacts triggered by late deliveries, failed deliveries, refunds, exchanges and payment problems.
     time_column: contact_at
     columns:
       contact_id: text - primary key
       ticket_id: text - groups contacts
-      customer_id: text
-      order_id: text
+      customer_id: text - customer who contacted support
+      order_id: text - order the contact is about, if any
       transaction_id: text - links to sales
-      product_id: text
-      contact_at: timestamp
-      channel: text
-      transcript_text: text
+      product_id: text - product the contact is about, if any
+      contact_at: timestamp - time of the contact
+      channel: text - how the customer contacted support (chat, email, phone, ...)
+      transcript_text: text - conversation text (not for analysis)
       issue_category: text - agent's tag (noisy)
       agent_id: text - links to agents
       first_response_minutes: integer - minutes until the first agent reply
-      resolved_at: timestamp
+      resolved_at: timestamp - when the ticket was resolved
       csat: number - customer satisfaction 1-5 (may be empty)
-      resolution_status: text
+      resolution_status: text - Resolved, Pending or Escalated
 joins:
 - sales.product_id = product_master.product_id
 - sales.sku_id = product_skus.sku_id

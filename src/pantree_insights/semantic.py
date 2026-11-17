@@ -15,6 +15,7 @@ from .config import get_settings
 # ----------------------------------------------------------------------------- schema.yaml
 class Table(BaseModel):
     group: str
+    entity: str = ""                 # what one row describes ("order line", "seller"); tells shared column names apart
     grain: str
     description: str
     time_column: str | None = None
