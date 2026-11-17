@@ -6,7 +6,7 @@ const STEP_LABELS = {
   plan: "Planning the analysis",
   write_sql: "Writing SQL", check_sql: "Safety checks", run_query: "Running the query",
   validate: "Reviewing the query", analyse: "Analysing the result", chart: "Building the chart",
-  remember: "Saving to memory",
+  remember: "Saving to memory", queue: "Waiting for analysis capacity",
   offline_demo: "Loading saved analysis",
 };
 const STATUS_ICON = { done: "✓", retry: "↻", failed: "✕", blocked: "✕", warning: "!", needs_input: "?", running: "" };
@@ -325,8 +325,21 @@ function answerCard(run, replay = false) {
     <div class="row"><button class="btn small" data-action="show-run">View analysis, chart & SQL</button>
     ${replay ? `<span class="tag replay">${run.offline ? "Offline demo · saved results" : "Replay · recorded run"} · data as of ${esc(run.data_as_of)}</span>` : `<span class="tag">Data as of ${esc(run.data_as_of)}</span>`}
     ${run.verification && run.verification.status === "verified" ? `<span class="tag ok" title="Each metric was recomputed from its definition for the confirmed scope and matched">✓ Numbers verified against the data</span>` : run.verification && run.verification.status === "mismatch" ? `<span class="tag warn" title="The recomputed metric disagrees with this result; see the warnings">⚠ Numbers do not match the definition</span>` : run.verification ? `<span class="tag" title="This answer's metric could not be recomputed independently">Not independently verified</span>` : ""}
-    ${run.cost && run.cost.usd ? `<span class="tag">$${run.cost.usd.toFixed(3)}</span>` : ""}</div></div>`;
+    ${run.cost && run.cost.usd ? `<span class="tag">${run.cost.usd.toFixed(3)}</span>` : ""}\n    ${!replay && !run.offline && run.run_id ? `<button class="btn small feedback" data-feedback="up" title="Correct">👍</button><button class="btn small feedback" data-feedback="down" title="Incorrect">👎</button>` : ""}</div></div>`;
   el.querySelector('[data-action="show-run"]').addEventListener("click", () => { showRunInPanel(run); openPanel(); });
+  el.querySelectorAll("[data-feedback]").forEach((button) => button.addEventListener("click", async () => {
+    const rating = button.dataset.feedback;
+    let reason = "", note = "";
+    if (rating === "down") {
+      reason = prompt("What was wrong? metric, filter, period, SQL, interpretation, missing data, or other") || "";
+      note = prompt("Optional short note") || "";
+    }
+    try {
+      await api("/api/runs/" + run.run_id + "/feedback", { method: "POST", body: { rating, reason, note } });
+      el.querySelectorAll("[data-feedback]").forEach((b) => (b.disabled = true));
+      toast("Feedback saved");
+    } catch (error) { toast(error.message); }
+  }));
   return el;
 }
 
