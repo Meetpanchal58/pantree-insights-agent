@@ -272,6 +272,18 @@ class Store:
             reason=reason[:40] or None, note=note[:1000] or None))
         return fid
 
+    def feedback_review(self, rating: str = "down") -> list[dict]:
+        stmt = (
+            select(
+                feedback.c.id, feedback.c.run_id, feedback.c.rating, feedback.c.reason,
+                feedback.c.note, feedback.c.created_at, analysis_runs.c.question, analysis_runs.c.events,
+            )
+            .join(analysis_runs, analysis_runs.c.id == feedback.c.run_id)
+            .where(feedback.c.rating == rating)
+            .order_by(feedback.c.created_at.desc())
+        )
+        return self._all(stmt)
+
     # ------------------------------------------------------------------ projects
     def projects(self, user_id: str) -> list[dict]:
         return self._all(select(projects).where(projects.c.user_id == user_id).order_by(projects.c.updated_at.desc()))
@@ -328,6 +340,8 @@ class Store:
     def delete_chat(self, user_id: str, chat_id: str) -> None:
         if self.chat(user_id, chat_id):
             with self.engine.begin() as c:
+                c.execute(delete(feedback).where(feedback.c.chat_id == chat_id))
+                c.execute(delete(analysis_runs).where(analysis_runs.c.chat_id == chat_id))
                 c.execute(delete(messages).where(messages.c.chat_id == chat_id))
                 c.execute(delete(chats).where(chats.c.id == chat_id))
 
