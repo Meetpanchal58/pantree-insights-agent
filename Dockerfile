@@ -21,7 +21,6 @@ COPY src ./src
 COPY semantic ./semantic
 COPY prompts ./prompts
 COPY memory ./memory
-COPY demo_runs ./demo_runs
 RUN uv sync --frozen --no-dev
 
 # Download the embedding model now, so cold starts do not fetch it
