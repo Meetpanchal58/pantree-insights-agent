@@ -112,7 +112,7 @@ def failure_details(error: Exception) -> dict:
 
 
 class Runner:
-    """Owns the agent and the runs in progress (one Cloud Run instance, so in-memory is fine)."""
+    """Runs execute in one process; persisted paused checkpoints can be reattached after a restart."""
 
     def __init__(self, agent_factory=None):
         self._agent_factory = agent_factory
@@ -136,12 +136,14 @@ class Runner:
             return self._agent
 
     def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool) -> Run:
+        # Initialize the agent before writing a user question: a cold-start error should
+        # not leave behind a message that can never receive an analysis result.
+        agent = self.agent
         history = store.history(chat["id"])
         store.add_message(chat["id"], "user", question)
         if chat["title"] == "New chat":
             store.update_chat(user["id"], chat["id"], title=question[:80])
         scope = MemoryScope(store, user, chat)
-        agent = self.agent
         run_id, events = agent.start(question, chat_id=chat["id"], history=history,
                                           use_defaults=use_defaults, memory=scope)
         run = Run(run_id, user, chat, question, agent=agent)
@@ -332,6 +334,9 @@ def create_app() -> FastAPI:
         pending = store.pending_run(user["id"], chat_id)
         active = runner.runs.get(pending["id"]) if pending else None
         resumable = bool(active or (pending and pending["status"] == "paused"))
+        if pending and not resumable:
+            store.save_run(pending["id"], "interrupted", pending.get("events") or [],
+                           {"reason": "The service restarted while a model call was active"})
         return to_json({**chat, "messages": store.messages(chat_id),
                         "pending_run": pending["id"] if resumable else None,
                         "interrupted_run": bool(pending and not resumable)})
@@ -384,6 +389,7 @@ def create_app() -> FastAPI:
 
         async def events():
             index = since
+            heartbeat = time.monotonic()
             while True:
                 while index < len(run.events):
                     event = run.events[index]
@@ -393,6 +399,10 @@ def create_app() -> FastAPI:
                         return
                 if await request.is_disconnected():
                     return
+                if time.monotonic() - heartbeat >= 12:
+                    # SSE comments are ignored by EventSource but prevent idle proxy timeouts.
+                    yield ": heartbeat\\n\\n"
+                    heartbeat = time.monotonic()
                 await asyncio.sleep(0.15)
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
