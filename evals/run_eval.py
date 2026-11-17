@@ -110,6 +110,8 @@ def claims_hold_on_gold(claims: list[dict], gold: pd.DataFrame, mapping: dict[st
 
 def decline_layer(events: list[dict]) -> str | None:
     for e in events:
+        if e.get("step") == "understand" and (e.get("detail") or {}).get("decision") == "decline":
+            return "understanding"
         if e.get("step") == "check_input" and e.get("status") == "blocked":
             return "input_guard"
         if e.get("step") == "plan" and (e.get("detail") or {}).get("decision") == "decline":
@@ -174,7 +176,10 @@ def ask(agent, item: dict, tries: int = 2, wait: float = 20, memory=None) -> lis
                                     memory=memory)
             return list(stream)
         except Exception as error:                        # noqa: BLE001 - any provider/transport failure
-            print(f"API ERROR {item.get('id', '?')} (try {attempt + 1}/{tries}): {str(error)[:120]}", flush=True)
+            import traceback
+            where = traceback.extract_tb(error.__traceback__)[-1]
+            print(f"API ERROR {item.get('id', '?')} (try {attempt + 1}/{tries}): {type(error).__name__}: "
+                  f"{str(error)[:120]} at {where.filename.split('/')[-1]}:{where.lineno}", flush=True)
             time.sleep(wait)
     return None
 

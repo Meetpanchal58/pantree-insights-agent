@@ -48,4 +48,11 @@ def test_same_word_different_column_by_subject():
 def test_columns_map_back_to_concepts():
     assert CONCEPTS.concepts_of_column("customers.city") == {"city"}
     assert CONCEPTS.concepts_of_column("sellers.city") == {"seller_city"}
-    assert CONCEPTS.concepts_of_column("warehouses.city") == {"warehouse"}
+    assert CONCEPTS.concepts_of_column("warehouses.city") == {"warehouse_city"}
+
+
+def test_warehouse_means_the_warehouse_id_with_its_city_as_a_label():
+    """Found by the evaluation: answers by warehouse used the city, the expected answers the ID."""
+    entry = CONCEPTS.column("warehouse", "orders")
+    assert entry.column == "sales.warehouse_id" and "warehouses.city" in (entry.note or "")
+    assert CONCEPTS.column("warehouse", "stock_now").column == "inventory_live.warehouse_id"

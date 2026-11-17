@@ -35,6 +35,8 @@ class Mention(BaseModel):
 
 
 class QuestionFrame(BaseModel):
+    decline_reason: str | None = Field(None, description="Only if the request must be declined: why, plus an "
+                                       "aggregated alternative. Decided before anything else.")
     restated_question: str = Field(description="The question as you understand it, precise and self-contained")
     subjects: list[str] = Field(default_factory=list, description="Subject names from the list: usually one; two "
                                 "when the question compares them (e.g. sign-ups vs orders)")

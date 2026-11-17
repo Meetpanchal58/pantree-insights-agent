@@ -28,6 +28,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from . import agents
+from .catalog import value_columns as catalog_values
 from .charts import build_chart
 from .checks import result_problems
 from .config import get_settings
@@ -179,6 +180,10 @@ class Agent:
             self.aliases = {alias.lower(): value for value, names in self.retriever.glossary.value_aliases.items()
                             for alias in names}
             self.references = ReferenceIndex(list(self.retriever.examples.values()))
+            # which columns hold a value: the catalog's complete lists plus the runtime value index (brands, ...)
+            self.value_columns = {v: list(cols) for v, cols in self.retriever.value_columns.items()}
+            for value, cols in catalog_values().items():
+                self.value_columns[value] = sorted(set(self.value_columns.get(value, [])) | set(cols))
         self._llms: dict[str, LLM] = {}
         self._memories: dict[str, Any] = {}          # run_id -> memory scope for that question
         self._checkpoint_context = None
@@ -261,8 +266,11 @@ class Agent:
         rounds = state.get("clarify_rounds", 0)
         frame = agents.understand(self.llm(state), state["question"], state["context"], self.data, self.concepts,
                                   state.get("history", ""), answers)
+        if frame.decline_reason:                           # decided first, before the question is resolved
+            return {"status": "declined", "message": frame.decline_reason, "route": "finish", "_status": "declined",
+                    "_detail": {"decision": "decline", "reason": frame.decline_reason}}
         ids = self.ids.find(state["question"])
-        res = resolve(frame, self.concepts, self.joins, self.retriever.value_columns, ids, choices, self.aliases)
+        res = resolve(frame, self.concepts, self.joins, self.value_columns, ids, choices, self.aliases)
         asked = {q.strip().lower() for q in answers}
         pending = [OpenPoint(f"llm:{q.question}", q.question, q.options, q.default, q.why)
                    for q in frame.open_points if q.question.strip().lower() not in asked] + \

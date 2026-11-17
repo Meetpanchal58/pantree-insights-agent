@@ -212,3 +212,8 @@ def test_history_is_forwarded_to_the_agent():
 
     run_eval.ask(Agent(), {"question": "Now by channel", "history": "Orders from Mumbai", "set": "answer"})
     assert seen["history"] == "Orders from Mumbai"
+
+
+def test_decline_by_the_understanding_step_is_recognised():
+    events = [{"type": "step", "step": "understand", "status": "declined", "detail": {"decision": "decline"}}]
+    assert run_eval.decline_layer(events) == "understanding"
