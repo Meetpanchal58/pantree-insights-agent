@@ -1,4 +1,4 @@
-"""The app's database: users, projects, chats, messages, memory, sign-in codes and daily usage.
+"""The app's database: users, chats, runs, feedback, memory, sign-in codes and daily usage.
 
 SQLite locally (.cache/app.db), Postgres (Neon) in production: the same SQLAlchemy Core code runs on both.
 
@@ -114,6 +114,26 @@ usage = Table(
     Column("user_id", String(16), primary_key=True), Column("day", String(10), primary_key=True),
     Column("questions", Integer, default=0), Column("usd", Float, default=0.0),
 )
+analysis_runs = Table(
+    "analysis_runs", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("user_id", String(16), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("chat_id", String(16), ForeignKey("chats.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("question", Text, nullable=False),
+    Column("status", String(20), nullable=False, default="running"),
+    Column("events", JSON, default=list),
+    Column("started_at", DateTime, default=_now), Column("updated_at", DateTime, default=_now),
+)
+feedback = Table(
+    "feedback", metadata,
+    Column("id", String(16), primary_key=True, default=_id),
+    Column("user_id", String(16), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("chat_id", String(16), ForeignKey("chats.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("run_id", String(32), index=True, nullable=False),
+    Column("rating", String(8), nullable=False),
+    Column("reason", String(40)), Column("note", Text),
+    Column("created_at", DateTime, default=_now),
+)
 
 
 class Store:
@@ -220,6 +240,37 @@ class Store:
     def add_cost(self, user_id: str, usd: float) -> None:
         day = str(date.today())
         self._exec(update(usage).where(usage.c.user_id == user_id, usage.c.day == day).values(usd=usage.c.usd + usd))
+
+    # ------------------------------------------------------------------ persistent runs + feedback
+    def create_run(self, run_id: str, user_id: str, chat_id: str, question: str) -> dict:
+        self._exec(insert(analysis_runs).values(
+            id=run_id, user_id=user_id, chat_id=chat_id, question=question, status="running", events=[]))
+        return self.run(user_id, run_id)
+
+    def run(self, user_id: str, run_id: str) -> dict | None:
+        return self._one(select(analysis_runs).where(
+            analysis_runs.c.id == run_id, analysis_runs.c.user_id == user_id))
+
+    def active_run_for_chat(self, user_id: str, chat_id: str) -> dict | None:
+        return self._one(select(analysis_runs).where(
+            analysis_runs.c.user_id == user_id, analysis_runs.c.chat_id == chat_id,
+            analysis_runs.c.status.in_(["running", "queued", "paused"])).order_by(analysis_runs.c.started_at.desc()))
+
+    def update_run(self, run_id: str, *, status: str | None = None, events: list[dict] | None = None) -> None:
+        values: dict[str, Any] = {"updated_at": _now()}
+        if status is not None:
+            values["status"] = status
+        if events is not None:
+            values["events"] = to_json(events)
+        self._exec(update(analysis_runs).where(analysis_runs.c.id == run_id).values(**values))
+
+    def add_feedback(self, user_id: str, chat_id: str, run_id: str, rating: str,
+                     reason: str = "", note: str = "") -> str:
+        fid = _id()
+        self._exec(insert(feedback).values(
+            id=fid, user_id=user_id, chat_id=chat_id, run_id=run_id, rating=rating[:8],
+            reason=reason[:40] or None, note=note[:1000] or None))
+        return fid
 
     # ------------------------------------------------------------------ projects
     def projects(self, user_id: str) -> list[dict]:
