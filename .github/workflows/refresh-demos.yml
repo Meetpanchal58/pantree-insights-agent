@@ -26,12 +26,12 @@ jobs:
       - run: DATA_SIZE=small uv run python scripts/build_offline_demos.py
       - name: Commit regenerated demos when changed
         run: |
-          if git diff --quiet -- demo_runs src/pantree_insights/static/offline-demos.js; then
+          if git diff --quiet -- src/pantree_insights/static/offline-demos.js; then
             echo "Offline demos already current."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add demo_runs src/pantree_insights/static/offline-demos.js
+          git add src/pantree_insights/static/offline-demos.js
           git commit -m "Regenerate category-aware offline demos"
           git push
