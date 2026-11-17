@@ -261,6 +261,9 @@ class Agent:
         rounds = state.get("clarify_rounds", 0)
         frame = agents.understand(self.llm(state), state["question"], state["context"], self.data, self.concepts,
                                   state.get("history", ""), answers)
+        if frame.decline_reason:                           # decided first, before the question is resolved
+            return {"status": "declined", "message": frame.decline_reason, "route": "finish", "_status": "declined",
+                    "_detail": {"decision": "decline", "reason": frame.decline_reason}}
         ids = self.ids.find(state["question"])
         res = resolve(frame, self.concepts, self.joins, self.retriever.value_columns, ids, choices, self.aliases)
         asked = {q.strip().lower() for q in answers}
