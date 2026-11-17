@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from .joins import JoinGraph
 from .recompute import canonical_sql
+from .semantic import load_metrics
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,13 @@ def compile_metric_query(scope: dict | None, joins: JoinGraph) -> CompiledQuery 
     if len(metrics) != 1:
         return None
     metric = metrics[0]
+    definitions = load_metrics()
+    definition = definitions.metrics.get(metric)
+    if not definition:
+        return None
+    source_table = definitions.sources[definition.source].from_.split()[0]
+    if source_table != scope.get("table"):
+        return None
     period = tuple(scope["period"]) if scope.get("period") else None
     sql = canonical_sql(
         metric,
