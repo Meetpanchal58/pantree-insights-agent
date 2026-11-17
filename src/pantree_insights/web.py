@@ -24,7 +24,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import demos as demo_runs
 from .auth import current_user, methods, require_admin, require_user
 from .auth import router as auth_router
 from .config import get_settings
