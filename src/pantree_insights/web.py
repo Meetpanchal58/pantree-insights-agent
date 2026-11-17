@@ -28,7 +28,7 @@ from . import demos as demo_runs
 from .auth import current_user, methods, require_admin, require_user
 from .auth import router as auth_router
 from .config import get_settings
-from .db import snapshot_signature
+from .db import manifest, snapshot_signature
 from .store import MemoryScope, Store, get_store, to_json
 
 log = logging.getLogger("pantree.web")
@@ -148,7 +148,7 @@ class Runner:
                                           use_defaults=use_defaults, memory=scope)
         run = Run(run_id, user, chat, question, agent=agent)
         self.runs[run_id] = run
-        store.create_run(run_id, user["id"], chat["id"], question, snapshot=snapshot_signature())
+        store.create_run(run_id, user["id"], chat["id"], question, snapshot=json.dumps(manifest(), sort_keys=True))
         self._consume(store, run, events)
         return run
 
@@ -165,7 +165,7 @@ class Runner:
             store.save_run(run_id, "interrupted", saved.get("events") or [])
             return None
         old_snapshot = (saved.get("summary") or {}).get("snapshot")
-        if old_snapshot and old_snapshot != snapshot_signature():
+        if old_snapshot and old_snapshot != json.dumps(manifest(), sort_keys=True):
             store.save_run(run_id, "interrupted", saved.get("events") or [],
                            {"reason": "The dataset changed during a paused analysis"})
             return None
@@ -291,7 +291,6 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------ me
     @app.get("/api/me")
     def me(user: dict | None = Depends(current_user), store: Store = Depends(get_store)):
-        from .db import manifest
         info = manifest()
         base = {"signin": methods(), "data": {"size": info["size"], "first_day": info["first_day"],
                                               "last_day": info["last_day"]}}
