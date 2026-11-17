@@ -13,6 +13,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -197,6 +198,15 @@ def create_app() -> FastAPI:
     if settings.app_env == "production" and settings.session_secret.startswith("dev-only"):
         raise RuntimeError("Set SESSION_SECRET in production.")
     app = FastAPI(title="Pantree Insights", lifespan=lifespan, docs_url=None, redoc_url=None)
+    @app.middleware("http")
+    async def request_reference(request: Request, call_next):
+        reference = uuid.uuid4().hex[:16]
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = reference
+        if response.status_code in (429, 503, 504):
+            log.warning("request_busy method=%s path=%s status=%s request_id=%s",
+                        request.method, request.url.path, response.status_code, reference)
+        return response
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_site="lax",
                        https_only=settings.app_env == "production", max_age=30 * 24 * 3600)
     app.include_router(auth_router)

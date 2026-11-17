@@ -31,6 +31,7 @@ def demos(folder: Path | None = None) -> list[dict]:
         except (OSError, ValueError):
             continue
         out.append({"slug": path.stem, "question": d["question"], "recorded_at": d.get("recorded_at"),
+                    "topic": d.get("topic"), "offline": d.get("offline", False),
                     "data_size": d.get("data_size"), "data_as_of": d.get("data_as_of"),
                     "seconds": d.get("seconds"), "order": d.get("order", 99)})
     return sorted(out, key=lambda d: (d["order"], d["question"]))

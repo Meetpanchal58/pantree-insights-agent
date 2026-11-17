@@ -7,19 +7,13 @@ const STEP_LABELS = {
   write_sql: "Writing SQL", check_sql: "Safety checks", run_query: "Running the query",
   validate: "Reviewing the query", analyse: "Analysing the result", chart: "Building the chart",
   remember: "Saving to memory",
+  offline_demo: "Loading saved analysis",
 };
 const STATUS_ICON = { done: "✓", retry: "↻", failed: "✕", blocked: "✕", warning: "!", needs_input: "?", running: "" };
-const EXAMPLES = [
-  ["Sales", "How did Diwali 2026 do compared with Diwali 2025?"],
-  ["Returns", "Why are footwear returns so high?"],
-  ["Delivery", "Is cash on delivery causing more RTO in tier 3 cities?"],
-  ["Marketing", "Which marketing channels give the best return on ad spend?"],
-  ["Customers", "What share of buyers order again within 90 days?"],
-  ["Stock", "Which product sizes lose the most sales to stock-outs?"],
-];
+const OFFLINE_DEMOS = window.PANTREE_DEMOS || [];
 
 const S = { me: null, projects: [], chats: [], chatId: null, expanded: new Set(), demoMode: false,
-            run: null, busy: false, pendingProject: null, view: 0, stream: null, chatRequest: null, demos: null,
+            run: null, busy: false, pendingProject: null, view: 0, stream: null, chatRequest: null, demos: OFFLINE_DEMOS,
             chatCache: new Map(), sidebarRequest: 0 };
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -35,7 +29,25 @@ async function api(path, opts = {}) {
   const init = { method: opts.method || "GET", headers: {}, credentials: "same-origin", signal: controller.signal };
   if (opts.body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
   try {
-    const res = await fetch(path, init);
+    let res;
+    // Retry reads only: replaying a timed-out POST could submit a paid question twice.
+    const retries = init.method === "GET" ? (opts.retries ?? 2) : 0;
+    for (let attempt = 0; ; attempt++) {
+      res = await fetch(path, init);
+      if (![429, 502, 503, 504].includes(res.status) || attempt >= retries) break;
+      const header = res.headers.get("Retry-After");
+      const seconds = header && /^\d+(\.\d+)?$/.test(header) ? Number(header)
+        : header ? Math.max(0, (Date.parse(header) - Date.now()) / 1000) : NaN;
+      const wait = Number.isFinite(seconds) ? seconds * 1000 : 500 * (2 ** attempt);
+      // Do not retry earlier than a long server cooldown, or leave a loading spinner indefinitely.
+      if (wait > 10000) break;
+      await new Promise((resolve, reject) => {
+        const abort = () => { clearTimeout(delay); reject(new DOMException("Cancelled", "AbortError")); };
+        const delay = setTimeout(() => { controller.signal.removeEventListener("abort", abort); resolve(); }, wait);
+        controller.signal.addEventListener("abort", abort, { once: true });
+        if (controller.signal.aborted) abort();
+      });
+    }
     let data;
     try { data = await res.json(); }
     catch (error) {
@@ -49,6 +61,9 @@ async function api(path, opts = {}) {
         : [502, 503, 504].includes(res.status) ? "The server is temporarily unavailable. Your chat is saved; try again."
         : (typeof data.detail === "string" ? data.detail : `Request failed (${res.status})`);
       const error = new Error(message); error.status = res.status;
+      const retry = res.headers.get("Retry-After");
+      error.retryAfter = retry && /^\d+(\.\d+)?$/.test(retry) ? Number(retry)
+        : retry ? Math.max(0, (Date.parse(retry) - Date.now()) / 1000) : 0;
       throw error;
     }
     return data;
@@ -59,10 +74,22 @@ async function api(path, opts = {}) {
     clearTimeout(timer); opts.signal?.removeEventListener("abort", cancel);
   }
 }
-function recoveryCard(message, action = "reopen-chat") {
+function recoveryCard(message, action = "reopen-chat", retryAfter = 0) {
   const el = document.createElement("div"); el.className = "msg";
   el.innerHTML = `<div class="answer error-box" role="alert"><h3>Could not finish loading</h3><p>${esc(message)}</p>
     <button class="btn small" data-action="${action}">${action === "retry-start" ? "Retry loading" : "Reopen chat"}</button></div>`;
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    const button = el.querySelector("button"), label = button.textContent;
+    const until = Date.now() + retryAfter * 1000;
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+      button.disabled = remaining > 0;
+      button.textContent = remaining ? `${label} in ${remaining}s` : label;
+      if (remaining && el.isConnected) setTimeout(update, 1000);
+    };
+    button.disabled = true;
+    setTimeout(update, 0);
+  }
   return el;
 }
 
@@ -73,6 +100,7 @@ function toast(msg, ms = 2600) {
 function fmtNum(v, col = "") {
   if (v === null || v === undefined || v === "") return "";
   if (typeof v !== "number") return esc(v);
+  if (/roas/.test(col)) return v.toLocaleString("en-IN", { maximumFractionDigits: 1 }) + "×";
   if (/rate|share|pct|ctr|conversion|margin|lift|growth/.test(col) && Math.abs(v) <= 1.5) return (v * 100).toFixed(1) + "%";
   const volume = /(^|_)(orders?|lines?|sessions|count|units|quantity|qty|customers|buyers|tickets|reviews|impressions|contacts|visits)(_|$)/.test(col);
   if (!volume && /revenue|sales|spend|aov|amount|cost|cac|value|price/.test(col)) return "₹" + v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
@@ -93,6 +121,8 @@ function leaveView() {
   S.chatRequest?.abort(); S.chatRequest = null;
   S.stream?.close(); S.stream = null;
   S.busy = false; $(".send").disabled = false;
+  $("#question").disabled = false;
+  $("#question").placeholder = "Ask about sales, returns, marketing, stock, customers…";
   S.run = null;
   if ($("#chart") && window.Plotly) window.Plotly.purge($("#chart"));
   $("#panel-body").innerHTML = ""; $("#panel-sub").textContent = "";
@@ -113,14 +143,30 @@ function loadScript(url, globalName) {
 /* ---------------------------------------------------------------- start */
 async function init() {
   if (window.innerWidth <= 1180) $("#app").classList.add("panel-closed");
+  if (!S.me) {
+    S.me = { user: null, signin: {}, data: null };
+    $("#signin").hidden = true;
+    renderUser(); renderWelcome();
+  }
+  const view = S.view;
   try { S.me = await api("/api/me"); }
-  catch (e) { $("#messages").replaceChildren(recoveryCard(e.message, "retry-start")); return; }
+  catch (e) {
+    if (view !== S.view) { if (!S.run?.replay) toast(e.message); return; }
+    if (!S.me) S.me = { user: null, signin: {}, data: null };
+    S.demoMode = true; $("#signin").hidden = true;
+    renderUser(); renderWelcome();
+    $("#messages").prepend(recoveryCard(e.message, "retry-start", e.retryAfter)); return;
+  }
   if (new URLSearchParams(location.search).get("signin") === "failed") toast("Sign-in did not complete. Please try again.");
-  if (!S.me.user) { showSignin(); renderWelcome(); renderUser(); return; }
+  if (!S.me.user) {
+    $("#signin").hidden = true; renderUser();
+    if (view === S.view) renderWelcome();
+    return;
+  }
   $("#signin").hidden = true;
   renderUser();
   refreshSidebar();
-  renderWelcome();
+  if (view === S.view) renderWelcome();
   loadPulseCount();
 }
 
@@ -195,10 +241,8 @@ async function renderWelcome() {
         <h2>What would you like to know?</h2>
         <p class="muted">Ask about Pantree's sales, returns, delivery, marketing, stock or customers.
         Data: ${d ? `${esc(d.first_day)} to ${esc(d.last_day)} (${esc(d.size)} shop, simulated)` : ""}.</p>
-        ${demos.length ? `<div class="section-label">Explore a recorded answer</div><div class="cards">${demos.map((x) => `
-          <button class="qcard" data-action="replay" data-slug="${esc(x.slug)}"><div class="kind">▶ Recorded answer</div>${esc(x.question)}</button>`).join("")}</div>` : ""}
-        ${S.me && S.me.user ? `<div class="section-label">Or try</div><div class="cards">${EXAMPLES.map(([k, q]) => `
-          <button class="qcard" data-action="example" data-q="${esc(q)}"><div class="kind">${esc(k)}</div>${esc(q)}</button>`).join("")}</div>` : ""}
+        ${demos.length ? `<div class="section-label">Four offline business demos</div><p class="muted">Saved sample-data results, charts and SQL. No live model calls.</p><div class="cards">${demos.map((x) => `
+          <button class="qcard" data-action="replay" data-slug="${esc(x.slug)}"><div class="kind">${esc(x.topic || "Offline demo")}</div>${esc(x.question)}<div class="muted">${esc(x.data_size)} sample · ${esc(x.data_as_of)}</div></button>`).join("")}</div>` : ""}
       </div>`;
   };
   paint(S.demos || []);
@@ -210,18 +254,25 @@ async function renderWelcome() {
   }
 }
 
-async function openChat(id) {
+async function openChat(id, force = false) {
+  if (!force && S.chatId === id && S.chatRequest) return;
   const view = leaveView();
   S.chatId = id; S.pendingProject = null;
   closeSidebarMobile(); renderSidebar();
   $("#chat-title").textContent = S.chats.find((c) => c.id === id)?.title || "Loading chat…";
   $("#messages").replaceChildren(statusLine("Loading chat…"));
   S.busy = true; $(".send").disabled = true;
-  if (S.chatCache.has(id)) renderChat(S.chatCache.get(id));
+  const cached = S.chatCache.get(id);
+  if (cached) {
+    S.busy = false; $(".send").disabled = false;
+    renderChat(cached);
+    if (!force && !cached.pending_run && Date.now() - (cached.cachedAt || 0) < 15000) return;
+  }
   const controller = new AbortController(); S.chatRequest = controller;
   try {
     const chat = await api(`/api/chats/${id}`, { signal: controller.signal });
     if (view !== S.view) return;
+    chat.cachedAt = Date.now();
     S.chatCache.delete(id); S.chatCache.set(id, chat);
     if (S.chatCache.size > 10) S.chatCache.delete(S.chatCache.keys().next().value);
     S.busy = false; $(".send").disabled = false;
@@ -229,7 +280,10 @@ async function openChat(id) {
   } catch (e) {
     if (view !== S.view || e.name === "AbortError") return;
     S.busy = false; $(".send").disabled = false;
-    $("#messages").replaceChildren(recoveryCard(e.message));
+    if (cached) {
+      const warning = recoveryCard("Showing the last loaded conversation. " + e.message, "reopen-chat", e.retryAfter);
+      warning.classList.add("read-warning"); $("#messages").prepend(warning);
+    } else $("#messages").replaceChildren(recoveryCard(e.message, "reopen-chat", e.retryAfter));
   } finally { if (S.chatRequest === controller) S.chatRequest = null; }
 }
 
@@ -241,7 +295,11 @@ function renderChat(chat, connect = false) {
     if (m.role === "user") box.insertAdjacentHTML("beforeend", userBubble(m.content));
     else { box.appendChild(answerCard(m.run || {})); last = m.run; }
   }
-  if (connect && chat.pending_run) { const el = statusLine("Working on it…"); box.appendChild(el); streamRun(chat.pending_run, 0, el); }
+  if (connect && chat.pending_run) {
+    const el = statusLine("Working on it…"); box.appendChild(el);
+    const question = [...chat.messages].reverse().find((m) => m.role === "user")?.content;
+    streamRun(chat.pending_run, 0, el, question);
+  }
   else if (last) showRunInPanel(last);
   renderSidebar(); scrollDown();
 }
@@ -265,7 +323,7 @@ function answerCard(run, replay = false) {
   el.innerHTML = `<div class="answer"><h3>${esc(a.headline)}</h3>
     <ul>${(a.findings || []).slice(0, 3).map((f) => `<li>${esc(f)}</li>`).join("")}</ul>
     <div class="row"><button class="btn small" data-action="show-run">View analysis, chart & SQL</button>
-    ${replay ? `<span class="tag replay">Replay · recorded run · data as of ${esc(run.data_as_of)}</span>` : `<span class="tag">Data as of ${esc(run.data_as_of)}</span>`}
+    ${replay ? `<span class="tag replay">${run.offline ? "Offline demo · saved results" : "Replay · recorded run"} · data as of ${esc(run.data_as_of)}</span>` : `<span class="tag">Data as of ${esc(run.data_as_of)}</span>`}
     ${run.verification && run.verification.status === "verified" ? `<span class="tag ok" title="Each metric was recomputed from its definition for the confirmed scope and matched">✓ Numbers verified against the data</span>` : run.verification && run.verification.status === "mismatch" ? `<span class="tag warn" title="The recomputed metric disagrees with this result; see the warnings">⚠ Numbers do not match the definition</span>` : run.verification ? `<span class="tag" title="This answer's metric could not be recomputed independently">Not independently verified</span>` : ""}
     ${run.cost && run.cost.usd ? `<span class="tag">$${run.cost.usd.toFixed(3)}</span>` : ""}</div></div>`;
   el.querySelector('[data-action="show-run"]').addEventListener("click", () => { showRunInPanel(run); openPanel(); });
@@ -274,6 +332,7 @@ function answerCard(run, replay = false) {
 
 /* ---------------------------------------------------------------- asking */
 async function ask(question) {
+  if (S.run?.replay) return;
   if (S.busy || !question.trim()) return;
   if (!S.me.user) { showSignin(); return; }
   const view = ++S.view;
@@ -287,12 +346,13 @@ async function ask(question) {
       if (chat.project_id) S.expanded.add(chat.project_id);
     }
     $("#messages").insertAdjacentHTML("beforeend", userBubble(question));
+    S.chatCache.delete(S.chatId);
     const status = statusLine("Starting…"); $("#messages").appendChild(status); scrollDown();
     const { run_id } = await api(`/api/chats/${S.chatId}/ask`, { method: "POST", body: { question, use_defaults: $("#use-defaults").checked } });
     if (view !== S.view) { refreshSidebar(); return; }
     $("#chat-title").textContent = question.slice(0, 80);
     refreshSidebar();
-    streamRun(run_id, 0, status);
+    streamRun(run_id, 0, status, question);
   } catch (e) {
     if (view !== S.view) return;
     toast(e.message, 4500); S.busy = false; $(".send").disabled = false;
@@ -340,8 +400,8 @@ function onEvent(e, status) {
   }
 }
 
-function streamRun(runId, since, status) {
-  if (since === 0) newTimeline($("#chat-title").textContent, false);
+function streamRun(runId, since, status, question) {
+  if (since === 0) newTimeline(question || $("#chat-title").textContent, false);
   S.stream?.close();
   const view = S.view;
   S.busy = true; $(".send").disabled = true;
@@ -391,6 +451,7 @@ function clarifyCard(e) {
     el.insertAdjacentHTML("afterend", userBubble(summary));
     const status = statusLine("Continuing…"); el.parentNode.appendChild(status); scrollDown();
     S.busy = true; $(".send").disabled = true;
+    S.chatCache.delete(S.chatId);
     try { await api(`/api/runs/${e.run_id}/answer`, { method: "POST", body: { answers } }); if (view === S.view) streamRun(e.run_id, e.count, status); }
     catch (err) { if (view !== S.view) return; toast(err.message); status.remove(); S.busy = false; $(".send").disabled = false; }
   };
@@ -402,16 +463,29 @@ function clarifyCard(e) {
 
 /* ---------------------------------------------------------------- demos */
 function replayDemo(slug, question) {
+  const demo = OFFLINE_DEMOS.find((item) => item.slug === slug);
+  if (demo) question = demo.question;
   const view = leaveView();
   S.chatId = null;
   closeSidebarMobile();
   renderSidebar();
-  $("#chat-title").textContent = "Recorded answer";
+  $("#chat-title").textContent = demo ? "Offline demo" : "Recorded answer";
   $("#move-project").hidden = true;
   $("#messages").innerHTML = userBubble(question);
   const status = statusLine("Starting…"); $("#messages").appendChild(status);
   newTimeline(question, true);
   S.busy = true; $(".send").disabled = true;
+  if (demo) {
+    $("#question").disabled = true;
+    $("#question").placeholder = "Offline demo. Start a new chat to ask your own question.";
+    for (const event of demo.events) {
+      if (view !== S.view) return;
+      onEvent({ ...event, replay: true }, status);
+    }
+    $(".send").disabled = true;
+    openPanel();
+    return;
+  }
   const es = new EventSource(`/api/demos/${encodeURIComponent(slug)}/stream?instant=true`);
   S.stream = es;
   es.onmessage = (msg) => { if (view !== S.view || S.stream !== es) return; const e = JSON.parse(msg.data); onEvent(e, status); if (e.type === "final") es.close(); };
@@ -452,7 +526,7 @@ function renderSteps() {
 }
 
 function showRunInPanel(run) {
-  newTimeline(run.question || $("#chat-title").textContent, false);
+  newTimeline(run.question || $("#chat-title").textContent, !!run.replay);
   S.run.restoring = true;
   for (const e of run.events || []) if (["step", "answered"].includes(e.type)) onEvent(e, null);
   renderSteps();
@@ -473,9 +547,9 @@ function showResult(run) {
     <div id="chart-area"></div>
     <div class="exports">
       <button class="btn small" data-action="export" data-kind="copy">⧉ Copy</button>
-      <button class="btn small" data-action="export" data-kind="png" ${run.chart && run.chart.figure ? "" : "disabled"}>▣ PNG</button>
+      <button class="btn small" data-action="export" data-kind="png" ${run.chart && (run.chart.figure || run.chart.kind === "offline_bar") ? "" : "disabled"}>▣ PNG</button>
       <button class="btn small" data-action="export" data-kind="csv">⇩ CSV</button>
-      <button class="btn small" data-action="export" data-kind="ppt">▤ PPT</button>
+      ${run.offline ? "" : '<button class="btn small" data-action="export" data-kind="ppt">▤ PPT</button>'}
       <button class="btn small" data-action="export" data-kind="sql">{ } SQL</button>
     </div>
     ${list("Findings", a.findings)}${list("Recommendations", a.recommendations)}${list("Caveats", a.caveats)}
@@ -489,7 +563,7 @@ function showResult(run) {
   </div>`;
   box.querySelectorAll("[data-action='export']").forEach((b) => b.addEventListener("click", () => exportRun(b.dataset.kind, run)));
   const followUps = [...box.querySelectorAll("h4")].find((h) => h.textContent === "Follow-up questions");
-  if (followUps && S.me.user) followUps.nextElementSibling.querySelectorAll("li").forEach((li) => {
+  if (followUps && S.me.user && !run.replay) followUps.nextElementSibling.querySelectorAll("li").forEach((li) => {
     li.style.cursor = "pointer"; li.title = "Ask this";
     li.addEventListener("click", () => { $("#question").value = li.textContent; $("#question").focus(); });
   });
@@ -499,6 +573,19 @@ function showResult(run) {
 
 async function drawChart(chart) {
   const area = $("#chart-area"); if (!area || !chart) return;
+  if (chart.kind === "offline_bar") {
+    const maximum = Math.max(1, ...chart.values.filter((value) => typeof value === "number"));
+    const height = chart.labels.length * 58 + 16;
+    area.innerHTML = `<svg id="offline-chart" role="img" aria-label="${esc(chart.title)}" viewBox="0 0 640 ${height}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">
+      <title>${esc(chart.title)}</title><rect width="640" height="${height}" fill="white"/>
+      ${chart.labels.map((label, i) => `<g transform="translate(12,${i * 58 + 12})">
+        <text x="0" y="15" font-family="sans-serif" font-size="13" fill="#161827">${esc(label)}</text>
+        <text x="616" y="15" text-anchor="end" font-family="sans-serif" font-size="13" fill="#161827">${fmtNum(chart.values[i], chart.metric)}</text>
+        <rect x="0" y="24" width="616" height="14" rx="3" fill="#eeeefa"/>
+        <rect x="0" y="24" width="${Math.max(0, (chart.values[i] || 0) / maximum * 616)}" height="14" rx="3" fill="#6557dc"/>
+      </g>`).join("")}</svg>`;
+    return;
+  }
   if (chart.kind === "kpi") {
     area.innerHTML = `<div class="kpis">${chart.values.map((v) => `<div class="kpi"><div class="v">${fmtNum(v.value, v.label.toLowerCase().replace(/ /g, "_"))}</div><div class="l">${esc(v.label)}</div></div>`).join("")}</div>`;
     return;
@@ -533,6 +620,17 @@ function csv(run) {
 }
 async function chartPng(width = 1600, height = 900) {
   await S.chartReady;
+  const svg = document.getElementById("offline-chart");
+  if (svg) {
+    const source = new XMLSerializer().serializeToString(svg);
+    const img = new Image(); img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(source);
+    await img.decode();
+    const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext("2d"); ctx.fillStyle = "white"; ctx.fillRect(0, 0, width, height);
+    const scale = Math.min(width / img.width, height / img.height);
+    ctx.drawImage(img, (width - img.width * scale) / 2, 0, img.width * scale, img.height * scale);
+    return canvas.toDataURL("image/png");
+  }
   const el = document.getElementById("chart");
   if (!el || !window.Plotly) return null;
   return window.Plotly.toImage(el, { format: "png", width, height,
@@ -711,7 +809,7 @@ document.addEventListener("click", async (ev) => {
   switch (a) {
     case "edit-question": $("#question").value = t.dataset.q; autosize(); $("#question").focus(); break;
     case "retry-start": init(); break;
-    case "reopen-chat": if (S.chatId) openChat(S.chatId); else renderWelcome(); break;
+    case "reopen-chat": if (S.chatId) openChat(S.chatId, true); else renderWelcome(); break;
     case "new-chat": S.pendingProject = t.dataset.project || null; closeSidebarMobile(); renderWelcome(); $("#question").focus(); break;
     case "open-chat": openChat(id); break;
     case "chat-menu": chatMenu(id); break;
@@ -719,7 +817,7 @@ document.addEventListener("click", async (ev) => {
     case "new-project": if (!S.me.user) return showSignin(); projectDialog(null); break;
     case "edit-project": projectDialog(S.projects.find((p) => p.id === id)); break;
     case "example": $("#question").value = t.dataset.q; ask(t.dataset.q); $("#question").value = ""; break;
-    case "replay": replayDemo(t.dataset.slug, t.textContent.replace("▶ Recorded answer", "").trim()); break;
+    case "replay": replayDemo(t.dataset.slug, OFFLINE_DEMOS.find((d) => d.slug === t.dataset.slug)?.question || t.textContent.trim()); break;
     case "toggle-panel": $("#app").classList.toggle("panel-closed"); break;
     case "toggle-step": {
       const det = t.parentElement.querySelector(".step-detail");
