@@ -179,7 +179,7 @@ def build():
     def brands(rows):
         brand = [r for r in rows if r["view"] == "Brand"]
         products = [r for r in rows if r["view"] == "Product"]
-        top, product = brand[0], max(products, key=lambda row: row["realized_revenue"])
+        top, product = min(brand, key=lambda row: row["position"]), max(products, key=lambda row: row["realized_revenue"])
         total = top["total_revenue"]
         share = sum(r["realized_revenue"] for r in brand) / total if total else 0
         return {
@@ -214,7 +214,8 @@ def build():
                 ),
             ],
             "caveats": [
-                "Products are ranked within each category of each leading brand. Do not double-count product and brand revenue.",
+                ("Products are ranked within each category of each leading brand. "
+                 "Do not double-count product and brand revenue."),
                 (
                     "One order can contain several brands/products. Exact stored brand spelling "
                     "is preserved; simulated revenue does not establish demand or profit."
@@ -249,7 +250,8 @@ def build():
            FROM lines l JOIN top_brands b USING (brand_name)
            GROUP BY l.brand_name, l.category, l.product_id, l.product_name
          ), product_ranks AS (
-           SELECT *, ROW_NUMBER() OVER (
+           SELECT brand_name, category, product_id, product_name, realized_revenue, orders,
+             ROW_NUMBER() OVER (
              PARTITION BY brand_name, category ORDER BY realized_revenue DESC, product_id
            ) AS position FROM product_totals
          ), ranked AS (
