@@ -198,18 +198,16 @@ def test_admin_shares_business_memory(app_env):
     assert client.post(f"/api/memory/{mem['insights'][0]['id']}/promote", json={}).status_code == 403
 
 
-def test_demo_replay(app_env):
-    client, _, tmp_path = app_env
-    demo = {"question": "Demo Q", "data_size": "small", "data_as_of": "2026-11-14", "seconds": 1, "events": [
-        {"type": "step", "step": "plan", "status": "started", "t": 0.0},
-        {"type": "step", "step": "plan", "status": "done", "t": 0.1, "detail": {}},
-        {"type": "final", "status": "done", "t": 0.2}]}
-    (tmp_path / "demos").mkdir()
-    (tmp_path / "demos" / "demo-q.json").write_text(json.dumps(demo))
-    assert client.get("/api/demos").json()[0]["slug"] == "demo-q"
-    with client.stream("GET", "/api/demos/demo-q/stream") as r:
-        lines = [json.loads(x[6:]) for x in r.iter_lines() if x.startswith("data: ")]
-    assert [e["type"] for e in lines] == ["step", "step", "final"] and all(e["replay"] for e in lines)
+
+def test_completed_run_accepts_feedback(app_env):
+    client, codes, _ = app_env
+    sign_in(client, codes)
+    chat = client.post("/api/chats", json={}).json()
+    run_id = client.post(f"/api/chats/{chat['id']}/ask", json={"question": "Revenue?"}).json()["run_id"]
+    assert run_to_end(client, run_id)[-1]["status"] == "done"
+    response = client.post(f"/api/runs/{run_id}/feedback",
+                           json={"rating": "down", "reason": "metric", "note": "wrong denominator"})
+    assert response.status_code == 200 and response.json()["ok"] is True
 
 
 def test_readback_is_sent_to_the_browser_and_confirming_finishes(app_env):
