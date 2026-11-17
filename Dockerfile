@@ -12,6 +12,9 @@ WORKDIR /app
 # Dependencies first (cached layer)
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
+# Production-only durable LangGraph checkpoint backend. Kept out of the locked
+# developer dependency set so local/test installs stay minimal.
+RUN .venv/bin/pip install --no-cache-dir "langgraph-checkpoint-postgres>=3.0,<4"
 
 # App code and the files it reads
 COPY src ./src
