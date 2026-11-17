@@ -319,8 +319,9 @@ def create_app() -> FastAPI:
         chat = store.chat(user["id"], chat_id)
         if not chat:
             raise HTTPException(404, "Chat not found")
-        pending = [r.id for r in runner.runs.values() if r.chat["id"] == chat_id and not r.finished]
-        return to_json({**chat, "messages": store.messages(chat_id), "pending_run": pending[-1] if pending else None})
+        active = store.active_run_for_chat(user["id"], chat_id)
+        return to_json({**chat, "messages": store.messages(chat_id),
+                        "pending_run": active["id"] if active else None})
 
     @app.patch("/api/chats/{chat_id}")
     def patch_chat(chat_id: str, body: ChatPatch, user=Depends(require_user), store: Store = Depends(get_store)):
@@ -342,7 +343,7 @@ def create_app() -> FastAPI:
         chat = store.chat(user["id"], chat_id)
         if not chat:
             raise HTTPException(404, "Chat not found")
-        if any(r.chat["id"] == chat_id and not r.finished for r in runner.runs.values()):
+        if store.active_run_for_chat(user["id"], chat_id):
             raise HTTPException(409, "This chat is already answering a question.")
         if not user["is_admin"] and store.questions_today(user["id"]) >= settings.daily_question_limit:
             raise HTTPException(429, f"You have used today's {settings.daily_question_limit} live questions. "
@@ -353,7 +354,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/runs/{run_id}/answer")
     def answer(run_id: str, body: AnswerIn, user=Depends(require_user), store: Store = Depends(get_store)):
-        run = runner.runs.get(run_id)
+        run = runner.runs.get(run_id) or runner.restore(store, user, run_id)
         if not run or run.user["id"] != user["id"]:
             raise HTTPException(404, "Run not found")
         if not run.paused:
@@ -362,8 +363,9 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/runs/{run_id}/stream")
-    async def stream(run_id: str, request: Request, since: int = 0, user=Depends(require_user)):
-        run = runner.runs.get(run_id)
+    async def stream(run_id: str, request: Request, since: int = 0, user=Depends(require_user),
+                     store: Store = Depends(get_store)):
+        run = runner.runs.get(run_id) or runner.restore(store, user, run_id)
         if not run or run.user["id"] != user["id"]:
             raise HTTPException(404, "Run not found")
 
@@ -381,6 +383,15 @@ def create_app() -> FastAPI:
                 await asyncio.sleep(0.15)
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.post("/api/runs/{run_id}/feedback")
+    def run_feedback(run_id: str, body: FeedbackIn, user=Depends(require_user),
+                     store: Store = Depends(get_store)):
+        saved = store.run(user["id"], run_id)
+        if not saved:
+            raise HTTPException(404, "Run not found")
+        fid = store.add_feedback(user["id"], saved["chat_id"], run_id, body.rating, body.reason, body.note)
+        return {"ok": True, "feedback_id": fid}
 
     # ------------------------------------------------------------------ memory
 
