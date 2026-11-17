@@ -169,6 +169,12 @@ class Resolution:
         return "\n".join(lines)
 
 
+def _plain(text: str) -> str:
+    """'Sale-event days' -> 'sale event day': case, hyphens and plurals do not change a label."""
+    return " ".join(w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
+                    for w in re.sub(r"[-_]", " ", text.casefold()).split())
+
+
 def _term(text: str, terms: dict[str, tuple[str, str]]) -> tuple[str, str] | None:
     """The glossary term a mention is ("active products" -> active product): exact, or a plural, or a term
     that makes up most of the words."""
@@ -197,11 +203,13 @@ def _find_value(text: str, value_columns: dict[str, list[str]], aliases: dict[st
 
 def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str, list[str]],
             ids: list[IdMatch], choices: dict[str, str] | None = None,
-            aliases: dict[str, str] | None = None, terms: dict[str, str] | None = None) -> Resolution:
+            aliases: dict[str, str] | None = None, terms: dict[str, str] | None = None,
+            answered: list[str] | None = None) -> Resolution:
     """`frame`: agents.QuestionFrame. `choices`: earlier answers, key -> chosen meaning (concept or subject).
     `aliases`: lowercased alias -> stored value (glossary value_aliases)."""
     choices, aliases = choices or {}, aliases or {}
     terms = {t.casefold(): (t, meaning) for t, meaning in (terms or {}).items()}
+    answered_words = {a.strip().casefold() for a in answered or [] if a}
     open_points: list[OpenPoint] = []
     notes: list[str] = []
 
@@ -235,12 +243,15 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
                 and sum(m.concept == mention.concept for m in frame.mentions) > 1)
 
         members = [m.text for m in frame.mentions if is_member(m)]
+        absorbed: set[str] = set()                      # member concepts a derived cut replaced
         for concept, entry in derived.items():          # "COD versus prepaid": the comparison IS the derived cut
-            labels = {lab.casefold(): lab for lab in entry.labels()}
-            if members and sum(t.strip().casefold() in labels for t in members) >= 2 and concept not in breakdowns:
-                stored = [c for c in breakdowns if (concepts.column(c, name) or ConceptEntry(column="")).column
-                          == entry.column]
+            labels = {_plain(lab): lab for lab in entry.labels()}
+            if members and sum(_plain(t) in labels for t in members) >= 2 and concept not in breakdowns:
+                member_concepts = {m.concept for m in frame.mentions if is_member(m)}
+                stored = [c for c in breakdowns if c in member_concepts
+                          or (concepts.column(c, name) or ConceptEntry(column="")).column == entry.column]
                 breakdowns = [c for c in breakdowns if c not in stored] + [concept]
+                absorbed |= member_concepts
                 notes.append(f"Comparison {' vs '.join(members)} is the {concepts.label(concept)} cut: "
                              f"{entry.expression}")
 
@@ -248,7 +259,7 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
             if mention.concept in ("id", "metric", "period"):    # "other" = the LLM was unsure: resolve it here
                 continue
             label = next(((c, e, lab) for c, e in derived.items() for lab in e.labels()
-                          if lab.casefold() == mention.text.strip().casefold()), None)
+                          if _plain(lab) == _plain(mention.text)), None)
             if label and not is_member(mention) and not (label[2] in value_columns
                                                               and label[1].column in value_columns[label[2]]):
                 concept, entry, lab = label                 # "prepaid orders": a value of a derived cut
@@ -267,6 +278,11 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
             if value is None and term:                      # business vocabulary, not a stored value
                 notes.append(f"'{term[0]}' is a business term: {term[1]}")
                 continue
+            said = mention.text.strip().casefold()
+            if value is None and said and any(re.search(rf"(?<![\w-]){re.escape(said)}(?![\w-])", a)
+                                              for a in answered_words):
+                notes.append(f"'{mention.text}' is the user's answer to a clarifying question: apply it as chosen")
+                continue                                    # a settled choice, not a value to look up
             value_key = f"value:{name}:{mention.concept}:{mention.text}"
             entry = concepts.column(mention.concept, name)
             literal_choice = f"Use exactly '{mention.text}' (may return no rows)"
@@ -355,7 +371,7 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
         tables = [c.split(".")[0] for _, c in view.breakdowns] + [f.column.split(".")[0] for f in view.filters] + \
             [i.column.split(".")[0] for i in view.id_filters]
         used = [c for c, _ in view.breakdowns] + [f.concept for f in view.filters] + \
-            [m.concept for m in frame.mentions if is_member(m)]
+            [m.concept for m in frame.mentions if is_member(m) and m.concept not in absorbed]
         for concept in dict.fromkeys(used):           # e.g. an event measured by its date window, not event_id
             entry = concepts.column(concept, name)
             if entry and entry.join:

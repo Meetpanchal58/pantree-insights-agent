@@ -146,3 +146,36 @@ def test_sale_event_is_joined_by_its_date_window_not_event_id():
     view = run(f).subjects[0]
     assert "sales.placed_at >= sale_events.start_date" in view.joins
     assert "sales.event_id = sale_events.event_id" not in view.joins
+
+
+# production run (Nov 17) ----------------------------------------------------------------------------------------
+def test_sale_event_days_versus_normal_days_is_the_day_type_cut():
+    f = frame(subjects=["orders"], measures=["avg_discount_pct"], breakdowns=["sale_event"],
+              comparison="normal days",
+              mentions=[Mention(text="sale-event days", concept="sale_event", role="comparison"),
+                        Mention(text="normal days", concept="sale_event", role="comparison")])
+    view = run(f).subjects[0]
+    assert [c for c, _ in view.breakdowns] == ["day_type"] and "sale_events" not in view.joins
+
+
+def test_a_word_from_the_users_answer_is_not_a_missing_value():
+    f = frame(subjects=["ad_spend"], mentions=[Mention(text="Last-click", concept="other")])
+    res = resolve(f, CONCEPTS, GRAPH, VALUES, [], {}, {}, TERMS, ["Last-click (shop-measured)"])
+    assert not res.open_points
+
+
+def test_a_value_inside_the_measure_satisfies_the_filter_check():
+    from pantree_insights.checks import result_problems
+    sql = ("SELECT p.category, COUNT(*) FILTER (WHERE s.return_reason = 'Size Issue') * 1.0 / COUNT(*) AS r "
+           "FROM sales s JOIN product_master p ON p.product_id = s.product_id WHERE s.line_type = 'Sale' GROUP BY 1")
+    assert not result_problems(None, sql, [("sales.return_reason", "Size Issue")])
+    plain = "SELECT p.category, COUNT(*) FROM sales s JOIN product_master p ON p.product_id = s.product_id GROUP BY 1"
+    assert result_problems(None, plain, [("sales.return_reason", "Size Issue")])
+
+
+def test_count_claims_are_verified():
+    from pantree_insights.grounding import Claim, verify
+    rows = pd.DataFrame({"sku_id": ["A", "B", "C"], "inbound_qty": [1, 0, 2]})
+    ok = Claim(id="c1", value=3, unit="count", column="sku_id", row=[], op="count")
+    assert verify(rows, [ok], {}).ok
+    assert not verify(rows, [ok.model_copy(update={"value": 4})], {}).ok

@@ -161,6 +161,9 @@ concepts:
     support: support_contacts.channel
   payment_method:
     orders: sales.payment_method
+  day_type:
+    orders: {column: sales.event_id, expression: "CASE WHEN sales.event_id IS NULL THEN 'Normal day' ELSE 'Sale-event day' END",
+      note: sale-event days versus normal days (a line sold at a sale-event price or not)}
   payment_type:
     orders: {column: sales.payment_method, expression: "CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END",
       note: COD versus prepaid (every method other than COD)}
@@ -273,6 +276,7 @@ concept_info:
   support_channel: {label: support channel (how the customer contacted us), group: support}
   payment_method: {label: payment method, group: payment}
   payment_type: {label: payment type (COD or prepaid), group: payment}
+  day_type: {label: sale-event day or normal day, group: event}
   coupon: {label: coupon code, group: payment}
   category: {label: product category, group: product}
   sub_category: {label: product sub-category, group: product}

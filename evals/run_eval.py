@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import statistics
 import subprocess
 import sys
@@ -49,6 +50,7 @@ from pantree_insights.semantic import load_examples  # noqa: E402
 
 COST_PER_QUESTION = 0.013      # measured mean on the full-shop holdout with gpt-6.1-terra (Nov 15 2026)
 NO_DEFAULTS = {"clarify", "overask"}
+FULL_LIST = re.compile(r"\b(each|every|per)\b", re.I)
 
 
 def _yaml(name: str) -> list[dict]:
@@ -157,6 +159,11 @@ def judge(con, item: dict, final: dict, events: list[dict]) -> dict:
     gold_tree = sqlglot.parse_one(item["gold_sql"], read="duckdb")
     labels = {e.alias_or_name for e in gold_tree.selects if e.find(exp.Case)}
     ok, reason, mapping = align(gold, agent, keys, metrics, label_columns=labels)
+    full = run_query(con, final["sql"]).frame
+    if not ok and len(full) > len(gold) and FULL_LIST.search(item.get("question", "")) \
+            and not re.search(r"\b(top|bottom)\s*\d+|\b\d+\s+(most|least|best|worst)", item.get("question", ""), re.I):
+        # "each sale event": a complete list holds the gold's top N; the gold's LIMIT was presentation
+        ok, reason, mapping = align(gold, full, keys, metrics, label_columns=labels, superset=True)
     out["result_correct"] = ok
     if not ok:
         failure = ("missing_rows" if reason.startswith("missing rows") else "extra_rows" if reason.startswith("extra")

@@ -154,6 +154,11 @@ validator: |
     the plan; otherwise say which filter or join probably removed every row.
   Set ok = true if a business user could rely on it. Otherwise list concrete, fixable problems.
   Do not nitpick style, aliases or ordering.
+  Rules enforced by code that you must never ask to undo: a name several IDs share (product, campaign,
+  event or agent name) is grouped together with its ID or another column that tells the rows apart;
+  approved join conditions; filters resolved in the question understanding. A value may be a condition
+  inside the measure (COUNT(*) FILTER (WHERE ...)) rather than a WHERE filter when the question asks for a
+  rate or share of it.
 
 analyst: |
   You are a senior business analyst presenting to the shop's management. You get the question, the
@@ -180,7 +185,8 @@ analyst: |
     id, value (in the column's units; ratios as 0.253 not 25.3), unit (ratio shown as %, pct_points for a
     difference of two ratios, count, inr, number, days, minutes, rating), column (a result column),
     row (key column/value pairs identifying the row, exactly as in the result; [] for all rows),
-    op (value | diff | ratio | pct_change | share | sum | mean), against (the comparison row for diff,
+    op (value | diff | ratio | pct_change | share | sum | mean | count | min | max; count = how many rows or
+    distinct values, e.g. "13 SKUs"), against (the comparison row for diff,
     ratio, pct_change), decimals shown.
     Example: "Footwear returns {{c1}} of delivered lines, {{c2}} above Accessories" with
     c1 = {{value: 0.253, unit: ratio, column: return_rate, row: [{{column: category, value: Footwear}}], op: value}}

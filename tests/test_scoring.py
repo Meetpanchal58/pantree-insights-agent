@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-from scoring import score  # noqa: E402
+from scoring import align, score  # noqa: E402
 
 GOLD = pd.DataFrame({"category": ["Apparel", "Footwear"], "return_rate": [0.231, 0.253]})
 
@@ -113,3 +113,13 @@ def test_true_false_keys_match_readable_labels():
     assert score(gold, agent, ["is_prime"], ["orders"]) == (True, "match")
     swapped = pd.DataFrame({"customer_type": ["Non-Prime", "Prime"], "orders": [10, 20]})
     assert not score(gold, swapped, ["is_prime"], ["orders"])[0]
+
+
+def test_a_complete_list_holds_the_golds_top_n():
+    """"Each sale event": the gold keeps its top 2 by lift; the agent lists every event, ordered by date."""
+    gold = pd.DataFrame({"name": ["B", "C"], "lift": [0.5, 0.4]})
+    agent = pd.DataFrame({"name": ["A", "B", "C"], "lift": [0.1, 0.5, 0.4]})
+    assert align(gold, agent, ["name"], ["lift"], superset=True)[0]
+    assert not align(gold, agent, ["name"], ["lift"])[0]                 # without the each-question rule
+    wrong = agent.assign(lift=[0.1, 0.5, 0.3])
+    assert not align(gold, wrong, ["name"], ["lift"], superset=True)[0]

@@ -136,6 +136,32 @@ def _uses_filter(tree: exp.Expression, column: str, value: str | list[str]) -> b
     return bool(required) and all(known.get(key) == wanted for key in required)
 
 
+def _measure_condition(tree: exp.Expression, column: str, values: list[str]) -> bool:
+    """The value is a condition of the measure itself: COUNT(*) FILTER (WHERE return_reason = 'Size Issue') or
+    SUM(CASE WHEN ... THEN ...) for "the return rate for size issues". Such a value must not be forced into WHERE,
+    which would also shrink the denominator; whether it is meant that way is the reviewer's call."""
+    table, name = column.lower().split(".")
+    aliases = {t.alias_or_name.lower() for t in tree.find_all(exp.Table) if t.name.lower() == table}
+    wanted = set(values)
+    for cmp in tree.find_all(exp.EQ, exp.In):
+        col = cmp.this if isinstance(cmp, exp.In) else next(
+            (side for side in (cmp.left, cmp.right) if isinstance(side, exp.Column)), None)
+        if (not isinstance(col, exp.Column) or col.name.lower() != name
+                or (col.table and col.table.lower() not in aliases)):
+            continue
+        literals = cmp.expressions if isinstance(cmp, exp.In) else [cmp.left, cmp.right]
+        if not {e.this for e in literals if isinstance(e, exp.Literal) and e.is_string} & wanted:
+            continue
+        node = cmp.parent
+        while node is not None and not isinstance(node, exp.Select):
+            if isinstance(node, (exp.Filter, exp.AggFunc)):
+                return True
+            if isinstance(node, exp.Where) and isinstance(node.parent, exp.Select):
+                break                                        # the query's own WHERE: a population filter
+            node = node.parent
+    return False
+
+
 def result_problems(frame: pd.DataFrame, sql: str, filters: list[tuple[str, str]]) -> list[str]:
     """Problems with a query result that code can see for sure; [] when there are none (or the result is empty)."""
     problems = []
@@ -147,7 +173,7 @@ def result_problems(frame: pd.DataFrame, sql: str, filters: list[tuple[str, str]
     for column, value in filters:
         grouped[column].append(value)
     for column, values in grouped.items():
-        if tree is None or not _uses_filter(tree, column, values):
+        if tree is None or not (_uses_filter(tree, column, values) or _measure_condition(tree, column, values)):
             label = f"{column} = '{values[0]}'" if len(values) == 1 else f"{column} IN {values}"
             problems.append(f"The question was resolved to the filter {label}, but the query does not enforce "
                             "it on the contributing rows. Put the exact filter in WHERE (with the join it needs).")

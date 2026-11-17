@@ -280,7 +280,7 @@ class Agent:
                     "_detail": {"decision": "decline", "reason": frame.decline_reason}}
         ids = self.ids.find(state["question"])
         res = resolve(frame, self.concepts, self.joins, self.value_columns, ids, choices, self.aliases,
-                      self.retriever.glossary.terms)
+                      self.retriever.glossary.terms, list(answers.values()))
         asked = {q.strip().lower() for q in answers}
         pending = [OpenPoint(f"llm:{q.question}", q.question, q.options, q.default, q.why)
                    for q in frame.open_points if q.question.strip().lower() not in asked] + \
@@ -326,6 +326,10 @@ class Agent:
         else:
             refreshed = {}
         text = res.to_prompt(period=frame.period, time_grain=frame.time_grain)
+        used_terms = self.retriever.glossary.terms_in(state["question"])
+        if text and used_terms:                            # definitions the question relies on are binding, not hints
+            text += "\n\nBusiness terms in this question (apply each definition):\n" + "\n".join(
+                f"- {t}: {m}" for t, m in used_terms.items())
         filters = [[f.column, f.value] for v in res.subjects for f in v.filters if not f.expression] + \
                   [[i.column, i.value] for v in res.subjects for i in v.id_filters]
         columns = {c for v in res.subjects for c in [v.time_column, *(c for _, c in v.breakdowns),
