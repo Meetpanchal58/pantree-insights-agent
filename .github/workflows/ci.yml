@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        run: uv sync --locked
+        run: uv sync
 
       - name: Lint
         run: uv run ruff check .
