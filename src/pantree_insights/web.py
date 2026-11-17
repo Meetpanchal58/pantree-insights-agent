@@ -127,8 +127,12 @@ class Runner:
             signature = snapshot_signature() if self._agent_factory is None else None
             if self._agent is None or signature != self._snapshot:
                 from .graph import Agent
+                old = self._agent
                 self._agent = (self._agent_factory or Agent)()
                 self._snapshot = signature
+                if old is not None and not any(not r.finished and r.agent is old for r in self.runs.values()):
+                    if hasattr(old, "close"):
+                        old.close()
             return self._agent
 
     def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool) -> Run:
@@ -146,10 +150,31 @@ class Runner:
         self._consume(store, run, events)
         return run
 
+    def restore(self, store: Store, user: dict, run_id: str) -> Run | None:
+        """Restore a paused user-owned checkpoint; never restart a pending LLM call."""
+        run = self.runs.get(run_id)
+        if run:
+            return run
+        saved = store.run_record(user["id"], run_id)
+        if not saved or saved["status"] != "paused":
+            return None
+        chat = store.chat(user["id"], saved["chat_id"])
+        if chat is None:
+            return None
+        agent = self.agent
+        run = Run(run_id, user, chat, saved["question"], agent=agent)
+        run.events = saved["events"] or []
+        run.started = min((e.get("t", time.time()) for e in run.events), default=time.time())
+        run.paused = True
+        agent.restore_memory(run_id, MemoryScope(store, user, chat))
+        self.runs[run_id] = run
+        return run
+
     def answer(self, store: Store, run: Run, answers: dict[str, str]) -> None:
         run.paused = False
         run.segment_done.clear()
         run.events.append({"type": "answered", "answers": answers, "t": time.time()})
+        store.save_run(run.id, "running", run.events)
         self._consume(store, run, (run.agent or self.agent).resume(run.id, answers))
 
     def _consume(self, store: Store, run: Run, events) -> None:
@@ -341,7 +366,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/runs/{run_id}/answer")
     def answer(run_id: str, body: AnswerIn, user=Depends(require_user), store: Store = Depends(get_store)):
-        run = runner.runs.get(run_id)
+        run = runner.restore(store, user, run_id)
         if not run or run.user["id"] != user["id"]:
             raise HTTPException(404, "Run not found")
         if not run.paused:
@@ -350,8 +375,9 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/runs/{run_id}/stream")
-    async def stream(run_id: str, request: Request, since: int = 0, user=Depends(require_user)):
-        run = runner.runs.get(run_id)
+    async def stream(run_id: str, request: Request, since: int = 0,
+                     user=Depends(require_user), store: Store = Depends(get_store)):
+        run = runner.restore(store, user, run_id)
         if not run or run.user["id"] != user["id"]:
             raise HTTPException(404, "Run not found")
 
