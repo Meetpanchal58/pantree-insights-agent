@@ -251,7 +251,8 @@ def build():
              ) AS product_rank
            FROM lines l GROUP BY l.brand_name, l.category, l.product_id, l.product_name
          ), selected_products AS (
-           SELECT p.*, c.category_rank
+           SELECT p.brand_name, p.category, p.product_id, p.product_name,
+             p.realized_revenue, p.orders, p.product_rank, c.category_rank
            FROM product_totals p JOIN category_totals c
              ON c.brand_name = p.brand_name AND c.category = p.category
            WHERE c.category_rank <= 5 AND p.product_rank = 1
