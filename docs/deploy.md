@@ -1,8 +1,7 @@
 # Deploy on Google Cloud Run
 
 Everything below runs in **Google Cloud Shell** (the terminal button at the top right of the Google Cloud
-console): it is already signed in and has `gcloud`, `git` and bash. Settings keep it inside the free tier:
-**0 instances when idle, at most 1**, request-based billing, data mounted from Cloud Storage.
+console): it is already signed in and has `gcloud`, `git` and bash. Settings favor a low-cost demo deployment: **0 instances when idle, at most 1**, request-based billing, data mounted from Cloud Storage. Analysis checkpoints and run metadata persist in Postgres, so browser navigation or a container restart does not rely only on process memory.
 
 **1. Database (Neon Postgres, free).** Create a project at neon.tech, copy the connection string
 (`postgresql://...?sslmode=require`) and store it as a secret (Cloud console → Secret Manager → Create secret,
@@ -52,9 +51,7 @@ script set them). In the Cloud console of this project:
 Click **Run** on the trigger once to test it; builds show under Cloud Build → History. Use the deploy script
 again when secrets, the data or service settings change.
 
-The first request after an idle period starts a new instance (about 20-40 seconds: indexes and the KPI pulse
-are rebuilt). Live questions are limited to 10 per user per day and the app stops calling the model after
-US$0.50 a day; the OpenAI project has its own monthly limit.
+The first request after an idle period starts a new instance (about 20-40 seconds: indexes and the KPI pulse are rebuilt). Live questions are limited to 10 per user per day and the app stops calling the model after US$0.50 a day; the OpenAI project has its own quota. `MAX_CONCURRENT_RUNS=1` queues LLM-heavy analyses so multiple browser tabs do not burst the provider at once. The deploy script maps `database-url` to both `DATABASE_URL` and `CHECKPOINT_DATABASE_URL`.
 
 ## Keep the instance warm (optional, about free)
 
