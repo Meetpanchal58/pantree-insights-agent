@@ -77,7 +77,7 @@
           "position",
           "total_revenue"
         ],
-        "query_seconds": 0.013,
+        "query_seconds": 0.014,
         "sample_rows": [
           {
             "view": "Brand",

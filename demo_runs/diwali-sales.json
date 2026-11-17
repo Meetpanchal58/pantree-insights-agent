@@ -77,7 +77,7 @@
           "orders_per_day",
           "revenue_per_order"
         ],
-        "query_seconds": 0.018,
+        "query_seconds": 0.02,
         "sample_rows": [
           {
             "event_name": "Diwali 2025",
