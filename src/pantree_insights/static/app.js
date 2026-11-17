@@ -229,29 +229,20 @@ function renderSidebar() {
 }
 
 /* ---------------------------------------------------------------- welcome and chats */
-async function renderWelcome() {
-  const view = leaveView();
+function renderWelcome() {
+  leaveView();
   S.chatId = null;
   renderSidebar();
   $("#chat-title").textContent = S.pendingProject ? `New chat in ${S.projects.find((p) => p.id === S.pendingProject)?.name || "project"}` : "New chat";
   $("#move-project").hidden = true;
-  const paint = (demos) => {
-    const d = S.me && S.me.data;
-    $("#messages").innerHTML = `<div class="welcome">
-        <h2>What would you like to know?</h2>
-        <p class="muted">Ask about Pantree's sales, returns, delivery, marketing, stock or customers.
-        Data: ${d ? `${esc(d.first_day)} to ${esc(d.last_day)} (${esc(d.size)} shop, simulated)` : ""}.</p>
-        ${demos.length ? `<div class="section-label">Four offline business demos</div><p class="muted">Saved sample-data results, charts and SQL. No live model calls.</p><div class="cards">${demos.map((x) => `
-          <button class="qcard" data-action="replay" data-slug="${esc(x.slug)}"><div class="kind">${esc(x.topic || "Offline demo")}</div>${esc(x.question)}<div class="muted">${esc(x.data_size)} sample · ${esc(x.data_as_of)}</div></button>`).join("")}</div>` : ""}
-      </div>`;
-  };
-  paint(S.demos || []);
-  if (!S.demos) {
-    try {
-      S.demos = await api("/api/demos");
-      if (view === S.view) paint(S.demos);
-    } catch (e) { if (view === S.view) toast(e.message); }
-  }
+  const d = S.me && S.me.data;
+  $("#messages").innerHTML = `<div class="welcome">
+      <h2>What would you like to know?</h2>
+      <p class="muted">Ask about Pantree's sales, returns, delivery, marketing, stock or customers.
+      Data: ${d ? `${esc(d.first_day)} to ${esc(d.last_day)} (${esc(d.size)} shop, simulated)` : ""}.</p>
+      ${S.demos.length ? `<div class="section-label">Four offline business demos</div><p class="muted">Saved sample-data walkthroughs with steps, results, charts and SQL. No live model calls.</p><div class="cards">${S.demos.map((x) => `
+        <button class="qcard" data-action="replay" data-slug="${esc(x.slug)}"><div class="kind">${esc(x.topic || "Offline demo")}</div>${esc(x.question)}<div class="muted">${esc(x.data_size)} sample · ${esc(x.data_as_of)}</div></button>`).join("")}</div>` : ""}
+    </div>`;
 }
 
 async function openChat(id, force = false) {
