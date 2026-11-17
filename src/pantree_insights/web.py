@@ -69,6 +69,12 @@ class PreferencesIn(BaseModel):
     text: str = Field("", max_length=4000)
 
 
+class FeedbackIn(BaseModel):
+    rating: str = Field(pattern="^(up|down)$")
+    reason: str = Field("", max_length=40)
+    note: str = Field("", max_length=1000)
+
+
 # ----------------------------------------------------------------------------- background runs
 @dataclass
 class Run:
@@ -104,13 +110,14 @@ def failure_details(error: Exception) -> dict:
 
 
 class Runner:
-    """Owns the agent and the runs in progress (one Cloud Run instance, so in-memory is fine)."""
+    """Owns active workers while durable graph/run state lives in Postgres."""
 
     def __init__(self, agent_factory=None):
         self._agent_factory = agent_factory
         self._agent = None
         self._snapshot = None
         self._lock = threading.Lock()
+        self._slots = threading.BoundedSemaphore(max(1, get_settings().max_concurrent_runs))
         self.runs: dict[str, Run] = {}
 
     @property
@@ -134,7 +141,23 @@ class Runner:
                                           use_defaults=use_defaults, memory=scope)
         run = Run(run_id, user, chat, question, agent=agent)
         self.runs[run_id] = run
+        store.create_run(run_id, user["id"], chat["id"], question)
         self._consume(store, run, events)
+        return run
+
+    def restore(self, store: Store, user: dict, run_id: str) -> Run | None:
+        saved = store.run(user["id"], run_id)
+        if not saved:
+            return None
+        chat = store.chat(user["id"], saved["chat_id"])
+        if not chat:
+            return None
+        run = Run(run_id, user, chat, saved["question"], events=list(saved.get("events") or []),
+                  paused=saved["status"] == "paused", finished=saved["status"] == "finished", agent=self.agent)
+        self.runs[run_id] = run
+        run.agent.attach_memory(run_id, MemoryScope(store, user, chat))
+        if saved["status"] in ("running", "queued"):
+            self._consume(store, run, run.agent.continue_run(run_id))
         return run
 
     def answer(self, store: Store, run: Run, answers: dict[str, str]) -> None:
