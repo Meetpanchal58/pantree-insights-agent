@@ -179,7 +179,8 @@ def build():
     def brands(rows):
         brand = [r for r in rows if r["view"] == "Brand"]
         products = [r for r in rows if r["view"] == "Product"]
-        top, product = min(brand, key=lambda row: row["position"]), max(products, key=lambda row: row["realized_revenue"])
+        top = min(brand, key=lambda row: row["position"])
+        product = max(products, key=lambda row: row["realized_revenue"])
         total = top["total_revenue"]
         share = sum(r["realized_revenue"] for r in brand) / total if total else 0
         return {
