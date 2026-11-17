@@ -332,8 +332,7 @@ function answerCard(run, replay = false) {
 
 /* ---------------------------------------------------------------- asking */
 async function ask(question) {
-  if (S.run?.replay) return;
-  if (S.busy || !question.trim()) return;
+  if (S.run?.replay || S.busy || !question.trim()) return false;
   if (!S.me.user) { showSignin(); return; }
   const view = ++S.view;
   S.busy = true; $(".send").disabled = true;
@@ -507,6 +506,8 @@ function stepDetail(s) {
   if (d.rows !== undefined) parts.push(`${d.rows} rows, ${(d.columns || []).length} columns in ${d.query_seconds}s${d.truncated ? " (truncated)" : ""}`);
   if (d.number_check) parts.push(`Number check: ${d.number_check}${d.rewritten ? " (after one rewrite)" : ""}`);
   if (d.reason) parts.push(esc(d.reason));
+  if (d.sample_rows?.length) parts.push("<b>Saved result preview:</b><pre>" + esc(JSON.stringify(d.sample_rows, null, 2)) + "</pre>");
+  if (d.findings?.length) parts.push("<b>Findings:</b> " + d.findings.map(esc).join(" · "));
   if (d.error) parts.push(`<div class="problem">${esc(d.error)}</div>`);
   if (d.gaps_closed) parts.push(`Explained ${d.gaps_closed} open gap(s)`);
   if (d.facts !== undefined) parts.push(`${d.facts} fact(s) saved`);
@@ -516,7 +517,7 @@ function renderSteps() {
   const ol = $("#steps"); if (!ol) return;
   ol.innerHTML = S.run.steps.map((s, i) => {
     const detail = stepDetail(s);
-    const open = s.open ?? (s.status === "running" || ["retry", "failed", "warning", "needs_input"].includes(s.status));
+    const open = s.open ?? (S.run?.replay || s.status === "running" || ["retry", "failed", "warning", "needs_input"].includes(s.status));
     const label = s.status === "needs_input" ? "Waiting for your confirmation or answer" : s.status;
     return `<li class="step ${s.status}"><span class="dot" title="${esc(label)}" aria-label="${esc(label)}">${s.status === "needs_input" ? "…" : STATUS_ICON[s.status] ?? "·"}</span>
       <div class="step-head" data-action="toggle-step" data-i="${i}"><span class="step-name">${esc(STEP_LABELS[s.step] || s.step)}</span>
@@ -816,7 +817,6 @@ document.addEventListener("click", async (ev) => {
     case "toggle-project": S.expanded.has(id) ? S.expanded.delete(id) : S.expanded.add(id); renderSidebar(); break;
     case "new-project": if (!S.me.user) return showSignin(); projectDialog(null); break;
     case "edit-project": projectDialog(S.projects.find((p) => p.id === id)); break;
-    case "example": $("#question").value = t.dataset.q; ask(t.dataset.q); $("#question").value = ""; break;
     case "replay": replayDemo(t.dataset.slug, OFFLINE_DEMOS.find((d) => d.slug === t.dataset.slug)?.question || t.textContent.trim()); break;
     case "toggle-panel": $("#app").classList.toggle("panel-closed"); break;
     case "toggle-step": {
@@ -843,7 +843,14 @@ document.addEventListener("click", async (ev) => {
 });
 $("#dialog").addEventListener("click", (ev) => { if (ev.target.id === "dialog") closeDialog(); });
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !$("#dialog").hidden) closeDialog(); });
-$("#composer").addEventListener("submit", (ev) => { ev.preventDefault(); const q = $("#question").value; $("#question").value = ""; autosize(); ask(q); });
+$("#composer").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const q = $("#question").value.trim();
+  if (!q || S.run?.replay) return;
+  if (S.busy) { toast("The current chat is still loading. Your question stays in the input."); return; }
+  if (!S.me?.user) { showSignin(); return; }
+  $("#question").value = ""; autosize(); ask(q);
+});
 const autosize = () => { const ta = $("#question"); ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; };
 $("#question").addEventListener("input", autosize);
 $("#question").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); $("#composer").requestSubmit(); } });
