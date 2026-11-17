@@ -401,7 +401,7 @@ def create_app() -> FastAPI:
                     return
                 if time.monotonic() - heartbeat >= 12:
                     # SSE comments are ignored by EventSource but prevent idle proxy timeouts.
-                    yield ": heartbeat\\n\\n"
+                    yield ": heartbeat\n\n"
                     heartbeat = time.monotonic()
                 await asyncio.sleep(0.15)
         return StreamingResponse(events(), media_type="text/event-stream",
