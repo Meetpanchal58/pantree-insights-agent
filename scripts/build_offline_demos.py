@@ -75,15 +75,23 @@ def build():
             "offline": True,
         }
         events = [
-            {
-                "type": "step",
-                "step": "offline_demo",
-                "status": "done",
-                "detail": {
-                    "understood": question,
-                    "reason": "Saved SQL results and editorial insights; no live model was run.",
-                },
-            },
+            {"type": "step", "step": "offline_demo", "status": "done",
+             "detail": {"reason": "Pinned sample-data walkthrough; no live model call."}},
+            {"type": "step", "step": "understand", "status": "done",
+             "detail": {"resolved": question}},
+            {"type": "step", "step": "plan", "status": "done",
+             "detail": {"plan": "Use the documented metric definitions and the pinned date range; aggregate only the business grain requested."}},
+            {"type": "step", "step": "write_sql", "status": "done",
+             "detail": {"attempt": 1, "sql": verdict.sql, "explanation": "Saved, guardrail-validated SQL used to make this demo reproducible."}},
+            {"type": "step", "step": "check_sql", "status": "done",
+             "detail": {"reason": "Read-only SQL, approved tables/columns and approved joins."}},
+            {"type": "step", "step": "run_query", "status": "done",
+             "detail": {"rows": len(result.frame), "columns": list(result.frame.columns),
+                        "query_seconds": round(result.seconds, 3), "truncated": result.truncated}},
+            {"type": "step", "step": "analyse", "status": "done",
+             "detail": {"reason": "Findings below are derived from the saved result table; they are not a live LLM response."}},
+            {"type": "step", "step": "chart", "status": "done",
+             "detail": {"reason": analysis["chart_title"]}},
             final,
         ]
         demos.append(
@@ -173,7 +181,8 @@ def build():
     def brands(rows):
         brand = [r for r in rows if r["view"] == "Brand"]
         products = [r for r in rows if r["view"] == "Product"]
-        top, product = brand[0], products[0]
+        top = brand[0]
+        product = max(products, key=lambda r: r["realized_revenue"])
         total = top["total_revenue"]
         share = sum(r["realized_revenue"] for r in brand) / total if total else 0
         return {
@@ -187,59 +196,76 @@ def build():
                     f"{number(top['orders'])} distinct orders containing that brand."
                 ),
                 (
-                    f"The leading product was {product['product_name']} "
-                    f"({product['brand_name']}), with {money(product['realized_revenue'])} and "
-                    f"{number(product['orders'])} orders."
+                    "For each top brand, the product rows choose the leading product from each of "
+                    "its five highest-revenue categories, so the product view is category-aware."
                 ),
                 (
-                    "The top five brands produced "
-                    f"{money(sum(r['realized_revenue'] for r in brand))} of the shop's "
-                    f"{money(total)} realized revenue in the period."
+                    f"The strongest category-leading product was {product['product_name']} "
+                    f"({product['brand_name']} · {product['category']}), with "
+                    f"{money(product['realized_revenue'])} realized revenue."
                 ),
             ],
             "recommendations": [
-                (
-                    "Prioritize availability checks for the leading products, then assess margin "
-                    "and return rates before increasing stock."
-                ),
-                (
-                    "Monitor concentration in the leading brands and test alternative brands "
-                    "rather than assuming revenue leaders are the most profitable."
-                ),
+                "Review stock, margin and return rate for the category leaders before increasing inventory.",
+                "Use the category-aware product view to avoid a single category dominating every product recommendation.",
             ],
             "caveats": [
-                "Brand and product rankings are separate views; do not add their revenue or order counts together.",
-                (
-                    "One order can contain several brands/products. Exact stored brand spelling "
-                    "is preserved; simulated revenue does not establish demand or profit."
-                ),
+                "Product rows are category leaders within the top five brands, not the global top-five products.",
+                "One order can contain several brands/products. Stored brand spelling is preserved; simulated revenue is not profit.",
             ],
             "chart_title": "Top five brands by realized revenue",
         }
 
     save(
         "brand-product-sales",
-        "Brand and product sales",
+        "Brand and category-leading products",
         (
-            "Which five brands and five products generated the most realized revenue from "
-            f"{period}, and how concentrated were brand sales?"
+            "Which five brands generated the most realized revenue from "
+            f"{period}, and within each top brand which product led each of its five "
+            "highest-revenue categories?"
         ),
         f"""WITH lines AS (
-           SELECT p.brand_name, p.product_id, p.product_name, s.order_id,
-             CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END AS revenue
+           SELECT p.brand_name, p.category, p.product_id, p.product_name, s.order_id,
+             CASE WHEN s.delivered_at IS NOT NULL
+               THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END AS revenue
            FROM sales s JOIN product_master p ON p.product_id = s.product_id
            WHERE s.line_type = 'Sale' AND s.placed_at >= TIMESTAMP '{start}'
              AND s.placed_at < DATE '{end}' + INTERVAL 1 DAY
-         ), ranked AS (
-           SELECT 'Brand' AS view, brand_name, NULL AS product_id, NULL AS product_name,
-             SUM(revenue) AS realized_revenue, COUNT(DISTINCT order_id) AS orders,
-             ROW_NUMBER() OVER (ORDER BY SUM(revenue) DESC, brand_name) AS position FROM lines GROUP BY brand_name
-           UNION ALL
-           SELECT 'Product', brand_name, product_id, product_name, SUM(revenue), COUNT(DISTINCT order_id),
-             ROW_NUMBER() OVER (ORDER BY SUM(revenue) DESC, product_id)
-           FROM lines GROUP BY brand_name, product_id, product_name
-         ) SELECT view, brand_name, product_id, product_name, realized_revenue, orders, position,
-           (SELECT SUM(revenue) FROM lines) AS total_revenue FROM ranked WHERE position <= 5 ORDER BY view, position""",
+         ), brand_totals AS (
+           SELECT brand_name, SUM(revenue) AS realized_revenue, COUNT(DISTINCT order_id) AS orders,
+             ROW_NUMBER() OVER (ORDER BY SUM(revenue) DESC, brand_name) AS brand_rank
+           FROM lines GROUP BY brand_name
+         ), category_totals AS (
+           SELECT l.brand_name, l.category, SUM(l.revenue) AS category_revenue,
+             ROW_NUMBER() OVER (
+               PARTITION BY l.brand_name ORDER BY SUM(l.revenue) DESC, l.category
+             ) AS category_rank
+           FROM lines l JOIN brand_totals b ON b.brand_name = l.brand_name AND b.brand_rank <= 5
+           GROUP BY l.brand_name, l.category
+         ), product_totals AS (
+           SELECT l.brand_name, l.category, l.product_id, l.product_name,
+             SUM(l.revenue) AS realized_revenue, COUNT(DISTINCT l.order_id) AS orders,
+             ROW_NUMBER() OVER (
+               PARTITION BY l.brand_name, l.category
+               ORDER BY SUM(l.revenue) DESC, l.product_id
+             ) AS product_rank
+           FROM lines l GROUP BY l.brand_name, l.category, l.product_id, l.product_name
+         ), selected_products AS (
+           SELECT p.*, c.category_rank
+           FROM product_totals p JOIN category_totals c
+             ON c.brand_name = p.brand_name AND c.category = p.category
+           WHERE c.category_rank <= 5 AND p.product_rank = 1
+         )
+         SELECT 'Brand' AS view, b.brand_name, NULL AS category, NULL AS product_id,
+           NULL AS product_name, b.realized_revenue, b.orders, b.brand_rank AS position,
+           (SELECT SUM(revenue) FROM lines) AS total_revenue
+         FROM brand_totals b WHERE b.brand_rank <= 5
+         UNION ALL
+         SELECT 'Product', p.brand_name, p.category, p.product_id, p.product_name,
+           p.realized_revenue, p.orders, p.category_rank,
+           (SELECT SUM(revenue) FROM lines)
+         FROM selected_products p
+         ORDER BY view, position, brand_name, category""",
         brands,
         "realized_revenue",
         lambda r: r["view"] == "Brand",
