@@ -314,8 +314,10 @@ the daily LLM budget is reached and never scores a budget refusal or a provider 
 - **Pulse raises false alerts** (about 2.8 a week on the backtest besides real changes) and misses most
   small changes; treat it as a prompt to look, not a detector.
 - Answers are against one data snapshot; the simulator adds a day every night.
-- **One instance by design.** Runs in progress and paused clarifying questions live in memory
-  (LangGraph `InMemorySaver`), so a restart drops them; scaling out needs a Postgres checkpointer (DESIGN.md).
+- **One instance by design.** Local tests use `InMemorySaver`, while Cloud Run can use
+  PostgreSQL LangGraph checkpoints to resume paused clarifications after a restart. An interrupted
+  *active* provider request cannot safely be replayed; the UI offers recovery instead. In-process
+  SSE streams are still single-instance, so multi-instance scaling requires shared event delivery.
 
 ## Roadmap
 
@@ -356,6 +358,28 @@ briefly, and failed refreshes preserve cached conversations. Paid POST requests 
 Application responses include X-Request-ID; app-generated 429/503/504 responses log `request_busy` with
 that reference. Upstream/Cloud Run failures can happen before the app and still require platform logs;
 these recovery changes do not increase provider quotas or Cloud Run capacity.
+
+### Reliability, feedback, and evaluation (feature branch)
+
+- The homepage contains **four model-free offline walkthroughs** with the saved SQL, step explanations,
+  preview data, charts and exports. The brand demo shows five leading brands and the five leading
+  products **in each category within each brand**. These are reproducible snapshots, **not live accuracy claims**.
+- Live queries use a bounded shared LLM concurrency gate. The browser preserves typed questions while
+  loading, reconnects interrupted SSE streams without repeating the paid POST, and retains recent chats
+  during transient 429/502/503/504 failures. These controls do **not** raise your provider/API quotas.
+- User-submitted 👍/👎 feedback is stored in `feedback`; admins can inspect it using
+  `GET /api/admin/feedback`. No responses are silently used as external gold evaluations.
+  Stage timing, cost and result status are available for admins at `GET /api/admin/metrics`.
+- `CHECKPOINT_BACKEND=postgres` uses the existing Neon database for paused LangGraph checkpoints.
+  `CHECKPOINT_BACKEND=memory` remains available for local testing.
+- `ENABLE_SQL_COMPILER=true` opts into a conservative code-built standard metric query path,
+  falling back to the validated LLM writer for unsupported analyses. It defaults to **false** until
+  a paired full-suite live evaluation confirms no quality regression.
+- To evaluate the current commit, use the manually triggered **Live agent evaluation (manual, paid)**
+  GitHub Action with `OPENAI_API_KEY` configured as a repository secret. It records artifacts and
+  runs the suite under a spending cap. The **external holdout remains empty** until independent humans
+  contribute questions and separately reviewed gold SQL; do not label self-authored tests external.
+- A merge does not deploy Cloud Run. Redeploy and verify the new revision after CI and model evaluation.
 
 ### Validate changes before rollout
 

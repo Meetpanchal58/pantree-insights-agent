@@ -69,18 +69,23 @@ error message that tells the writer how to fix it.
 **Known weakness.** The list of identifier columns is maintained by hand; a new key column not added to it
 is not covered.
 
-## 5. One Cloud Run instance with an in-memory checkpointer
+## 5. Durable paused runs while keeping the single-instance serving model
 
-**Decision.** LangGraph runs use `InMemorySaver`; live events and paused clarifying questions live in the
-process. The service runs with `min-instances 0`, `max-instances 1`.
+**Decision.** Local tests use `InMemorySaver`. The production setting
+`CHECKPOINT_BACKEND=postgres` uses a LangGraph PostgreSQL checkpointer in Neon so that
+paused clarification checkpoints can be restored after a Cloud Run restart. Run ownership and
+status are stored in SQLAlchemy tables, and runtime checkpoint memory is reattached per user.
 
-**Alternatives.** A Postgres checkpointer and a shared event store, allowing several instances.
+**Alternatives.** Stateless full replay (unsafe because an already-paid or running LLM call
+could execute twice), an in-memory-only demo, or horizontally scaled shared event delivery.
 
-**Why.** For a personal demo the traffic fits one instance, and the simplest correct design has no
-cross-instance state to get wrong. The daily LLM budget is in Postgres, so a restart does not reset it.
+**Why.** Paused user interactions deserve durability without a second infrastructure service.
+The application retains `max-instances 1`; active SSE events still live inside that instance.
 
-**Known weakness.** A restart or scale-to-zero drops runs in progress and unanswered clarifications.
-Scaling out needs the Postgres checkpointer first.
+**Known weakness.** An active model call interrupted mid-flight is marked for recovery and
+not automatically replayed. Multiple Cloud Run instances require shared SSE/event state,
+a distributed run lock, and a database-backed claim of execution ownership. These are
+not implemented; do not describe this as horizontally scalable.
 
 ## 6. Memory is written only for verified answers, and old insights age out
 

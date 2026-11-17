@@ -31,3 +31,9 @@ Thumbs.db
 .cache/
 
 node_modules/
+
+# Locally produced evaluation reports. Keep pinned historical evidence already tracked;
+# new evaluation runs are shared via GitHub Actions artifacts instead.
+/evals/reports/*.json
+/evals/reports/*.md
+!/evals/reports/README.md
