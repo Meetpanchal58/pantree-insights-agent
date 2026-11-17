@@ -152,7 +152,9 @@ class Runner:
         chat = store.chat(user["id"], saved["chat_id"])
         if not chat:
             return None
-        run = Run(run_id, user, chat, saved["question"], events=list(saved.get("events") or []),
+        run = Run(run_id, user, chat, saved["question"],
+                  started=saved["started_at"].timestamp() if saved.get("started_at") else time.time(),
+                  events=list(saved.get("events") or []),
                   paused=saved["status"] == "paused", finished=saved["status"] == "finished", agent=self.agent)
         self.runs[run_id] = run
         run.agent.attach_memory(run_id, MemoryScope(store, user, chat))
