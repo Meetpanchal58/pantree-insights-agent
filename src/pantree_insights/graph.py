@@ -164,6 +164,7 @@ class Agent:
                  features: Features | None = None):
         settings = get_settings()
         self.features = features or Features()
+        self.compile_metrics = (llm_factory is None) if compile_metrics is None else compile_metrics
         self.llm_factory = llm_factory or ChatLLM
         self.con = con or connect(settings.shop_dir)
         self.retriever = retriever or get_retriever()
@@ -413,7 +414,7 @@ class Agent:
 
         # First choice: deterministic SQL for a single supported metric with a fully
         # confirmed scope. The model interprets intent; code owns standard metric SQL.
-        if attempt == 1 and self.features.understand:
+        if attempt == 1 and self.features.understand and self.compile_metrics:
             compiled = compile_metric_query(state.get("verify_scope"), self.joins)
             if compiled:
                 return {"sql": compiled.sql, "explanation": compiled.reason, "attempts": attempt,
