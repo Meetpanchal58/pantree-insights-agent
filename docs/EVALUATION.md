@@ -30,3 +30,14 @@ uv run python evals/collect_external.py --author <name> --question "<question>"
 Review intent, required tables/metrics, result grain and gold SQL independently before moving a question from `external_intake.yaml` to `holdout_external.yaml`.
 
 The repository intentionally ships with no fabricated external accuracy claim.
+
+
+## Production feedback
+
+A thumbs-down stores the run ID, reason and note but never changes prompts automatically. Export the review queue with:
+
+```bash
+uv run python evals/export_feedback.py
+```
+
+Review the question, SQL/result and failure category. Once corrected, add a deliberately reviewed case to the regression suite; do not relabel production failures as unseen holdout questions.
