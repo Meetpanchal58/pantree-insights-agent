@@ -403,7 +403,7 @@ function onEvent(e, status) {
   }
 }
 
-function streamRun(runId, since, status, question) {
+function streamRun(runId, since, status, question, retry = 0) {
   if (since === 0) newTimeline(question || $("#chat-title").textContent, false);
   S.stream?.close();
   const view = S.view;
@@ -419,9 +419,22 @@ function streamRun(runId, since, status, question) {
     onEvent(e, status);
     if (e.type === "clarify" || e.type === "final") es.close();
   };
-  es.onerror = () => { es.close(); if (view !== S.view || S.stream !== es) return; if (S.busy) { if (status) status.remove();
-    $("#messages").appendChild(recoveryCard("The connection was interrupted. Reopen this chat to check whether the analysis finished."));
-    S.busy = false; $(".send").disabled = false; } };
+  es.onerror = () => {
+    es.close();
+    if (view !== S.view || S.stream !== es) return;
+    if (retry < 2) {
+      if (status?.querySelector(".txt")) status.querySelector(".txt").textContent = "Reconnecting to analysis…";
+      setTimeout(() => {
+        if (view === S.view && S.stream === es) streamRun(runId, count, status, question, retry + 1);
+      }, 1500 * (2 ** retry));
+      return;
+    }
+    if (S.busy) {
+      if (status) status.remove();
+      $("#messages").appendChild(recoveryCard("The connection was interrupted. Reopen this chat to check whether the analysis finished."));
+      S.busy = false; $(".send").disabled = false;
+    }
+  };
 }
 
 const clean = (o) => String(o).replace(/\s*\((recommended|default)\)\s*/gi, " ").trim();
@@ -465,6 +478,28 @@ function clarifyCard(e) {
 }
 
 /* ---------------------------------------------------------------- demos */
+function educationalDemoEvents(demo) {
+  const steps = (demo.events || []).filter(e => e.type === "step");
+  // Older pinned demo fixtures contain only a summary step. Explain their actual
+  // saved SQL, output and chart in order; never pretend these are paid LLM calls.
+  if (steps.length >= 3) return demo.events;
+  const final = demo.events?.at(-1);
+  if (!final || final.type !== "final") return demo.events || [];
+  const detail = (step, extra) => ({ type: "step", step, status: "done", detail: extra });
+  const result = final.result || { columns: [], data: [] };
+  const sample_rows = (result.data || []).slice(0, 3).map(row =>
+    Object.fromEntries(row.map((value, i) => [result.columns[i], value])));
+  return [
+    detail("check_input", { reason: "This is a saved, model-free walkthrough using simulated data." }),
+    detail("understand", { understood: demo.question, reason: "The analysis scope was fixed when the snapshot was built." }),
+    detail("write_sql", { sql: final.sql, reason: "Read-only, validated SQL saved with the demo." }),
+    detail("run_query", { rows: result.data?.length || 0, columns: result.columns || [], sample_rows }),
+    detail("analyse", { findings: final.analysis?.findings || [], reason: "Saved findings, not live-generated answers." }),
+    detail("chart", { reason: "The chart and downloadable table visualize the saved SQL output." }),
+    final,
+  ];
+}
+
 function replayDemo(slug, question) {
   const demo = OFFLINE_DEMOS.find((item) => item.slug === slug);
   if (demo) question = demo.question;
@@ -481,7 +516,7 @@ function replayDemo(slug, question) {
   if (demo) {
     $("#question").disabled = true;
     $("#question").placeholder = "Offline demo. Start a new chat to ask your own question.";
-    for (const event of demo.events) {
+    for (const event of educationalDemoEvents(demo)) {
       if (view !== S.view) return;
       onEvent({ ...event, replay: true }, status);
     }
