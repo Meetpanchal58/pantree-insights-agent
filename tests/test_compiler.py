@@ -2,7 +2,6 @@ from pantree_insights.compiler import compile_metric_query
 from pantree_insights.guardrails import check_sql
 from pantree_insights.joins import JoinGraph
 from pantree_insights.semantic import load_schema
-
 from test_joins import fake_profile
 
 
