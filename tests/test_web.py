@@ -198,6 +198,33 @@ def test_admin_shares_business_memory(app_env):
     assert client.post(f"/api/memory/{mem['insights'][0]['id']}/promote", json={}).status_code == 403
 
 
+def test_scoped_feedback_and_admin_observability(app_env):
+    client, codes, _ = app_env
+    sign_in(client, codes)
+    chat = client.post("/api/chats", json={}).json()
+    events = run_to_end(
+        client, client.post(f"/api/chats/{chat['id']}/ask",
+                            json={"question": "Revenue by category?"}).json()["run_id"]
+    )
+    final = events[-1]
+    assert final["status"] == "done"
+    payload = {"chat_id": chat["id"], "run_id": final["run_id"], "rating": "negative",
+               "category": "wrong_metric", "comment": "Please review the metric"}
+    assert client.post("/api/feedback", json=payload).status_code == 200
+    assert client.post("/api/feedback", json={**payload, "run_id": "missing"}).status_code == 404
+    assert client.get("/api/admin/feedback").status_code == 403
+    assert client.get("/api/admin/metrics").status_code == 403
+    client.post("/auth/logout", json={})
+    sign_in(client, codes, "boss@example.com")
+    rows = client.get("/api/admin/feedback").json()["feedback"]
+    assert len(rows) == 1 and rows[0]["category"] == "wrong_metric"
+    assert "user_id" not in rows[0] and "question" not in rows[0]
+    metrics = client.get("/api/admin/metrics").json()
+    assert metrics["completed_runs"] >= 1
+    assert metrics["status_counts"]["done"] >= 1
+
+
+
 def test_demo_replay(app_env):
     client, _, tmp_path = app_env
     demo = {"question": "Demo Q", "data_size": "small", "data_as_of": "2026-11-14", "seconds": 1, "events": [
