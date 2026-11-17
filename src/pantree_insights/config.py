@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     daily_question_limit: int = 10                                   # live questions per user per day
     memory_max_age_days: int = 30          # insights older than this (vs the data's last day) are left out
     demo_dir: Path = ROOT / "demo_runs"
+    checkpoint_database_url: str = ""  # production: reuse Neon/Postgres for durable LangGraph checkpoints
+    max_concurrent_runs: int = 1       # provider-friendly queue; avoids bursts of LLM requests
 
     # Sign-in: Google (OAuth client in Google Cloud) and/or email codes (SMTP, e.g. Gmail app password)
     google_client_id: str = ""
