@@ -22,10 +22,12 @@ from functools import wraps
 from typing import Any, TypedDict
 
 import pandas as pd
+import sqlglot
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
+from sqlglot import exp
 
 from . import agents
 from .catalog import value_columns as catalog_values
@@ -39,7 +41,7 @@ from .joins import JoinGraph
 from .llm import LLM, BudgetExceeded, ChatLLM
 from .memory import Memory
 from .profile import profile_for
-from .recompute import canonical_sql, check_answer
+from .recompute import canonical_sql, check_answer, extra_filter_columns
 from .references import ReferenceIndex
 from .retrieval import Retriever, get_retriever
 from .semantic import load_concepts, load_metrics, tables_in
@@ -122,6 +124,12 @@ class State(TypedDict, total=False):
 
 def _frame(result: dict) -> pd.DataFrame:
     return pd.DataFrame(result["data"], columns=result["columns"])
+
+
+def _defines(numerator: str, column: str, value: str) -> bool:
+    """Does a metric's numerator already select this value of this column (sentiment = 'Negative')?"""
+    name = column.split(".")[-1]
+    return re.search(rf"\b{re.escape(name)}\s*(=|IN\s*\()\s*[^)]*'{re.escape(value)}'", numerator, re.I) is not None
 
 
 def _result(frame: pd.DataFrame, truncated: bool) -> dict:
@@ -281,6 +289,14 @@ class Agent:
         ids = self.ids.find(state["question"])
         res = resolve(frame, self.concepts, self.joins, self.value_columns, ids, choices, self.aliases,
                       self.retriever.glossary.terms, list(answers.values()))
+        for view in res.subjects:                          # "share of reviews that are negative": not a filter
+            for f in list(view.filters):
+                owner = next((m for m in frame.measures if m in self.metrics.metrics and _defines(
+                    self.metrics.metrics[m].numerator, f.column, f.value)), None)
+                if owner:
+                    view.filters.remove(f)
+                    res.notes.append(f"'{f.value}' is the condition of {self.metrics.metrics[owner].label} "
+                                     f"(its numerator), not a filter on all rows")
         asked = {q.strip().lower() for q in answers}
         pending = [OpenPoint(f"llm:{q.question}", q.question, q.options, q.default, q.why)
                    for q in frame.open_points if q.question.strip().lower() not in asked] + \
@@ -534,6 +550,14 @@ class Agent:
         scope = state.get("verify_scope")
         if not self.features.understand or not scope or not scope.get("metrics") or not scope.get("supported", True):
             return {"status": "unverified", "metrics": {}, "problems": []}
+        allowed = {c.split(".")[-1].lower() for c in [scope["time"], *(f[0] for f in scope["filters"])]}
+        allowed |= {c.name.lower() for cond in scope.get("conditions") or []
+                    for c in sqlglot.parse_one(f"SELECT 1 WHERE {cond}", read="duckdb").find_all(exp.Column)}
+        allowed |= {"line_type"}                               # the sales source's own filter (sale lines)
+        extra = extra_filter_columns(state["sql"], allowed)
+        if extra:                                              # the query's population is not the confirmed scope
+            return {"status": "unverified", "metrics": {m: "unverified" for m in scope["metrics"]}, "problems": [],
+                    "reason": f"the query also filters on {', '.join(sorted(extra))}"}
         statuses, problems = {}, []
         grain = (state.get("frame") or {}).get("time_grain")
         if grain and grain in scope["by"] and grain not in frame:   # the date column under another name

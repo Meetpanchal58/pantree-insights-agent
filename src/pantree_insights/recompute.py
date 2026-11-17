@@ -228,3 +228,22 @@ def check_answer(agent, canonical, keys: list[str], ratio: bool = False, toleran
     sample = "; ".join(f"{', '.join(key) or 'total'}: {lookup[key]}" for key in mine_keys[:3])
     return "mismatch", [f"{column} disagrees with the metric recomputed from its definition for the confirmed "
                         f"filters, period and grain ({sample})."]
+
+
+# ----------------------------------------------------------------------------- is the scope the query's population?
+def extra_filter_columns(sql: str, allowed: set[str]) -> set[str]:
+    """Columns the query filters rows on (WHERE, HAVING) that the confirmed scope does not know. `allowed` holds
+    column names (no table). Conditions inside an aggregate's FILTER are measure conditions, not row filters."""
+    try:
+        tree = sqlglot.parse_one(sql, read="duckdb")
+    except sqlglot.errors.ParseError:
+        return {"(unparsed)"}
+    found = set()
+    for clause in tree.find_all(exp.Where, exp.Having):
+        if isinstance(clause, exp.Where) and isinstance(clause.parent, exp.Filter):
+            continue
+        for col in clause.find_all(exp.Column):
+            name = col.name.lower()
+            if name not in allowed:
+                found.add(name)
+    return found

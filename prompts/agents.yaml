@@ -11,6 +11,8 @@ shared: |
     is asked, its definition wins over the wording of the question (e.g. a "share of orders" question
     answered by a line-level metric keeps the metric's grain; say so in the assumptions).
   - Use only tables, columns and values listed in the context. Never invent column names or values.
+  - A "Question understanding" section, when given, was resolved in code and confirmed by the user. It wins
+    over everything else, including the analysis plan: when they disagree, follow the understanding.
   - Personal data (names, emails, phones, street addresses) does not exist here. Never try to get it.
   - Business users want analysis: aggregated numbers by meaningful cuts, never raw row dumps.
 

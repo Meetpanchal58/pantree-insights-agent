@@ -179,3 +179,18 @@ def test_count_claims_are_verified():
     ok = Claim(id="c1", value=3, unit="count", column="sku_id", row=[], op="count")
     assert verify(rows, [ok], {}).ok
     assert not verify(rows, [ok.model_copy(update={"value": 4})], {}).ok
+
+
+def test_a_metrics_own_condition_is_not_a_population_filter():
+    from pantree_insights.graph import _defines
+    assert _defines("COUNT(*) FILTER (WHERE r.sentiment = 'Negative')", "product_reviews.sentiment", "Negative")
+    assert not _defines("COUNT(*)", "product_reviews.sentiment", "Negative")
+
+
+def test_query_filters_the_scope_does_not_know_make_the_check_unverified():
+    from pantree_insights.recompute import extra_filter_columns
+    sql = ("SELECT c.channel, SUM(m.spend) / SUM(m.clicks) FROM marketing_spend m JOIN campaigns c "
+           "ON c.campaign_id = m.campaign_id WHERE c.channel_group = 'Display' AND m.date_hour >= '2025-01-01' "
+           "GROUP BY 1")
+    assert extra_filter_columns(sql, {"date_hour"}) == {"channel_group"}
+    assert not extra_filter_columns(sql, {"date_hour", "channel_group"})
