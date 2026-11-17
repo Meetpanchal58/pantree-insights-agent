@@ -234,7 +234,8 @@ concepts:
     stock_now: warehouses.city
   sale_event:
     orders: {column: sale_events.name, note: measure an event by its date window (placed_at between start_date and
-      end_date); events overlap, so sales.event_id only says which event's price applied}
+      end_date); events overlap, so sales.event_id only says which event's price applied,
+      join: "sale_events ON sales.placed_at >= sale_events.start_date AND sales.placed_at < sale_events.end_date + INTERVAL 1 DAY"}
     ad_spend: sale_events.name
     prices: sale_events.name
   return_reason:

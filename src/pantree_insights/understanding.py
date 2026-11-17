@@ -100,6 +100,7 @@ class SubjectView:
     joins: str = ""
     event_required: bool = False
     expressions: dict[str, str] = field(default_factory=dict)          # concept -> derived breakdown expression
+    own_joins: dict[str, str] = field(default_factory=dict)            # table -> join a concept defines itself
 
     def breakdown_sql(self) -> dict[str, str]:
         """Result column name -> SQL for each breakdown (derived cuts are named after their concept)."""
@@ -166,6 +167,18 @@ class Resolution:
         if self.notes:
             lines.append("\nNotes:\n" + "\n".join(f"- {n}" for n in self.notes))
         return "\n".join(lines)
+
+
+def _term(text: str, terms: dict[str, tuple[str, str]]) -> tuple[str, str] | None:
+    """The glossary term a mention is ("active products" -> active product): exact, or a plural, or a term
+    that makes up most of the words."""
+    text = re.sub(r"\s+", " ", text.strip().strip("'\"").casefold())
+    for candidate in (text, text[:-1] if text.endswith("s") else text, text[:-2] if text.endswith("es") else text):
+        if candidate in terms:
+            return terms[candidate]
+    found = [t for t in terms if re.search(rf"(?<![\w-]){re.escape(t)}s?(?![\w-])", text)]
+    best = max(found, key=len, default=None)
+    return terms[best] if best and len(best) >= 0.6 * len(text) else None
 
 
 def _find_value(text: str, value_columns: dict[str, list[str]], aliases: dict[str, str]) -> str | None:
@@ -250,7 +263,7 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
                         notes.append(note)
                 continue
             value = _find_value(mention.text, value_columns, aliases)
-            term = terms.get(mention.text.strip().strip("'\"").casefold())
+            term = _term(mention.text, terms)
             if value is None and term:                      # business vocabulary, not a stored value
                 notes.append(f"'{term[0]}' is a business term: {term[1]}")
                 continue
@@ -341,7 +354,19 @@ def resolve(frame, concepts: Concepts, graph: JoinGraph, value_columns: dict[str
 
         tables = [c.split(".")[0] for _, c in view.breakdowns] + [f.column.split(".")[0] for f in view.filters] + \
             [i.column.split(".")[0] for i in view.id_filters]
-        view.joins = graph.render(subj.table, [t for t in dict.fromkeys(tables) if t != subj.table])
+        used = [c for c, _ in view.breakdowns] + [f.concept for f in view.filters] + \
+            [m.concept for m in frame.mentions if is_member(m)]
+        for concept in dict.fromkeys(used):           # e.g. an event measured by its date window, not event_id
+            entry = concepts.column(concept, name)
+            if entry and entry.join:
+                view.own_joins[entry.join.split()[0]] = entry.join
+        keyed = [t for t in dict.fromkeys(tables) if t != subj.table and t not in view.own_joins]
+        view.joins = graph.render(subj.table, keyed)
+        if view.own_joins:
+            first, _, rest = view.joins.partition("\n")
+            view.joins = "\n".join([first, *(f"JOIN {j}" for j in view.own_joins.values())] + ([rest] if rest else []))
+            notes.append("Use the join path exactly as given: " + "; ".join(
+                f"{t} is joined by {j.split(' ON ', 1)[1]}, not by its ID" for t, j in view.own_joins.items()))
         views.append(view)
     return Resolution(views, open_points, notes)
 

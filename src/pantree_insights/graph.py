@@ -353,7 +353,8 @@ class Agent:
                      + [[i.column, i.value] for i in v.id_filters],
                      "conditions": [f.sql() for f in v.filters if f.expression],
                      "period": dates if len(dates) == 2 else None, "time": v.time_column,
-                     "supported": period_valid and not frame.comparison, "ranking": frame.ranking,
+                     "supported": period_valid and not frame.comparison and not v.own_joins,
+                     "ranking": frame.ranking,
                      "limit": (frame.row_limit or 10) if frame.ranking else None}
         out = {**refreshed, "frame": frame.model_dump(), "understanding": text, "understood_tables": res.tables(),
                "verify_scope": scope,

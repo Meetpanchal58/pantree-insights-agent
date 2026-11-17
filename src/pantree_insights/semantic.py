@@ -225,6 +225,7 @@ class ConceptEntry(BaseModel):
     column: str                                  # "table.column" (the stored column; decides the join path)
     note: str | None = None
     expression: str | None = None                # derived cut, e.g. COD vs Prepaid from payment_method
+    join: str | None = None                      # own join instead of the approved key join (event date windows)
 
     def sql(self) -> str:
         return self.expression or self.column

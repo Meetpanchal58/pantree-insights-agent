@@ -198,18 +198,19 @@ def check_answer(agent, canonical, keys: list[str], ratio: bool = False, toleran
     lookup = dict(zip(ref_keys, canon["value"], strict=True))
     if set(mine_keys) - set(ref_keys):
         return "mismatch", ["Result contains groups outside the confirmed scope."]
-    partial = limit is not None and ranking in {"highest", "lowest"}
+    partial = limit is not None and ranking in {"highest", "lowest"} and set(mine_keys) != set(ref_keys)
     if partial:
-        if len(agent) != min(limit, len(canon)):
-            return "mismatch", ["The result does not contain the confirmed number of ranked groups."]
+        # A ranking may return its top N or more (every group, ranked): more rows are checked number by number
+        # below. Fewer rows than N, or a group outside the true top N in place of one inside it, is wrong.
+        if len(agent) < min(limit, len(canon)):
+            return "mismatch", ["The result has fewer ranked groups than confirmed."]
         ranked = canon["value"].dropna().sort_values(ascending=ranking == "lowest")
-        non_null = [lookup[key] for key in mine_keys if not pd.isna(lookup[key])]
         expected_non_null = min(limit, len(ranked))
-        if len(non_null) != expected_non_null:
-            return "mismatch", ["The ranking omitted non-null groups in favor of null-valued groups."]
         if expected_non_null:
-            threshold = ranked.iloc[expected_non_null - 1]
-            if any(value < threshold if ranking == "highest" else value > threshold for value in non_null):
+            top = {key for key, value in zip(ref_keys, canon["value"], strict=True)
+                   if not pd.isna(value) and (value >= ranked.iloc[expected_non_null - 1] if ranking == "highest"
+                                              else value <= ranked.iloc[expected_non_null - 1])}
+            if not top <= set(mine_keys):
                 return "mismatch", ["The returned groups are not the confirmed highest/lowest groups."]
     elif set(ref_keys) - set(mine_keys):
         return "mismatch", ["Recomputed groups are missing; no partial ranking was confirmed."]

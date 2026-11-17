@@ -73,6 +73,7 @@ terms:
   most common: Rank by count (most first) and give each group's share of the total count.
   event performance: Measure a sale event by its date window (sales.placed_at from start_date to the end of end_date)
     over all sale lines, not by sales.event_id (events overlap; event_id only says which price applied).
+    "How did an event do" = its orders, net sales and realized revenue in that window.
 
 # Phrases that need a table retrieval might not rank highly; these tables are added to the context first.
 term_tables:

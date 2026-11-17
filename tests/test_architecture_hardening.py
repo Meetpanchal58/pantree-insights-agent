@@ -119,3 +119,30 @@ def test_grouping_by_a_shared_name_is_rejected_unless_told_apart():
     assert label_grain_problems(merged)
     assert not label_grain_problems(merged.replace("GROUP BY 1", "GROUP BY a.campaign_id, 1"))
     assert not label_grain_problems("SELECT name, CAST(start_date AS DATE), COUNT(*) FROM sale_events GROUP BY 1, 2")
+
+
+# diagnostic run (Nov 17): m08, m11, h02 ---------------------------------------------------------------------------
+def test_plural_business_term_is_not_a_missing_value():
+    terms = {**TERMS, "active product": "listed today (product_master.is_active = true)"}
+    res = resolve(frame(subjects=["stock_now"], mentions=[Mention(text="active products", concept="other")]),
+                  CONCEPTS, GRAPH, VALUES, [], {}, {}, terms)
+    assert not res.open_points
+
+
+def test_a_ranking_may_return_every_group():
+    canonical = pd.DataFrame({"issue": list("abcdefghijkl"), "value": range(12, 0, -1)})
+    everything = canonical.rename(columns={"value": "n"})
+    assert check_answer(everything, canonical, ["issue"], column="n", limit=10, ranking="highest")[0] == "verified"
+    top3 = everything.head(3)
+    assert check_answer(top3, canonical, ["issue"], column="n", limit=10, ranking="highest")[0] == "mismatch"
+    skipped = everything.drop(index=0)                  # the true number one is missing
+    assert check_answer(skipped, canonical, ["issue"], column="n", limit=10, ranking="highest")[0] == "mismatch"
+
+
+def test_sale_event_is_joined_by_its_date_window_not_event_id():
+    f = frame(subjects=["orders"], measures=["net_sales"], breakdowns=["sale_event"], comparison="Diwali 2025",
+              mentions=[Mention(text="Diwali 2026", concept="sale_event", role="comparison"),
+                        Mention(text="Diwali 2025", concept="sale_event", role="comparison")])
+    view = run(f).subjects[0]
+    assert "sales.placed_at >= sale_events.start_date" in view.joins
+    assert "sales.event_id = sale_events.event_id" not in view.joins
