@@ -417,10 +417,10 @@ class Agent:
         if attempt == 1 and self.features.understand and self.compile_metrics:
             compiled = compile_metric_query(state.get("verify_scope"), self.joins)
             if compiled:
-                return {"sql": compiled.sql, "explanation": compiled.reason, "attempts": attempt,
-                        "feedback": [], "_detail": {"attempt": attempt, "sql": compiled.sql,
-                                                    "explanation": compiled.reason,
-                                                    "mode": "deterministic_metric_compiler"}}
+                return {"sql": compiled.sql, "sql_mode": "deterministic", "explanation": compiled.reason,
+                        "attempts": attempt, "feedback": [],
+                        "_detail": {"attempt": attempt, "sql": compiled.sql, "explanation": compiled.reason,
+                                    "mode": "deterministic_metric_compiler"}}
 
         first = state.get("attempts", 0) == 0 and self.features.narrow
         # Complex queries and retries keep the LLM writer as a fallback.
@@ -429,10 +429,11 @@ class Agent:
         draft = agents.write_sql(self.llm(state), state["question"], plan, context,
                                  state.get("feedback") or None, state.get("sql"), state.get("understanding", ""),
                                  state.get("references", ""))
-        return {"sql": draft.sql.strip().rstrip(";"), "explanation": draft.explanation, "attempts": attempt,
-                "feedback": [], "_detail": {"attempt": attempt, "sql": draft.sql.strip(),
-                                            "explanation": draft.explanation, "context_tables": tables,
-                                            "mode": "llm_fallback"}}
+        return {"sql": draft.sql.strip().rstrip(";"), "sql_mode": "llm", "explanation": draft.explanation,
+                "attempts": attempt, "feedback": [],
+                "_detail": {"attempt": attempt, "sql": draft.sql.strip(),
+                            "explanation": draft.explanation, "context_tables": tables,
+                            "mode": "llm_fallback"}}
 
     def _retry_or_fail(self, state: State, problems: list[str], step_name: str) -> dict:
         if state.get("attempts", 0) < get_settings().max_sql_attempts:
@@ -477,7 +478,8 @@ class Agent:
             return self._retry_or_fail(state, verification["problems"], "number check")
         return {"result": _result(result.frame, result.truncated), "warnings": state_warnings,
                 "verification": {k: v for k, v in verification.items() if k != "problems"},
-                "route": "validate" if self.features.validator else "analyse",
+                "route": ("analyse" if state.get("sql_mode") == "deterministic"
+                          else "validate" if self.features.validator else "analyse"),
                 "_detail": {"rows": len(result.frame), "columns": list(result.frame.columns),
                             "query_seconds": round(result.seconds, 2), "truncated": result.truncated}}
 
