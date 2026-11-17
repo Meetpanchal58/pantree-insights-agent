@@ -168,24 +168,34 @@ class Runner:
 
     def _consume(self, store: Store, run: Run, events) -> None:
         def work():
+            acquired = self._slots.acquire(blocking=False)
+            if not acquired:
+                queued = {"type": "step", "step": "queue", "status": "started",
+                          "detail": {"message": "Waiting for an analysis slot"}, "t": time.time()}
+                run.events.append(queued)
+                store.update_run(run.id, status="queued", events=run.events)
+                self._slots.acquire()
             try:
+                store.update_run(run.id, status="running", events=run.events)
                 for event in events:
                     run.events.append({**event, "t": event.get("t", time.time())})
                     if event["type"] == "clarify":
                         run.paused = True
+                        store.update_run(run.id, status="paused", events=run.events)
                     elif event["type"] == "final":
                         self._save(store, run, event)
-            except Exception as error:                      # never leave the browser waiting
+                    else:
+                        store.update_run(run.id, status="running", events=run.events)
+            except Exception as error:
                 log.exception("run %s failed", run.id)
                 final = {"type": "final", "run_id": run.id, "question": run.question,
-                         "status": "failed", "t": time.time(),
-                         **failure_details(error)}
+                         "status": "failed", "t": time.time(), **failure_details(error)}
                 run.events.append(final)
                 self._save(store, run, final)
             finally:
+                self._slots.release()
                 run.segment_done.set()
         threading.Thread(target=work, daemon=True, name=f"run-{run.id}").start()
-
     def _save(self, store: Store, run: Run, final: dict) -> None:
         run.finished = True
         headline = ((final.get("analysis") or {}).get("headline") or final.get("message") or "")
@@ -193,7 +203,11 @@ class Runner:
         store.add_message(run.chat["id"], "assistant", headline, to_json({**final, "events": timeline}))
         if final.get("cost"):
             store.add_cost(run.user["id"], final["cost"].get("usd", 0.0))
-        run.agent = None  # Finished runs no longer need to retain an older snapshot's entire agent/index.
+        store.update_run(run.id, status="finished", events=run.events)
+        log.info("analysis_run run_id=%s status=%s seconds=%.2f attempts=%s cost_usd=%s verification=%s",
+                 run.id, final.get("status"), time.time() - run.started, final.get("attempts"),
+                 (final.get("cost") or {}).get("usd", 0.0), (final.get("verification") or {}).get("status"))
+        run.agent = None
 
 
 runner = Runner()
