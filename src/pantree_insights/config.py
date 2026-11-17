@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     max_sql_attempts: int = 3                    # SQL writer tries (guardrail / database / validator feedback)
     daily_budget_usd: float = 1.00               # live LLM calls stop for the day after this
 
+    # Durable LangGraph checkpoints; use Postgres on Cloud Run, memory only for tests.
+    checkpoint_backend: Literal["memory", "postgres"] = "memory"
+
     # Web app
     app_env: Literal["development", "production"] = "development"
     public_url: str = "http://127.0.0.1:8000"

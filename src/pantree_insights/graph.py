@@ -181,7 +181,28 @@ class Agent:
             self.references = ReferenceIndex(list(self.retriever.examples.values()))
         self._llms: dict[str, LLM] = {}
         self._memories: dict[str, Any] = {}          # run_id -> memory scope for that question
-        self.graph = self._build().compile(checkpointer=InMemorySaver())
+        self._checkpoint_context = None
+        if settings.checkpoint_backend == "postgres":
+            from langgraph.checkpoint.postgres import PostgresSaver
+
+            dsn = settings.database_url.replace("postgresql+psycopg://", "postgresql://")
+            if not dsn.startswith(("postgresql://", "postgres://")):
+                raise RuntimeError("CHECKPOINT_BACKEND=postgres requires a PostgreSQL DATABASE_URL")
+            self._checkpoint_context = PostgresSaver.from_conn_string(dsn)
+            saver = self._checkpoint_context.__enter__()
+            saver.setup()
+        else:
+            saver = InMemorySaver()
+        self.graph = self._build().compile(checkpointer=saver)
+
+    def restore_memory(self, run_id: str, scope: Any) -> None:
+        """Reattach user/project memory to a paused persistent graph after a restart."""
+        self._memories[run_id] = scope
+
+    def close(self) -> None:
+        if self._checkpoint_context is not None:
+            self._checkpoint_context.__exit__(None, None, None)
+            self._checkpoint_context = None
 
     def llm(self, state: State) -> LLM:
         if state["run_id"] not in self._llms:
