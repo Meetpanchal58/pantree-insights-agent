@@ -433,26 +433,6 @@ def create_app() -> FastAPI:
         flags = [{**f, "resolved": (f["id"], f["window_end"]) in resolved} for f in report.get("flags", [])]
         return {"data_as_of": report.get("data_as_of"), "series": report.get("series"), "flags": flags}
 
-    # ------------------------------------------------------------------ demos
-    @app.get("/api/demos")
-    def list_demos():
-        return demo_runs.demos()
-
-    @app.get("/api/demos/{name}/stream")
-    async def replay(name: str, request: Request, instant: bool = False):
-        demo = demo_runs.load(name)
-        if not demo:
-            raise HTTPException(404, "Demo not found")
-
-        async def events():
-            for delay, event in demo_runs.replay(demo):
-                if delay and not instant:
-                    await asyncio.sleep(delay)
-                if await request.is_disconnected():
-                    return
-                yield f"data: {json.dumps(event)}\n\n"
-        return StreamingResponse(events(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     return app
 
