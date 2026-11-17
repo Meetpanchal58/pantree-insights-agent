@@ -56,7 +56,7 @@ else
 fi
 
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format 'value(status.url)' 2>/dev/null || true)"
-ENV_VARS="APP_ENV=production,DATA_DIR=/data,DATA_SIZE=full,ADMIN_EMAILS=[\"${ADMIN_EMAIL}\"],DAILY_QUESTION_LIMIT=10,DAILY_BUDGET_USD=0.50,MAX_CONCURRENT_RUNS=1${EMAIL_ENV}"
+ENV_VARS="APP_ENV=production,DATA_DIR=/data,DATA_SIZE=full,ADMIN_EMAILS=[\"${ADMIN_EMAIL}\"],DAILY_QUESTION_LIMIT=10,DAILY_BUDGET_USD=0.50,MAX_CONCURRENT_RUNS=1,LANGGRAPH_STRICT_MSGPACK=true${EMAIL_ENV}"
 [ -n "$URL" ] && ENV_VARS+=",PUBLIC_URL=${URL}"
 
 # min-instances 0 and max-instances 1: runs persist in Postgres and LLM-heavy work is queued to avoid provider bursts.
