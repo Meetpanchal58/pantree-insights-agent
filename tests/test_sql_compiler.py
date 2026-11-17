@@ -1,10 +1,10 @@
 """Compiler is conservative: unsupported questions must reach the existing LLM writer."""
+from test_joins import fake_profile
+
+from pantree_insights.guardrails import check_sql
 from pantree_insights.joins import JoinGraph
 from pantree_insights.semantic import load_schema
 from pantree_insights.sql_compiler import compile_standard
-from pantree_insights.guardrails import check_sql
-
-from test_joins import fake_profile
 
 
 def test_compile_approved_metric_and_ranked_categories():

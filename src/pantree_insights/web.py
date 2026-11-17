@@ -130,9 +130,9 @@ class Runner:
                 old = self._agent
                 self._agent = (self._agent_factory or Agent)()
                 self._snapshot = signature
-                if old is not None and not any(not r.finished and r.agent is old for r in self.runs.values()):
-                    if hasattr(old, "close"):
-                        old.close()
+                if (old is not None and hasattr(old, "close")
+                        and not any(not r.finished and r.agent is old for r in self.runs.values())):
+                    old.close()
             return self._agent
 
     def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool) -> Run:
