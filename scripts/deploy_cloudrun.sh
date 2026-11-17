@@ -59,10 +59,10 @@ URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format 'valu
 ENV_VARS="APP_ENV=production,DATA_DIR=/data,DATA_SIZE=full,ADMIN_EMAILS=[\"${ADMIN_EMAIL}\"],DAILY_QUESTION_LIMIT=10,DAILY_BUDGET_USD=0.50,MAX_CONCURRENT_RUNS=1${EMAIL_ENV}"
 [ -n "$URL" ] && ENV_VARS+=",PUBLIC_URL=${URL}"
 
-# min-instances 0 and max-instances 2: runs persist in Postgres; LLM-heavy work is queued per instance.
+# min-instances 0 and max-instances 1: runs persist in Postgres and LLM-heavy work is queued to avoid provider bursts.
 gcloud run deploy "$SERVICE" --image "$IMAGE" --region "$REGION" \
   --service-account "$SA" --allow-unauthenticated \
-  --min-instances 0 --max-instances 2 --concurrency 20 \
+  --min-instances 0 --max-instances 1 --concurrency 20 \
   --cpu 1 --memory 2Gi --cpu-throttling --timeout 300 \
   --execution-environment gen2 --cpu-boost \
   --add-volume "name=data,type=cloud-storage,bucket=${BUCKET},readonly=true" \
