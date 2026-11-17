@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install locked dependencies
-        run: uv sync
+        run: uv sync --locked
       - name: Ensure model key exists
         run: |
           if [ -z "$OPENAI_API_KEY" ]; then
