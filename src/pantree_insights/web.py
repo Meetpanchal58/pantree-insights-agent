@@ -174,7 +174,8 @@ class Runner:
         run.paused = False
         run.segment_done.clear()
         run.events.append({"type": "answered", "answers": answers, "t": time.time()})
-        store.save_run(run.id, "running", run.events)
+        if store is not None:
+            store.save_run(run.id, "running", run.events)
         self._consume(store, run, (run.agent or self.agent).resume(run.id, answers))
 
     def _consume(self, store: Store, run: Run, events) -> None:
