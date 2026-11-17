@@ -6,6 +6,8 @@ is a settings change. Tests use FakeLLM, which never touches the network.
 """
 from __future__ import annotations
 
+import threading
+
 import json
 import time
 from collections.abc import Callable
@@ -101,6 +103,18 @@ class LLM(Protocol):
             light: bool = False) -> T: ...
 
 
+_slots_lock = threading.Lock()
+_slots: dict[int, threading.BoundedSemaphore] = {}
+
+
+def _provider_slots(limit: int) -> threading.BoundedSemaphore:
+    """Prevent concurrent agent runs from stampeding the shared API quota."""
+    with _slots_lock:
+        if limit not in _slots:
+            _slots[limit] = threading.BoundedSemaphore(max(1, limit))
+        return _slots[limit]
+
+
 class ChatLLM:
     """Real models through LangChain (structured output, reasoning effort, usage tracking)."""
 
@@ -135,7 +149,15 @@ class ChatLLM:
         model = self._model(name, effort or settings.reasoning_effort)
         runnable = model.with_structured_output(schema, include_raw=True)
         started = time.perf_counter()
-        result = runnable.invoke([("system", system), ("user", user)])
+        gate = _provider_slots(settings.max_parallel_llm_calls)
+        # Keep model calls bounded across users and chats on this Cloud Run instance.
+        # This does not override provider RPM/TPM quotas.
+        if not gate.acquire(timeout=settings.llm_timeout_s):
+            raise TimeoutError("Model request queue is busy; retry after the current run finishes")
+        try:
+            result = runnable.invoke([("system", system), ("user", user)])
+        finally:
+            gate.release()
         usage = getattr(result["raw"], "usage_metadata", None) or {}
         cached = (usage.get("input_token_details") or {}).get("cache_read", 0) or 0
         call = Call(agent, name, usage.get("input_tokens", 0), cached, usage.get("output_tokens", 0), 0.0,
