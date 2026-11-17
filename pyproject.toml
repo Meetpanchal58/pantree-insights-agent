@@ -44,7 +44,6 @@ pantree-context = "pantree_insights.retrieval:main"
 pantree-profile = "pantree_insights.profile:main"
 pantree-ask = "pantree_insights.graph:main"
 pantree-web = "pantree_insights.web:main"
-pantree-demo = "pantree_insights.demos:main"
 
 [build-system]
 requires = ["hatchling"]
