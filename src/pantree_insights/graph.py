@@ -407,6 +407,17 @@ class Agent:
     @step("write_sql")
     def write_sql(self, state: State) -> dict:
         plan = agents.AnalysisPlan.model_validate(state["plan"])
+        if (get_settings().enable_sql_compiler and self.features.understand
+                and not state.get("attempts") and state.get("verify_scope")):
+            from .sql_compiler import compile_standard
+
+            compiled = compile_standard(state["verify_scope"], self.joins)
+            if compiled is not None:
+                return {"sql": compiled, "explanation": "Deterministic metric SQL from the semantic layer",
+                        "attempts": 1, "feedback": [],
+                        "_detail": {"attempt": 1, "sql": compiled,
+                                    "explanation": "Compiled without an LLM; metric and joins are code-defined.",
+                                    "context_tables": state.get("understood_tables") or []}}
         first = state.get("attempts", 0) == 0 and self.features.narrow
         # first attempt: only the plan's tables; retries get the full context so recovery stays possible
         context, tables = self.narrowed_context(state, plan) if first else (

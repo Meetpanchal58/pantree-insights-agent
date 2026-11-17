@@ -1,0 +1,63 @@
+name: Live agent evaluation (manual, paid)
+
+on:
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: "Independent repeats per question"
+        type: choice
+        options: ["1", "3"]
+        default: "3"
+      max_cost_usd:
+        description: "Maximum cost of model calls in USD"
+        type: choice
+        options: ["5", "10", "20"]
+        default: "10"
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATA_SIZE: full
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DAILY_BUDGET_USD: "25"
+      APP_ENV: development
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Ensure model key exists
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::Configure OPENAI_API_KEY as a repository secret before running paid evaluation."
+            exit 1
+          fi
+      - name: Download dataset and capture manifest
+        run: |
+          uv run pantree-data download --size full
+          sha256sum data/full/manifest.json > dataset-manifest.sha256
+      - name: Run all deterministic gold-SQL validation
+        run: uv run python evals/run_eval.py --suite all --dry-run
+      - name: Run full live-model evaluation
+        run: |
+          uv run python evals/run_eval.py --suite all --repeats ${{ inputs.repeats }} \
+            --max-cost-usd ${{ inputs.max_cost_usd }} --minimum-pass-rate 0.90 \
+            --output-dir evals/reports --yes
+      - name: Upload complete evaluation evidence (even when gate fails)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-evaluation-${{ github.sha }}
+          path: |
+            dataset-manifest.sha256
+            evals/reports/*.md
+            evals/reports/*.json
+          if-no-files-found: warn
+          retention-days: 30
