@@ -83,3 +83,12 @@ With request-based billing an idle instance that is not a minimum instance is no
 Scheduler includes 3 free jobs per billing account, so this costs about nothing. It is not a guarantee
 (Cloud Run can still restart an instance; outside those hours the first visit is cold). The guaranteed option
 is `--min-instances 1`, about 19 USD a month for 1 vCPU and 2 GiB at the idle rate.
+
+## Cold starts
+
+The first question after an instance starts prepares the data profile and catalog (about 13 s on local disk,
+longer from the Cloud Storage mount). The question request returns at once and the app shows "Preparing the data"
+as a step, so the browser never times out. With `--cpu-throttling` the start-up warm-up only gets CPU while a
+request is open; `--no-cpu-throttling` (CPU always allocated) or `--min-instances 1` makes the first question fast
+at a higher idle cost.
+

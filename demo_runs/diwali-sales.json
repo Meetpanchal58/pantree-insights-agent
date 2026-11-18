@@ -4,7 +4,7 @@
   "question": "How did Diwali 2026 compare with Diwali 2025 in realized revenue per day, daily orders and revenue per placed order?",
   "order": 1,
   "data_size": "small",
-  "data_as_of": "2026-11-17",
+  "data_as_of": "2026-11-14",
   "seconds": 0,
   "offline": true,
   "provenance": {
@@ -12,7 +12,7 @@
       "size": "small",
       "seed": 42,
       "first_day": "2025-01-01",
-      "last_day": "2026-11-17",
+      "last_day": "2026-11-14",
       "package_version": "1.0.0",
       "n_products": 1500,
       "n_sellers": 80,
@@ -32,39 +32,23 @@
     },
     {
       "type": "step",
-      "step": "retrieve",
+      "step": "interpret",
       "status": "done",
       "detail": {
+        "understood": "How did Diwali 2026 compare with Diwali 2025 in realized revenue per day, daily orders and revenue per placed order?",
         "tables": [
           "sale_events",
           "sales"
         ],
-        "reason": "Approved tables used by the saved SQL."
+        "reason": "A predefined question and data period."
       }
     },
     {
       "type": "step",
-      "step": "understand",
-      "status": "done",
-      "detail": {
-        "understood": "How did Diwali 2026 compare with Diwali 2025 in realized revenue per day, daily orders and revenue per placed order?",
-        "reason": "This example uses a predefined question and data period."
-      }
-    },
-    {
-      "type": "step",
-      "step": "write_sql",
+      "step": "execute",
       "status": "done",
       "detail": {
         "sql": "WITH totals AS (\n  SELECT\n    e.name AS event_name,\n    e.start_date,\n    e.end_date,\n    DATE_DIFF('DAY', e.start_date, e.end_date) + 1 AS event_days,\n    COUNT(DISTINCT s.order_id) AS orders,\n    COALESCE(\n      SUM(\n        CASE\n          WHEN NOT s.delivered_at IS NULL\n          THEN s.net_amount - COALESCE(s.refund_amount, 0)\n          ELSE 0\n        END\n      ),\n      0\n    ) AS realized_revenue\n  FROM sale_events AS e\n  LEFT JOIN sales AS s\n    ON s.placed_at >= e.start_date\n    AND s.placed_at < e.end_date + INTERVAL '1' DAY\n    AND s.line_type = 'Sale'\n  WHERE\n    e.name IN ('Diwali 2025', 'Diwali 2026')\n  GROUP BY\n    1,\n    2,\n    3\n)\nSELECT\n  event_name,\n  start_date,\n  end_date,\n  event_days,\n  orders,\n  realized_revenue,\n  realized_revenue / event_days AS revenue_per_day,\n  orders * 1.0 / event_days AS orders_per_day,\n  realized_revenue / NULLIF(orders, 0) AS revenue_per_order\nFROM totals\nORDER BY\n  start_date",
-        "reason": "Saved, validated, deterministic query."
-      }
-    },
-    {
-      "type": "step",
-      "step": "run_query",
-      "status": "done",
-      "detail": {
         "rows": 2,
         "columns": [
           "event_name",
@@ -77,7 +61,7 @@
           "orders_per_day",
           "revenue_per_order"
         ],
-        "query_seconds": 0.023,
+        "query_seconds": 0.052,
         "sample_rows": [
           {
             "event_name": "Diwali 2025",
@@ -96,12 +80,13 @@
             "end_date": "2026-11-08T00:00:00.000",
             "event_days": 6,
             "orders": 604,
-            "realized_revenue": 1096257.92,
-            "revenue_per_day": 182709.6533333333,
+            "realized_revenue": 991629.1099999995,
+            "revenue_per_day": 165271.5183333333,
             "orders_per_day": 100.6666666667,
-            "revenue_per_order": 1814.9965562914
+            "revenue_per_order": 1641.7700496689
           }
-        ]
+        ],
+        "reason": "Saved, reviewed, deterministic query."
       }
     },
     {
@@ -110,9 +95,9 @@
       "status": "done",
       "detail": {
         "findings": [
-          "2026 generated Rs 1,096,258 across 6 event days, versus Rs 609,654 across 7 days in 2025.",
-          "Revenue per day was Rs 182,710 versus Rs 87,093; daily order volume changed +71.9%.",
-          "Revenue per placed order was Rs 1,815 versus Rs 1,487, separating basket realization from order volume."
+          "2026 generated Rs 991,629 across 6 event days, versus Rs 609,654 across 7 days in 2025.",
+          "Revenue per day was Rs 165,272 versus Rs 87,093; daily order volume changed +71.9%.",
+          "Revenue per placed order was Rs 1,642 versus Rs 1,487, separating basket realization from order volume."
         ],
         "reason": "Saved editorial insights."
       }
@@ -161,19 +146,19 @@
             "2026-11-08T00:00:00.000",
             6,
             604,
-            1096257.92,
-            182709.6533333333,
+            991629.1099999995,
+            165271.5183333333,
             100.6666666667,
-            1814.9965562914
+            1641.7700496689
           ]
         ]
       },
       "analysis": {
-        "headline": "Diwali 2026 realized revenue per day changed +109.8% versus Diwali 2025.",
+        "headline": "Diwali 2026 realized revenue per day changed +89.8% versus Diwali 2025.",
         "findings": [
-          "2026 generated Rs 1,096,258 across 6 event days, versus Rs 609,654 across 7 days in 2025.",
-          "Revenue per day was Rs 182,710 versus Rs 87,093; daily order volume changed +71.9%.",
-          "Revenue per placed order was Rs 1,815 versus Rs 1,487, separating basket realization from order volume."
+          "2026 generated Rs 991,629 across 6 event days, versus Rs 609,654 across 7 days in 2025.",
+          "Revenue per day was Rs 165,272 versus Rs 87,093; daily order volume changed +71.9%.",
+          "Revenue per placed order was Rs 1,642 versus Rs 1,487, separating basket realization from order volume."
         ],
         "recommendations": [
           "Use per-day revenue and order volume when allocating the next festive campaign budget; unequal event lengths distort total-only comparisons.",
@@ -195,10 +180,10 @@
         ],
         "values": [
           87093.4699999999,
-          182709.6533333333
+          165271.5183333333
         ]
       },
-      "data_as_of": "2026-11-17",
+      "data_as_of": "2026-11-14",
       "data_size": "small",
       "attempts": 1,
       "warnings": [],

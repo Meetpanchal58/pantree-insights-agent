@@ -277,7 +277,7 @@ class Agent:
             _, summary = build_template(decision.template.name, decision.template.params)
             summary = f"**Analysis:** {summary}" + (f"\n**Assumed:** {'; '.join(decision.assumptions)}"
                                                      if decision.assumptions else "")
-            out = {"template": decision.template.model_dump(), "spec": None}
+            out = {"template": {"name": decision.template.name, "params": decision.template.params}, "spec": None}
         else:
             summary = readback(decision.spec, self.catalog, decision.assumptions)
             out = {"spec": decision.spec.model_dump(mode="json"), "template": None}
@@ -416,9 +416,9 @@ class Agent:
 
     # ------------------------------------------------------------------ running
     def start(self, question: str, chat_id: str | None = None, history: str = "", use_defaults: bool = False,
-              memory: Any = None) -> tuple[str, Iterator[dict]]:
+              memory: Any = None, run_id: str | None = None) -> tuple[str, Iterator[dict]]:
         """memory: a scope with context(), save_insight() and close_gaps(); defaults to the file memory."""
-        run_id = uuid.uuid4().hex[:12]
+        run_id = run_id or uuid.uuid4().hex[:12]
         if memory is not None:
             self._memories[run_id] = memory
         state = {"run_id": run_id, "chat_id": chat_id, "question": question, "history": history,

@@ -138,20 +138,32 @@ class Runner:
             return self._agent
 
     def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool) -> Run:
-        # Initialize the agent before writing a user question: a cold-start error should
-        # not leave behind a message that can never receive an analysis result.
-        agent = self.agent
+        """Return at once: the agent (built on the first question after a restart, which can take a while on a
+        cold instance) is prepared in the run's own thread, shown as a step, never inside the HTTP request.
+        A failure while preparing ends the run with a saved failure, so the question always gets a reply."""
         history = store.history(chat["id"])
         store.add_message(chat["id"], "user", question)
         if chat["title"] == "New chat":
             store.update_chat(user["id"], chat["id"], title=question[:80])
         scope = MemoryScope(store, user, chat)
-        run_id, events = agent.start(question, chat_id=chat["id"], history=history,
-                                          use_defaults=use_defaults, memory=scope)
-        run = Run(run_id, user, chat, question, agent=agent)
-        self.runs[run_id] = run
-        store.create_run(run_id, user["id"], chat["id"], question, snapshot=json.dumps(manifest(), sort_keys=True))
-        self._consume(store, run, events)
+        run = Run(uuid.uuid4().hex[:12], user, chat, question)
+        self.runs[run.id] = run
+        store.create_run(run.id, user["id"], chat["id"], question, snapshot=json.dumps(manifest(), sort_keys=True))
+
+        def events():
+            cold = self._agent is None
+            started = time.time()
+            if cold:
+                yield {"type": "step", "step": "prepare", "status": "started", "t": started}
+            agent = self.agent
+            run.agent = agent
+            if cold:
+                yield {"type": "step", "step": "prepare", "status": "done", "t": time.time(),
+                       "detail": {"seconds": round(time.time() - started, 2)}}
+            _, stream = agent.start(question, chat_id=chat["id"], history=history, use_defaults=use_defaults,
+                                    memory=scope, run_id=run.id)
+            yield from stream
+        self._consume(store, run, events())
         return run
 
     def restore(self, store: Store, user: dict, run_id: str) -> Run | None:
@@ -255,14 +267,14 @@ runner = Runner()
 async def lifespan(app: FastAPI):
     def warm():
         try:
+            _ = runner.agent                                  # the agent first: questions must not wait for pulse
+        except Exception:
+            log.exception("agent failed to start")
+        try:
             from .pulse import run as pulse
             pulse()                                           # KPI history + open gaps for this data
         except Exception:
             log.exception("pulse failed at startup")
-        try:
-            _ = runner.agent                                  # build indexes before the first question
-        except Exception:
-            log.exception("agent failed to start")
     threading.Thread(target=warm, daemon=True).start()
     yield
 

@@ -363,8 +363,7 @@ metrics:
     label: Last-click revenue
     description: >-
       Booked order revenue the shop credits to a campaign, channel or channel group under last-click
-      attribution. Use it for "credited", "attributed" or "last-click" revenue; not reduced by later
-      cancellations or refunds.
+      attribution (not reduced by later cancellations or refunds).
     source: attribution
     numerator: SUM(a.credit_last_click * a.order_revenue)
     unit: inr

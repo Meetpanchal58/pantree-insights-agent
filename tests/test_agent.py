@@ -202,3 +202,12 @@ def test_a_repeat_question_is_served_from_the_cache(con, tmp_path):
     agent.con = type("NoDB", (), {"cursor": lambda self: calls.append(1)})()       # the cache must answer
     frame, _ = agent.query(sql)
     assert not frame.empty and not calls
+
+
+def test_reading_options_show_only_what_differs():
+    from pantree_insights.interpret import reading_options
+    from pantree_insights.spec import QuerySpec, default_catalog
+    a = QuerySpec.model_validate(BY_CATEGORY["spec"])
+    b = QuerySpec.model_validate(BY_BRAND)
+    options = reading_options([a, b], default_catalog())
+    assert options == ["Split by: product category", "Split by: brand"]
