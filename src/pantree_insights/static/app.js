@@ -403,7 +403,7 @@ function onEvent(e, status) {
   }
 }
 
-function streamRun(runId, since, status, question, retry = 0) {
+function streamRun(runId, since, status, question) {
   if (since === 0) newTimeline(question || $("#chat-title").textContent, false);
   S.stream?.close();
   const view = S.view;
@@ -411,25 +411,46 @@ function streamRun(runId, since, status, question, retry = 0) {
   let count = since;
   const es = new EventSource(`/api/runs/${runId}/stream?since=${since}`);
   S.stream = es;
-  es.onmessage = (msg) => {
-    if (view !== S.view || S.stream !== es) return;
+  const receive = (e) => {
     count += 1;
-    const e = JSON.parse(msg.data);
     if (e.type === "clarify") { e.run_id = runId; e.count = count; }
     onEvent(e, status);
-    if (e.type === "clarify" || e.type === "final") es.close();
+    return e.type === "clarify" || e.type === "final";
   };
-  es.onerror = () => {
+  es.onmessage = (msg) => {
+    if (view === S.view && S.stream === es && receive(JSON.parse(msg.data))) es.close();
+  };
+  es.onerror = async () => {
     es.close();
     if (view !== S.view || S.stream !== es) return;
-    if (retry < 2) {
-      if (status?.querySelector(".txt")) status.querySelector(".txt").textContent = "Reconnecting to analysis…";
-      setTimeout(() => {
-        if (view === S.view && S.stream === es) streamRun(runId, count, status, question, retry + 1);
-      }, 1500 * (2 ** retry));
-      return;
+
+    const controller = new AbortController();
+    const polling = { close: () => controller.abort() };
+    S.stream = polling;
+    const current = () => view === S.view && S.stream === polling;
+    if (status?.querySelector(".txt")) status.querySelector(".txt").textContent = "Checking analysis progress…";
+    const deadline = Date.now() + 5 * 60 * 1000;
+    let failures = 0;
+    while (current() && Date.now() < deadline) {
+      try {
+        const update = await api(`/api/runs/${runId}/progress?since=${count}`, {
+          signal: controller.signal, timeoutMs: 12000, retries: 0,
+        });
+        if (!current()) return;
+        failures = 0;
+        for (const event of update.events) {
+          if (receive(event)) return;
+        }
+        if (!update.active) break;
+      } catch (error) {
+        if (!current() || error.name === "AbortError") return;
+        failures += 1;
+        if ([401, 403, 404, 410].includes(error.status) || failures >= 3) break;
+        if (error.retryAfter > 10) break;
+        await new Promise((resolve) => setTimeout(resolve, Math.max(1000, (error.retryAfter || 0) * 1000)));
+      }
     }
-    if (S.busy) {
+    if (current() && S.busy) {
       if (status) status.remove();
       $("#messages").appendChild(recoveryCard("The connection was interrupted. Reopen this chat to check whether the analysis finished."));
       S.busy = false; $(".send").disabled = false;

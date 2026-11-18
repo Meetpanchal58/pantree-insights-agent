@@ -107,6 +107,29 @@ def test_signed_out(app_env):
     assert client.get("/api/chats").status_code == 401
 
 
+def test_progress_recovers_events_without_restarting_a_run(app_env):
+    from pantree_insights import web
+
+    client, codes, _ = app_env
+    sign_in(client, codes)
+    chat = client.post("/api/chats", json={}).json()
+    run_id = client.post(f"/api/chats/{chat['id']}/ask", json={
+        "question": "Revenue by category", "use_defaults": True,
+    }).json()["run_id"]
+    path = f"/api/runs/{run_id}/progress"
+    response = client.get(path, params={"since": 1})
+    assert response.status_code == 200 and response.headers["Cache-Control"] == "no-store"
+    assert response.json()["events"]
+    assert web.runner.runs[run_id].segment_done.wait(15)
+    events = client.get(path).json()["events"]
+    assert events[0]["step"] == "prepare" and events[-1]["status"] == "done"
+    assert client.get(path, params={"since": len(events) - 1}).json() == {"events": events[-1:], "active": False}
+    web.runner.runs.pop(run_id)
+    assert client.get(path, params={"since": len(events) - 1}).json() == {"events": events[-1:], "active": False}
+    sign_in(client, codes, "eve@example.com")
+    assert client.get(path).status_code == 404
+
+
 def test_email_sign_in_rules(app_env):
     client, codes, _ = app_env
     assert client.post("/auth/email/request", json={"email": "not-an-email"}).status_code == 400

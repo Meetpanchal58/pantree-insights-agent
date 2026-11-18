@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import re
 import threading
 import time
@@ -49,6 +50,7 @@ CONFIRM_QUESTION = "Is this what you want me to compute?"
 CONFIRM_YES, CONFIRM_NO = "Yes, go ahead", "No, change something"
 CORRECTION = "Correction to your reading of the question"
 CACHE_SIZE = 256
+log = logging.getLogger("pantree.graph")
 
 
 @dataclass
@@ -159,16 +161,22 @@ class Agent:
                  data: dict | None = None):
         settings = get_settings()
         self.llm_factory = llm_factory or ChatLLM
+        started = time.monotonic()
+        log.info("agent_prepare phase=duckdb started")
         self.con = con or connect(settings.shop_dir)
+        log.info("agent_prepare phase=duckdb seconds=%.2f", time.monotonic() - started)
         self.memory = memory or Memory()
         self.metrics, self.glossary = load_metrics(), load_glossary()
         self.snapshot = snapshot_signature() if data is None else None
         info = data or manifest(settings.shop_dir)
         self.data = {"first_day": info["first_day"], "last_day": info["last_day"], "size": info["size"]}
         schema = load_schema()
-        profile = profile_for(self.con, {**info, "snapshot_signature": self.snapshot})
+        started = time.monotonic()
+        log.info("agent_prepare phase=joins data_size=%s data_as_of=%s started", info["size"], info["last_day"])
+        profile = profile_for(self.con, {**info, "snapshot_signature": self.snapshot}, joins_only=True)
         self.catalog = Catalog(schema, self.metrics, load_concepts(), JoinGraph(schema, profile), load_catalog(),
                                label_columns(), self.con)
+        log.info("agent_prepare phase=joins seconds=%.2f", time.monotonic() - started)
         self.aliases = {alias.lower(): value for value, names in self.glossary.value_aliases.items()
                         for alias in names}
         self._cache: OrderedDict[str, tuple[pd.DataFrame, bool]] = OrderedDict()
@@ -176,6 +184,8 @@ class Agent:
         self._llms: dict[str, LLM] = {}
         self._memories: dict[str, Any] = {}          # run_id -> memory scope for that question
         self._checkpoint_context = None
+        started = time.monotonic()
+        log.info("agent_prepare phase=checkpoint backend=%s started", settings.checkpoint_backend)
         if settings.checkpoint_backend == "postgres":
             from langgraph.checkpoint.postgres import PostgresSaver
 
@@ -188,6 +198,7 @@ class Agent:
         else:
             saver = InMemorySaver()
         self.graph = self._build().compile(checkpointer=saver)
+        log.info("agent_prepare phase=checkpoint seconds=%.2f", time.monotonic() - started)
 
     def restore_memory(self, run_id: str, scope: Any) -> None:
         """Reattach user/project memory to a paused persistent graph after a restart."""

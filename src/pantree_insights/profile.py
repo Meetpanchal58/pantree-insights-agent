@@ -161,10 +161,13 @@ def _profile_join_with_rule(con, join, lt, lc, rt, rc, extra) -> JoinProfile:
                        left_unmatched=round(unmatched or 0.0, 4), right_unmatched=0.0)
 
 
-def build_profile(con: duckdb.DuckDBPyConnection, schema: Schema | None = None) -> Profile:
+def build_profile(con: duckdb.DuckDBPyConnection, schema: Schema | None = None, *, joins_only: bool = False) -> Profile:
     schema = schema or load_schema()
-    kinds = {t: {c: d.split(" - ")[0].strip() for c, d in info.columns.items()} for t, info in schema.tables.items()}
-    tables = {t: profile_table(con, t, kinds[t]) for t in schema.tables}
+    tables = {}
+    if not joins_only:
+        for name, info in schema.tables.items():
+            kinds = {c: d.split(" - ")[0].strip() for c, d in info.columns.items()}
+            tables[name] = profile_table(con, name, kinds)
     joins = {j: profile_join(con, j, schema.join_rules[j].extra if j in schema.join_rules else None)
              for j in schema.joins}
     return Profile(tables, joins)
@@ -186,7 +189,7 @@ def _from_json(text: str) -> Profile:
     return Profile(tables, joins)
 
 
-def cached_profile(con: duckdb.DuckDBPyConnection, key: str) -> Profile:
+def cached_profile(con: duckdb.DuckDBPyConnection, key: str, *, joins_only: bool = False) -> Profile:
     """Profile for one data snapshot; `key` must change when the data or schema changes."""
     path = CACHE / f"profile_{re.sub(r'[^A-Za-z0-9_.-]', '_', key)}.json"
     if path.exists():
@@ -194,20 +197,22 @@ def cached_profile(con: duckdb.DuckDBPyConnection, key: str) -> Profile:
             return _from_json(path.read_text())
         except (ValueError, KeyError, TypeError):
             pass
-    profile = build_profile(con)
+    profile = build_profile(con, joins_only=joins_only)
     CACHE.mkdir(parents=True, exist_ok=True)
     path.write_text(_to_json(profile))
     return profile
 
 
-def profile_for(con: duckdb.DuckDBPyConnection, info: dict) -> Profile:
+def profile_for(con: duckdb.DuckDBPyConnection, info: dict, *, joins_only: bool = False) -> Profile:
     """Cached profile for the data snapshot described by `info` (db.manifest: size, last_day)."""
     schema_text = (get_settings().semantic_dir / "schema.yaml").read_bytes()
     code = Path(__file__).read_bytes()                       # a change in how we measure invalidates the cache
     version = str(info.get("snapshot_signature", "")).encode()
     digest = hashlib.sha1(schema_text + code + version).hexdigest()[:8]
     key = f"{info['size']}_{info['last_day']}_{digest}"
-    return cached_profile(con, key)
+    if joins_only:
+        key += "_joins"
+    return cached_profile(con, key, joins_only=joins_only)
 
 
 @lru_cache
