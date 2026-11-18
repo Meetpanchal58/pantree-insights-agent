@@ -120,9 +120,11 @@ def spec_match(item: dict, spec: dict | None) -> bool | None:
     gold = _gold_specs().get(f"{item['suite']}/{item['id']}")
     if not gold or gold.get("route") == "template":
         return None
-    from pantree_insights.interpret import canonical
-    from pantree_insights.spec import QuerySpec
-    return canonical(QuerySpec.model_validate(spec)) == canonical(QuerySpec.model_validate(gold))
+    from pantree_insights.interpret import canonical, normalise
+    from pantree_insights.spec import QuerySpec, default_catalog
+    cat = default_catalog()
+    model = normalise(QuerySpec.model_validate(spec), cat, {})
+    return canonical(model) == canonical(normalise(QuerySpec.model_validate(gold), cat, {}))
 
 
 def _gold_specs() -> dict:

@@ -125,7 +125,19 @@ def normalise(spec: QuerySpec, cat: Catalog, aliases: dict[str, str]) -> QuerySp
             out.append(f.model_copy(update={"values": values}))
         return out
     measures = [m.model_copy(update={"where": fix(m.where)}) for m in spec.measures]
-    return spec.model_copy(update={"filters": fix(spec.filters), "measures": measures})
+    subject = cat.subject_of.get(spec.table)
+    always = cat.concepts.subjects[subject].where if subject else None
+
+    def redundant(f) -> bool:                          # the table's own rule restated (line_type = 'Sale')
+        if not always or f.op not in ("eq", "in") or len(f.values) != 1:
+            return False
+        try:
+            expression = cat.resolve(f.field, spec.table)[0]
+        except Exception:                              # noqa: BLE001 - validation reports it
+            return False
+        return f"{expression} = '{f.values[0]}'" == always
+    filters = [f for f in fix(spec.filters) if not redundant(f)]
+    return spec.model_copy(update={"filters": filters, "measures": measures})
 
 
 # ----------------------------------------------------------------------------- agreement
