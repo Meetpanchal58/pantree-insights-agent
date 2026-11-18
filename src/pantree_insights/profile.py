@@ -136,13 +136,17 @@ def profile_join(con: duckdb.DuckDBPyConnection, join: str, extra: str | None = 
     (lt, lc), (rt, rc) = (side.strip().split(".") for side in join.split("="))
     if extra:
         return _profile_join_with_rule(con, join, lt, lc, rt, rc, extra)
-    per_key = "SELECT COALESCE(MAX(n), 0) FROM (SELECT COUNT(*) AS n FROM {t} WHERE {c} IS NOT NULL GROUP BY {c})"
-    left_per_key = con.execute(per_key.format(t=_q(lt), c=_q(lc))).fetchone()[0]
-    right_per_key = con.execute(per_key.format(t=_q(rt), c=_q(rc))).fetchone()[0]
-    unmatched = ("SELECT COUNT(*) FILTER (WHERE r.k IS NULL), COUNT(*) FROM (SELECT {c} AS k FROM {t} "
-                 "WHERE {c} IS NOT NULL) l LEFT JOIN (SELECT DISTINCT {c2} AS k FROM {t2}) r ON l.k = r.k")
-    miss_l, all_l = con.execute(unmatched.format(t=_q(lt), c=_q(lc), t2=_q(rt), c2=_q(rc))).fetchone()
-    miss_r, all_r = con.execute(unmatched.format(t=_q(rt), c=_q(rc), t2=_q(lt), c2=_q(lc))).fetchone()
+    # Scan each source once. Reuse grouped counts for cardinality AND row-weighted coverage;
+    # repeated scans of remote parquet files make cold preparation particularly expensive.
+    grouped = "SELECT {c} AS k, COUNT(*) AS n FROM {t} WHERE {c} IS NOT NULL GROUP BY {c}"
+    sql = (f"WITH l AS MATERIALIZED ({grouped.format(t=_q(lt), c=_q(lc))}), "
+           f"r AS MATERIALIZED ({grouped.format(t=_q(rt), c=_q(rc))}) "
+           "SELECT (SELECT COALESCE(MAX(n), 0) FROM l), (SELECT COALESCE(MAX(n), 0) FROM r), "
+           "(SELECT COALESCE(SUM(l.n) FILTER (WHERE r.k IS NULL), 0) FROM l LEFT JOIN r ON l.k = r.k), "
+           "(SELECT COALESCE(SUM(n), 0) FROM l), "
+           "(SELECT COALESCE(SUM(r.n) FILTER (WHERE l.k IS NULL), 0) FROM r LEFT JOIN l ON r.k = l.k), "
+           "(SELECT COALESCE(SUM(n), 0) FROM r)")
+    left_per_key, right_per_key, miss_l, all_l, miss_r, all_r = con.execute(sql).fetchone()
     return JoinProfile(join, left_per_key, right_per_key, round(miss_l / all_l, 4) if all_l else 0.0,
                        round(miss_r / all_r, 4) if all_r else 0.0)
 

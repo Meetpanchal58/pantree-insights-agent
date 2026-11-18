@@ -378,6 +378,12 @@ specs:
     time: {start: 2026-01-01, end: 2026-12-31}
 
   # ------------------------------------------------------------------ conversation flow
+  flow/flow-brand-followup:
+    table: sales
+    measures: [{name: realized_revenue, metric: realized_revenue}]
+    dimensions: [brand, category, sub_category]
+    filters: [{field: brand, op: in, values: [ADIDAS, Catwalk, Puma, Nike, United]}]
+    time: {start: 2026-10-16, end: 2026-11-14}
   flow/flow-case:
     table: sales
     measures: [{name: realized_revenue, metric: realized_revenue}]

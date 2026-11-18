@@ -170,6 +170,8 @@ def test_ask_in_project_streams_and_remembers(app_env):
     assert "Focus on Diwali" in prompt
     assert "Earlier insights in this project" in prompt
     assert "User: Revenue by category?" in prompt
+    assert "Earlier computed aggregate" in prompt
+    assert json.dumps(final["result"], ensure_ascii=False) in prompt
 
 
 def test_clarify_then_answer(app_env):
