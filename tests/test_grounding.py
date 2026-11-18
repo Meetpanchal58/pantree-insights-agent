@@ -1,19 +1,43 @@
 """Grounding: numbers in answers must be verifiable claims about the result table.
 
-The random-claim experiment: on an 8-row return-rate result, generate 2,000 random claims per type and
-count how many a checker accepts. The old regex check (now only in evals/grounding_experiment.py) accepted most of
-them; the structured-claim verifier must accept < 1%.
+The random-claim experiment: on an 8-row return-rate result, generate 2,000 random claims per type and count how
+many the checker accepts; the structured-claim verifier must accept < 1%.
 """
 import random
-import sys
-from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from pantree_insights.grounding import Claim, KeyValue, free_numbers, render, verify
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-from grounding_experiment import frame, random_claims, unsupported_numbers  # noqa: E402
+CATS = ["Topwear", "Bottomwear", "Shoes", "Sandal", "Bags", "Watches", "Innerwear", "Flip Flops"]
+
+
+def frame(seed: int = 7) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame({"sub_category": CATS, "return_rate": rng.uniform(0.05, 0.30, 8).round(4),
+                         "delivered_lines": rng.integers(800, 15000, 8)})
+
+
+def random_claims(kind: str, n: int = 2000, seed: int = 11) -> list[Claim]:
+    rnd = random.Random(seed)
+    out = []
+    for i in range(n):
+        row = [KeyValue(column="sub_category", value=rnd.choice(CATS))]
+        if kind == "pct":
+            out.append(Claim(id=f"c{i}", value=rnd.uniform(0.01, 0.60), unit="ratio", column="return_rate", row=row))
+        elif kind == "ratio":
+            other = [KeyValue(column="sub_category", value=rnd.choice(CATS))]
+            out.append(Claim(id=f"c{i}", value=rnd.uniform(1.0, 5.0), unit="ratio", column="return_rate", row=row,
+                             op="ratio", against=other))
+        else:
+            out.append(Claim(id=f"c{i}", value=float(rnd.randint(100, 20000)), unit="count",
+                             column="delivered_lines", row=row))
+    return out
+
+
+# ----------------------------------------------------------------------------- the old regex check (replaced)
 
 
 @pytest.mark.parametrize("kind", ["pct", "ratio", "count"])
@@ -21,15 +45,6 @@ def test_random_claims_are_rejected(kind):
     f = frame()
     accepted = sum(verify(f, [c], {}).ok for c in random_claims(kind))
     assert accepted / 2000 < 0.01, f"{kind}: {accepted}/2000 random claims accepted"
-
-
-def test_old_regex_check_accepted_most_random_claims():
-    """Documents why the old check was replaced (see README): it accepts most random numbers."""
-    f = frame()
-    rnd = random.Random(3)
-    pct = sum(not unsupported_numbers(f"{rnd.uniform(1, 60):.1f}%", f) for _ in range(2000)) / 2000
-    counts = sum(not unsupported_numbers(f"{rnd.randint(100, 20000):,}", f) for _ in range(2000)) / 2000
-    assert pct > 0.9 and counts > 0.2          # measured: ~100% and ~47% (8-row frame)
 
 
 def test_true_claims_verify_for_every_op():

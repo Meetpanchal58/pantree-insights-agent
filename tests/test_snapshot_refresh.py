@@ -1,7 +1,7 @@
 """Rebuild metadata on a published manifest change, and don't run SQL with a stale interpretation."""
 from types import SimpleNamespace
 
-from pantree_insights import db, graph, retrieval, web
+from pantree_insights import db, graph, web
 
 
 def test_manifest_signature_includes_version_and_location(tmp_path, monkeypatch):
@@ -11,23 +11,6 @@ def test_manifest_signature_includes_version_and_location(tmp_path, monkeypatch)
     old = db.snapshot_signature()
     path.write_text('{"last_day":"2026-11-16"}')
     assert db.snapshot_signature() != old
-
-
-def test_retriever_rebuilds_once_per_snapshot(monkeypatch):
-    version = ["one"]
-    builds = []
-    monkeypatch.setattr(retrieval, "snapshot_signature", lambda: version[0])
-    monkeypatch.setattr(retrieval, "connect", lambda *a: None)
-    monkeypatch.setattr(retrieval, "Retriever", lambda *a: builds.append(object()) or builds[-1])
-    retrieval._snapshot_retriever.cache_clear()
-    try:
-        first = retrieval.get_retriever()
-        assert retrieval.get_retriever() is first
-        version[0] = "two"
-        assert retrieval.get_retriever() is not first
-        assert len(builds) == 2
-    finally:
-        retrieval._snapshot_retriever.cache_clear()
 
 
 def test_runner_rebuilds_agent_on_data_refresh(monkeypatch):
@@ -51,9 +34,9 @@ def test_paused_run_resumes_with_its_own_agent(monkeypatch):
     assert resumed == ["paused"]
 
 
-def test_snapshot_change_stops_before_query_execution(monkeypatch):
+def test_snapshot_change_stops_before_saving_an_insight(monkeypatch):
     agent = object.__new__(graph.Agent)
     agent.snapshot = "old"
     monkeypatch.setattr(graph, "snapshot_signature", lambda: "new")
-    result = agent.run_query({"sql": "SELECT 1"})  # No connection: executing SQL would fail this test.
-    assert result["status"] == "failed" and result["route"] == "finish"
+    result = agent.remember({"run_id": "r", "analysis": {}, "question": "q"})
+    assert result["status"] == "failed" and result["insight_id"] is None

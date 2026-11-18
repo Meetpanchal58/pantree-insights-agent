@@ -13,8 +13,7 @@ reviewed like code. For each column:
 - range: for numbers (min / median / max) and dates (first / last)
 - also_in: other tables with a column of the same name, with what it means there
 
-The agent sees this for every table in its context (catalog.describe); the understanding step uses the value lists
-to find which column a word refers to.
+The interpreter sees all of it in its prompt (catalog.describe); validation checks values against it.
 """
 from __future__ import annotations
 

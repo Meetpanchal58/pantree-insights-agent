@@ -25,6 +25,8 @@ from scoring import align, trim_top_n  # noqa: E402
 
 from pantree_insights.db import run_query  # noqa: E402
 from pantree_insights.spec import QuerySpec, compile_spec, default_catalog, validate  # noqa: E402
+from pantree_insights.templates import TemplateError  # noqa: E402
+from pantree_insights.templates import build as build_template  # noqa: E402
 
 
 def load_gold_specs() -> dict[str, dict]:
@@ -33,17 +35,23 @@ def load_gold_specs() -> dict[str, dict]:
 
 def check(item: dict, raw: dict, cat) -> dict:
     """{route, ok, reason, sql} for one question."""
-    if raw.get("route") == "template":
-        return {"route": "template", "ok": None, "reason": raw.get("why", ""), "sql": None}
-    spec = QuerySpec.model_validate(raw)
-    problems = validate(spec, cat)
-    if problems:
-        return {"route": "compiled", "ok": False, "reason": "invalid: " + "; ".join(problems), "sql": None}
-    sql = compile_spec(spec, cat)
+    if raw.get("template"):
+        route = "template"
+        try:
+            sql, _ = build_template(raw["template"], raw.get("params"))
+        except TemplateError as error:
+            return {"route": route, "ok": False, "reason": str(error), "sql": None}
+    else:
+        route = "compiled"
+        spec = QuerySpec.model_validate(raw)
+        problems = validate(spec, cat)
+        if problems:
+            return {"route": route, "ok": False, "reason": "invalid: " + "; ".join(problems), "sql": None}
+        sql = compile_spec(spec, cat)
     try:
         frame = run_query(cat.con, sql).frame
     except Exception as error:                         # noqa: BLE001 - reported, never hidden
-        return {"route": "compiled", "ok": False, "reason": f"database error: {error}", "sql": sql}
+        return {"route": route, "ok": False, "reason": f"database error: {error}", "sql": sql}
     gold, keys, metrics = gold_frame(cat.con, item)
     tree = sqlglot.parse_one(item["gold_sql"], read="duckdb")
     labels = {e.alias_or_name for e in tree.selects if e.find(exp.Case)}
@@ -51,7 +59,7 @@ def check(item: dict, raw: dict, cat) -> dict:
     ok, reason, _ = align(gold, agent, keys, metrics, label_columns=labels)
     if not ok and len(frame) > len(gold) and FULL_LIST.search(item["question"]):
         ok, reason, _ = align(gold, frame, keys, metrics, label_columns=labels, superset=True)
-    return {"route": "compiled", "ok": ok, "reason": reason, "sql": sql}
+    return {"route": route, "ok": ok, "reason": reason, "sql": sql}
 
 
 def main() -> None:
@@ -74,18 +82,15 @@ def main() -> None:
         if args.show:
             print(result["sql"] or "(no SQL)")
             print(result["reason"])
-    compiled = [r for _, r in rows if r["route"] == "compiled"]
-    right = [r for r in compiled if r["ok"]]
-    print(f"\nanswer questions: {len(rows)}")
-    print(f"coverage (compiled route): {len(compiled)}/{len(rows)} = {len(compiled) / max(len(rows), 1):.0%}")
-    print(f"compiled results matching gold: {len(right)}/{len(compiled)}")
+    verified = [r for _, r in rows if r["route"] in ("compiled", "template")]
+    right = [r for r in verified if r["ok"]]
+    templates = sum(r["route"] == "template" for _, r in rows)
+    print(f"\nanswer questions: {len(rows)} (compiled {len(verified) - templates}, templates {templates})")
+    print(f"verified results matching gold: {len(right)}/{len(verified)}")
     for key, r in rows:
-        if r["route"] == "compiled" and not r["ok"]:
+        if not r["ok"]:
             print(f"  FAIL {key}: {r['reason'][:200]}")
-    for key, r in rows:
-        if r["route"] == "template":
-            print(f"  template {key}: {r['reason']}")
-    if len(right) != len(compiled):
+    if len(right) != len(verified) or len(verified) != len(rows):
         sys.exit(1)
 
 

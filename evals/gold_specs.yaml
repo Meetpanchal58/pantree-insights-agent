@@ -2,8 +2,7 @@
 # tests/test_spec.py compiles each one and scores the result against the question's gold SQL (free, no LLM).
 # The phase 2 evaluation scores the model's spec against these (exact comparison) as well as by result.
 #
-# route: compiled  - answered by the spec compiler (VERIFIED)
-#        template  - multi-step analysis for a verified template (phase 3); `why` says what the spec lacks
+# Either a QuerySpec (compiled) or {template: name, params: {...}} (a reviewed multi-step template); both VERIFIED.
 # Keys are "<suite>/<id>". Dates are inclusive. Never shown to the model.
 
 specs:
@@ -91,8 +90,8 @@ specs:
       - {name: net_sales, metric: net_sales}
     dimensions: [sale_event]
     filters: [{field: sale_event, op: in, values: [Diwali 2025, Diwali 2026]}]
-  regression/h03: {route: template, why: lift of each event's daily average against the 14 days before it}
-  regression/h04: {route: template, why: credited revenue and spend come from two tables per channel}
+  regression/h03: {template: event_lift, params: {days_before: 14}}
+  regression/h04: {template: channel_roas, params: {by: channel}}
   regression/h05:
     table: marketing_attribution
     measures: [{name: last_click_revenue, metric: last_click_revenue}]
@@ -104,8 +103,8 @@ specs:
       - {name: late_delivery_rate, metric: late_delivery_rate}
       - {name: delivered_lines, agg: count, where: [{field: sales.delivered_at, op: is_set}]}
     dimensions: [courier]
-  regression/h07: {route: template, why: platform-reported orders and recorded orders come from two tables}
-  regression/h08: {route: template, why: per-customer 90-day repeat window}
+  regression/h07: {template: platform_vs_recorded_orders, params: {by: channel}}
+  regression/h08: {template: repeat_within_days, params: {days: 90}}
   regression/h09:
     table: inventory_history
     measures:

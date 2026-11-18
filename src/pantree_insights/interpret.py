@@ -1,43 +1,65 @@
-"""v2 interpretation: one model call turns a question into a QuerySpec; code checks it and asks when unsure.
+"""Interpretation: the question becomes a checked QuerySpec (or a template call); anything unsure is asked.
 
-1. The model reads the question against the whole catalog (metrics, cuts, columns, values; a stable prompt prefix
-   the provider caches) and returns an Interpretation: a spec, questions for the user, a decline, or "analysis"
-   for multi-step questions the spec cannot express.
-2. Code normalises values to their stored spelling (aliases, case, underscores) and validates the spec. If it is
-   invalid, the model gets one repair round with the exact problems; still invalid -> the problems become
-   questions for the user.
-3. Agreement: a second, independent reading must produce the same spec. If not, a third reading breaks the tie;
-   with no majority the readings become a choice for the user. Disagreement is never resolved by guessing.
-4. The read-back the user confirms is rendered from the spec itself, so what is confirmed is what is computed.
+The model may decide WHICH question is answered, never WHICH number is returned (docs/ARCHITECTURE.md):
+
+1. Ambiguity register: phrases this shop knows to have several meanings ("wrong size", "worst reviews") are asked
+   first, whatever the model thinks.
+2. The interpreter reads the question against the whole catalog (a stable, provider-cached prompt prefix) and returns
+   a spec, a template call, questions, a decline, or "unanswerable".
+3. Code normalises values to their stored spelling and validates; one repair round with the exact problems; still
+   invalid -> the problems become questions.
+4. Contrast: a second call proposes materially different readings (definition, filter, split, grouping, ranking).
+   Each is compiled and RUN; only if a reading gives different numbers does the user choose. Readings that give the
+   same numbers are not worth a question (disagreement-guided clarification, 2026 research).
+5. Premise check: a period outside the data is stated, never silently answered as zero.
 """
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Literal
 
+import pandas as pd
 from pydantic import BaseModel, Field
 
 from .agents import ClarifyingQuestion, system_prompt
 from .catalog import describe
-from .spec import TICKETS, Catalog, QuerySpec, validate
+from .spec import TICKETS, Catalog, QuerySpec, SpecError, compile_spec, validate
+from .templates import TemplateError
+from .templates import build as build_template
+from .templates import describe as describe_templates
 
 MAX_REPAIRS = 1
+MAX_ALTERNATIVES = 2
 CANNOT_BUILD = "I could not build this exactly"
 READINGS = "I can read this question in more than one way"
+
+
+class TemplateCall(BaseModel):
+    name: str = Field(description="Template name from the list")
+    params: dict = Field(default_factory=dict)
 
 
 class Interpretation(BaseModel):
     decline_reason: str | None = Field(None, description="Only if the request must be declined; decided first")
     decline_category: Literal["personal_data", "raw_dump", "change_data", "instructions", "off_topic"] | None = None
-    route: Literal["spec", "analysis", "clarify"] = Field(
-        "spec", description="spec: answerable as one QuerySpec; analysis: needs several steps (lift vs a baseline "
-        "period, per-customer windows, comparing two tables); clarify: something material is unclear")
+    route: Literal["spec", "template", "clarify", "unanswerable"] = Field(
+        "spec", description="spec: one QuerySpec; template: one of the listed analyses; clarify: something material "
+        "is open; unanswerable: the data cannot answer it as asked (say what it can answer instead)")
     restated_question: str = Field(description="The question as you will answer it, precise and self-contained")
     spec: QuerySpec | None = Field(None, description="For route spec")
+    template: TemplateCall | None = Field(None, description="For route template")
     questions: list[ClarifyingQuestion] = Field(default_factory=list, description="For route clarify")
     assumptions: list[str] = Field(default_factory=list, description="Defaults you applied, in business words")
+    unanswerable_reason: str | None = Field(None, description="For route unanswerable: why, and what can be answered")
+
+
+class Alternatives(BaseModel):
+    readings: list[QuerySpec] = Field(default_factory=list, description="Materially different readings, at most 2")
+    why: list[str] = Field(default_factory=list, description="For each reading: the word it reads differently")
 
 
 # ----------------------------------------------------------------------------- prompt
@@ -66,6 +88,8 @@ def catalog_text(cat: Catalog, terms: dict[str, str]) -> str:
         out.append(f"- {s.table}: " + "; ".join(cuts))
     out.append("\n## Columns (any table.column below may also be used; values are the exact stored spellings)")
     out.append(describe(list(cat.catalog), catalog=cat.catalog))
+    out.append("\n## Analyses (route template; for multi-step questions a spec cannot express)")
+    out.append(describe_templates())
     if terms:
         out.append("\n## Business terms")
         out += [f"- {t}: {m}" for t, m in terms.items()]
@@ -74,10 +98,12 @@ def catalog_text(cat: Catalog, terms: dict[str, str]) -> str:
 
 def ask_model(llm, cat: Catalog, terms: dict[str, str], data: dict, question: str, history: str = "",
               answers: dict[str, str] | None = None, problems: list[str] | None = None,
-              independent: bool = False) -> Interpretation:
+              background: str = "") -> Interpretation:
     system = system_prompt("interpreter", data_first_day=data["first_day"], data_last_day=data["last_day"]) \
         + "\n\n" + catalog_text(cat, terms)
     parts = []
+    if background:
+        parts.append(f"## Project instructions and what we already know\n{background}")
     if history:
         parts.append(f"## Earlier in this chat\n{history}")
     parts.append(f"## Question\n{question}")
@@ -86,8 +112,6 @@ def ask_model(llm, cat: Catalog, terms: dict[str, str], data: dict, question: st
     if problems:
         parts.append("## Your last spec could not be used; fix exactly these problems\n"
                      + "\n".join(f"- {p}" for p in problems))
-    if independent:
-        parts.append("Read the question from scratch and build the spec independently.")
     return llm.ask("interpreter", Interpretation, system, "\n\n".join(parts))
 
 
@@ -224,71 +248,140 @@ def readback(spec: QuerySpec, cat: Catalog, assumptions: list[str] | None = None
 # ----------------------------------------------------------------------------- the decision
 @dataclass
 class Decision:
-    kind: Literal["spec", "analysis", "clarify", "decline"]
+    kind: Literal["spec", "template", "clarify", "decline", "unanswerable"]
     spec: QuerySpec | None = None
+    template: TemplateCall | None = None
     questions: list[ClarifyingQuestion] = field(default_factory=list)
+    required: bool = False                       # a question no default may answer
     restated: str = ""
     assumptions: list[str] = field(default_factory=list)
     reason: str = ""
-    readings: int = 0
+    readings: list[QuerySpec] = field(default_factory=list)    # options of a READINGS question, in order
     detail: dict = field(default_factory=dict)
 
 
+def register_questions(question: str, register: dict[str, list[str]], answers: dict[str, str]) -> list:
+    """Known two-meaning phrases in the question that the user's answers have not settled."""
+    asked = " ".join(answers).casefold()
+    out = []
+    for phrase, meanings in register.items():
+        if re.search(rf"(?<![\w-]){re.escape(phrase)}(?![\w-])", question, re.I) and phrase.casefold() not in asked:
+            out.append(ClarifyingQuestion(question=f"What do you mean by '{phrase}'?", options=meanings,
+                                          default=meanings[0], why="the two meanings give different numbers"))
+    return out
+
+
+def premise_notes(spec: QuerySpec, data: dict) -> list[str]:
+    """Facts the user must know about the question's premise (stated in the read-back and the answer)."""
+    notes = []
+    first, last = date.fromisoformat(str(data["first_day"])[:10]), date.fromisoformat(str(data["last_day"])[:10])
+    if spec.time and (spec.time.start or spec.time.end):
+        start, end = spec.time.start or first, spec.time.end or last
+        if end < first or start > last:
+            notes.append(f"The data covers {first} to {last}; the requested period has no data, so every number is "
+                         "zero because nothing was recorded, not because nothing happened.")
+        elif start < first or end > last:
+            notes.append(f"The data covers {first} to {last}; only that part of the requested period is included.")
+    return notes
+
+
+def _same(a: pd.DataFrame, b: pd.DataFrame) -> bool:
+    """Do two results carry the same numbers (ignoring column names, row order and rounding)?"""
+    if a.shape != b.shape:
+        return False
+    def norm(f: pd.DataFrame) -> list:
+        rows = [tuple(round(v, 6) if isinstance(v, float) else str(v) for v in r) for r in f.itertuples(index=False)]
+        return sorted(rows, key=str)
+    return norm(a) == norm(b)
+
+
 def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], data: dict, question: str,
-           history: str = "", answers: dict[str, str] | None = None, agreement: bool = True) -> Decision:
-    """Read the question (and, for agreement, re-read it independently) and decide what happens next."""
-    def one(independent: bool) -> tuple[Interpretation, QuerySpec | None, list[str]]:
-        reading = ask_model(llm, cat, terms, data, question, history, answers, independent=independent)
-        problems: list[str] = []
-        for attempt in range(MAX_REPAIRS + 1):
-            if reading.decline_reason or reading.route != "spec" or reading.spec is None:
-                return reading, None, []
+           history: str = "", answers: dict[str, str] | None = None, register: dict[str, list[str]] | None = None,
+           run: Callable[[str], pd.DataFrame] | None = None, contrast: bool = True,
+           background: str = "") -> Decision:
+    """Read the question and decide: answer (spec / template), ask, decline or say it cannot be answered."""
+    answers = answers or {}
+    unsettled = register_questions(question, register or {}, answers)
+    if unsettled:
+        return Decision("clarify", questions=unsettled, required=True, reason="ambiguity register")
+
+    reading = ask_model(llm, cat, terms, data, question, history, answers, background=background)
+    detail: dict = {"reading": reading.model_dump(mode="json")}
+    for attempt in range(MAX_REPAIRS + 1):
+        if reading.decline_reason:
+            return Decision("decline", reason=reading.decline_reason, detail=detail)
+        if reading.route == "unanswerable":
+            return Decision("unanswerable", restated=reading.restated_question, detail=detail,
+                            reason=reading.unanswerable_reason or "The data cannot answer this as asked.")
+        if reading.route == "clarify" and reading.questions:
+            return Decision("clarify", questions=reading.questions, restated=reading.restated_question, detail=detail)
+        problems = []
+        if reading.route == "template" and reading.template:
+            try:
+                build_template(reading.template.name, reading.template.params)
+                return Decision("template", template=reading.template, restated=reading.restated_question,
+                                assumptions=reading.assumptions, detail=detail)
+            except TemplateError as error:
+                problems = [str(error)]
+        elif reading.spec is not None:
             spec = normalise(reading.spec, cat, aliases)
             problems = validate(spec, cat)
             if not problems:
-                return reading, spec, []
-            if attempt < MAX_REPAIRS:
-                reading = ask_model(llm, cat, terms, data, question, history, answers, problems=problems,
-                                    independent=independent)
-        return reading, None, problems
-
-    first, spec, problems = one(independent=False)
-    detail = {"first": first.model_dump(mode="json")}
-    if first.decline_reason:
-        if first.decline_category == "raw_dump":           # lists of up to 100 rows are analysis: second opinion
-            return Decision("analysis", restated=first.restated_question, reason="possible raw dump", readings=1)
-        return Decision("decline", reason=first.decline_reason, readings=1)
-    if first.route == "analysis":
-        return Decision("analysis", restated=first.restated_question, reason="multi-step analysis", readings=1)
-    if first.route == "clarify" and first.questions:
-        return Decision("clarify", questions=first.questions, restated=first.restated_question, readings=1)
-    if spec is None:
+                break
+        else:
+            problems = ["no spec, template or question was given"]
+        if attempt < MAX_REPAIRS:
+            reading = ask_model(llm, cat, terms, data, question, history, answers, problems=problems,
+                                background=background)
+            detail["repair"] = {"problems": problems, "reading": reading.model_dump(mode="json")}
+    else:
         rephrase = "Let me rephrase the question"
         questions = [ClarifyingQuestion(question=f"{CANNOT_BUILD}: {p}. What did you mean?", options=[rephrase],
-                                        default=rephrase, why="nothing is computed from a guess")
-                     for p in problems[:3]] or first.questions
-        return Decision("clarify", questions=questions, restated=first.restated_question, readings=1,
+                                        default=rephrase, why="nothing is computed from a guess") for p in problems[:3]]
+        return Decision("clarify", questions=questions, required=True, restated=reading.restated_question,
                         detail={**detail, "problems": problems})
-    if not agreement:
-        return Decision("spec", spec=spec, restated=first.restated_question, assumptions=first.assumptions,
-                        readings=1, detail=detail)
-    second, spec2, _ = one(independent=True)
-    detail["second"] = second.model_dump(mode="json")
-    if spec2 is not None and canonical(spec2) == canonical(spec):
-        return Decision("spec", spec=spec, restated=first.restated_question, assumptions=first.assumptions,
-                        readings=2, detail=detail)
-    third, spec3, _ = one(independent=True)
-    detail["third"] = third.model_dump(mode="json")
-    keys = [canonical(s) if s is not None else None for s in (spec, spec2, spec3)]
-    for candidate, key in zip((spec, spec2, spec3), keys, strict=True):
-        if key is not None and keys.count(key) >= 2:
-            chosen = (first, second, third)[keys.index(key)]
-            return Decision("spec", spec=candidate, restated=chosen.restated_question,
-                            assumptions=chosen.assumptions, readings=3, detail=detail)
-    readings = [s for s in (spec, spec2, spec3) if s is not None]
-    options = list(dict.fromkeys(readback(s, cat).replace("\n", " · ") for s in readings))[:3]
-    question_text = f"{READINGS}. Which one do you mean?"
-    choice = ClarifyingQuestion(question=question_text, options=options + ["None of these"], default=options[0],
-                                why="different readings give different numbers")
-    return Decision("clarify", restated=first.restated_question, readings=3, detail={**detail, "readings": options},
-                    questions=[choice])
+
+    notes = premise_notes(spec, data)
+    decision = Decision("spec", spec=spec, restated=reading.restated_question,
+                        assumptions=[*reading.assumptions, *notes], detail=detail)
+    if not contrast or run is None:
+        return decision
+
+    # contrast: materially different readings, compiled and run; ask only when the numbers differ
+    alternatives = ask_alternatives(llm, cat, terms, data, question, history, answers, spec)
+    detail["alternatives"] = alternatives.model_dump(mode="json")
+    try:
+        base = run(compile_spec(spec, cat))
+    except Exception:                                  # noqa: BLE001 - the main reading is executed later anyway
+        return decision
+    different = []
+    for alt in alternatives.readings[:MAX_ALTERNATIVES]:
+        alt = normalise(alt, cat, aliases)
+        if validate(alt, cat) or canonical(alt) == canonical(spec):
+            continue
+        try:
+            if not _same(base, run(compile_spec(alt, cat))):
+                different.append(alt)
+        except (SpecError, Exception):                 # noqa: BLE001 - an alternative that cannot run is no option
+            continue
+    if not different:
+        return decision
+    readings = [spec, *different]
+    options = [readback(r, cat).replace("\n", " · ") for r in readings]
+    choice = ClarifyingQuestion(question=f"{READINGS}. Which one do you mean?", options=options, default=options[0],
+                                why="these readings give different numbers")
+    return Decision("clarify", questions=[choice], required=True, restated=reading.restated_question,
+                    readings=readings, detail={**detail, "different": len(different)})
+
+
+def ask_alternatives(llm, cat: Catalog, terms: dict[str, str], data: dict, question: str, history: str,
+                     answers: dict[str, str], spec: QuerySpec) -> Alternatives:
+    system = system_prompt("contrast", data_first_day=data["first_day"], data_last_day=data["last_day"]) \
+        + "\n\n" + catalog_text(cat, terms)
+    parts = [f"## Earlier in this chat\n{history}"] if history else []
+    parts.append(f"## Question\n{question}")
+    if answers:
+        parts.append("## The user's answers (settled; do not offer readings against them)\n"
+                     + "\n".join(f"- {q}: {a}" for q, a in answers.items()))
+    parts.append(f"## The reading chosen so far\n{json.dumps(spec.model_dump(mode='json'))}")
+    return llm.ask("contrast", Alternatives, system, "\n\n".join(parts))

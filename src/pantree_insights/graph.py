@@ -1,136 +1,111 @@
-"""The agent flow, as a LangGraph state machine.
+"""The agent as a LangGraph state machine. The model decides which question is answered, never which number.
 
-    check_input -> retrieve -> understand --(open points: pause for the user's answers)--> understand ...
-                               understand -> plan --(decline)-> finish
-                               plan -> write_sql -> check_sql -> run_query -> validate -> analyse
-                                          ^________|___________|____________|   (feedback, max 3 tries)
-                               analyse -> (number check, one rewrite) -> chart -> remember -> finish
+    check_input -> interpret -> clarify (questions or read-back; pauses for the user) -> interpret ...
+                   interpret -> execute (compiled spec or reviewed template; no model writes SQL)
+                   execute -> analyse (numbers rendered by code) -> chart -> remember -> finish
 
-Every step streams progress events ({"type": "step", "step", "status", "detail", ...}) so the UI can
-show the agents working. A run pauses at clarifying questions and resumes with Agent.resume().
+Every step streams progress events ({"type": "step", "step", "status", "detail", ...}). A run pauses at a question
+or the read-back and resumes with Agent.resume(). See docs/ARCHITECTURE.md.
 """
 from __future__ import annotations
 
 import contextlib
+import json
 import re
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
-from datetime import date
+from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, TypedDict
 
 import pandas as pd
-import sqlglot
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
-from sqlglot import exp
 
 from . import agents
-from .catalog import value_columns as catalog_values
+from .catalog import label_columns, load_catalog
 from .charts import build_chart
-from .checks import label_grain_problems, result_problems
 from .config import get_settings
-from .db import QueryTimeout, connect, manifest, run_query, snapshot_signature
+from .db import connect, manifest, run_query, snapshot_signature
 from .grounding import free_numbers, verify
 from .guardrails import check_question, check_sql
+from .interpret import READINGS, Decision, TemplateCall, canonical, decide, readback
 from .joins import JoinGraph
 from .llm import LLM, BudgetExceeded, ChatLLM
 from .memory import Memory
 from .profile import profile_for
-from .recompute import canonical_sql, check_answer, extra_filter_columns
-from .references import ReferenceIndex
-from .retrieval import Retriever, get_retriever
-from .semantic import load_concepts, load_metrics, tables_in
-from .understanding import IdResolver, OpenPoint, readback, resolve
+from .semantic import load_concepts, load_glossary, load_metrics, load_schema
+from .spec import Catalog, QuerySpec, SpecError, compile_spec
+from .templates import TemplateError
+from .templates import build as build_template
 
 MAX_CLARIFY_ROUNDS = 6        # stop without computing if material questions remain unresolved
 CONFIRM_QUESTION = "Is this what you want me to compute?"
 CONFIRM_YES, CONFIRM_NO = "Yes, go ahead", "No, change something"
 CORRECTION = "Correction to your reading of the question"
+CACHE_SIZE = 256
 
 
-@dataclass(frozen=True)
-class Features:
-    """Switches for ablations (evals/run_eval.py --variant). The default is the full system."""
-    retrieval: bool = True        # hybrid retrieval context (off: the whole schema.yaml)
-    semantic: bool = True         # metric definitions and glossary in the context
-    planner: bool = True          # planner step (off: the question goes straight to the SQL writer)
-    validator: bool = True        # validator retry loop
-    narrow: bool = True           # SQL writer's first attempt sees only the plan's tables
-    memory: bool = True           # memory in prompts and saving insights
-    understand: bool = True       # question understanding + clarifying loop + code-resolved columns and joins
-    verified: bool = False        # v2: question -> QuerySpec -> compiled SQL (docs/ARCHITECTURE_V2.md)
+@dataclass
+class OpenPoint:
+    """A question for the user. `meaning` maps an option to what code does with it (internal)."""
+    key: str
+    question: str
+    options: list[str]
+    default: str
+    why: str
+    meaning: dict[str, str] = field(default_factory=dict)
+    required: bool = False                     # no default may answer it, even when defaults were requested
 
-
-VARIANTS = {
-    "baseline": Features(retrieval=False, semantic=False, planner=False, validator=False, narrow=False, memory=False,
-                         understand=False),
-    "semantic": Features(retrieval=False, semantic=True, planner=False, validator=False, narrow=False, memory=False,
-                         understand=False),
-    "retrieval": Features(retrieval=True, semantic=True, planner=False, validator=False, narrow=False, memory=False,
-                          understand=False),
-    "planner": Features(retrieval=True, semantic=True, planner=True, validator=False, narrow=False, memory=False,
-                        understand=False),
-    "validator": Features(retrieval=True, semantic=True, planner=True, validator=True, narrow=False, memory=False,
-                          understand=False),
-    "no_understanding": Features(understand=False),      # the system before the understanding step
-    "full": Features(),
-    "full_no_memory": Features(memory=False),
-    "v2": Features(verified=True),                          # verified answers by construction
-}
+    def public(self) -> dict:
+        return {"question": self.question, "options": self.options, "default": self.default, "why": self.why}
 
 
 class State(TypedDict, total=False):
-    pipeline: str                  # v1 | v2
-    spec: dict | None              # v2: the confirmed QuerySpec
-    readings: list[dict]           # v2: different readings offered to the user
-    restated: str
-    trust: str | None              # v2: verified | exploratory
     run_id: str
     chat_id: str | None
     question: str
     history: str
     use_defaults: bool
-    exclude_examples: list[str]  # evaluation: hide these example ids from retrieval (no leakage)
     answers: dict[str, str]
-    frame: dict                  # the understanding agent's question frame
-    understanding: str           # resolved subjects, filters, columns and join paths (prompt text)
-    understood_tables: list[str] # tables the resolved understanding needs (kept in the narrowed context)
-    resolved_filters: list[list[str]]  # [column, value] the SQL must use (checked after the query runs)
-    references: str              # reference queries with the same structure (tables, columns, metrics)
-    open_points: list[dict]      # questions waiting for the user (with their internal meaning)
-    choices: dict[str, str]      # answers code can act on: "mention:Mumbai" -> "city"
+    choices: dict[str, str]
+    open_points: list[dict]
     clarify_rounds: int
-    confirmed: bool              # the user confirmed the read-back of the understood question
-    verify_scope: dict           # confirmed scope for recomputing the answer's metrics (recompute.py)
-    verification: dict           # {"status": verified | mismatch | unverified, "metrics": {name: status}}
+    confirmed: bool
+    readings: list[dict]                       # different readings offered to the user
+    spec: dict | None                          # the confirmed QuerySpec
+    template: dict | None                      # or the confirmed template call
+    restated: str
     readback: str
-    context: str
-    retrieved: dict              # the retrieved context's parts, for narrowing it after planning
-    metric_names: list[str]
+    notes: list[str]                           # assumptions and premise facts the answer must state
+    trust: str | None
     memory: str
-    plan: dict
+    metric_names: list[str]
     sql: str
-    explanation: str
-    attempts: int
-    feedback: list[str]
-    result: dict                 # {"columns": [...], "data": [[...]], "truncated": bool}
+    result: dict                               # {"columns": [...], "data": [[...]], "truncated": bool}
+    verification: dict
     warnings: list[str]
     analysis: dict
     grounded: bool
     chart: dict | None
     insight_id: str | None
-    status: str                  # running | clarify | declined | failed | done
-    message: str                 # for declined / failed
+    status: str                                # running | declined | failed | done
+    message: str
     route: str
 
 
 def _frame(result: dict) -> pd.DataFrame:
     return pd.DataFrame(result["data"], columns=result["columns"])
+
+
+def _result(frame: pd.DataFrame, truncated: bool) -> dict:
+    split = json.loads(frame.to_json(orient="split", date_format="iso", index=False))
+    return {"columns": split["columns"], "data": split["data"], "truncated": truncated}
 
 
 def drop_unverified(analysis: agents.Analysis, problems: list[str]) -> agents.Analysis:
@@ -150,19 +125,6 @@ def drop_unverified(analysis: agents.Analysis, problems: list[str]) -> agents.An
         "recommendations": [t for t in analysis.recommendations if clean(t)],
         "caveats": [t for t in analysis.caveats if clean(t)],
         "memory": [m for m in analysis.memory if clean(m.statement)]})
-
-
-def _defines(numerator: str, column: str, value: str) -> bool:
-    """Does a metric's numerator already select this value of this column (sentiment = 'Negative')?"""
-    name = column.split(".")[-1]
-    return re.search(rf"\b{re.escape(name)}\s*(=|IN\s*\()\s*[^)]*'{re.escape(value)}'", numerator, re.I) is not None
-
-
-def _result(frame: pd.DataFrame, truncated: bool) -> dict:
-    import json
-
-    split = json.loads(frame.to_json(orient="split", date_format="iso", index=False))
-    return {"columns": split["columns"], "data": split["data"], "truncated": truncated}
 
 
 def _emit(step: str, status: str, **detail: Any) -> None:
@@ -193,41 +155,24 @@ def step(name: str):
 
 
 class Agent:
-    def __init__(self, llm_factory: Callable[[], LLM] | None = None, retriever: Retriever | None = None,
-                 memory: Memory | None = None, con=None, data: dict | None = None,
-                 features: Features | None = None):
+    def __init__(self, llm_factory: Callable[[], LLM] | None = None, memory: Memory | None = None, con=None,
+                 data: dict | None = None):
         settings = get_settings()
-        self.features = features or Features()
         self.llm_factory = llm_factory or ChatLLM
         self.con = con or connect(settings.shop_dir)
-        self.retriever = retriever or get_retriever()
         self.memory = memory or Memory()
-        self.metrics = load_metrics()
+        self.metrics, self.glossary = load_metrics(), load_glossary()
         self.snapshot = snapshot_signature() if data is None else None
         info = data or manifest(settings.shop_dir)
         self.data = {"first_day": info["first_day"], "last_day": info["last_day"], "size": info["size"]}
-        self.concepts = load_concepts()
-        if self.features.understand:
-            profile = profile_for(self.con, {**info, "snapshot_signature": self.snapshot})
-            self.joins = JoinGraph(self.retriever.schema, profile)
-            self.ids = IdResolver(profile.id_formats(), self.concepts.id_entities, self.con)
-            self.aliases = {alias.lower(): value for value, names in self.retriever.glossary.value_aliases.items()
-                            for alias in names}
-            self.references = ReferenceIndex(list(self.retriever.examples.values()))
-            # which columns hold a value: the catalog's complete lists plus the runtime value index (brands, ...)
-            self.value_columns = {v: list(cols) for v, cols in self.retriever.value_columns.items()}
-            for value, cols in catalog_values().items():
-                self.value_columns[value] = sorted(set(self.value_columns.get(value, [])) | set(cols))
-        if self.features.verified:
-            from .catalog import label_columns, load_catalog
-            from .spec import Catalog
-
-            profile = profile_for(self.con, {**info, "snapshot_signature": self.snapshot})
-            self.spec_catalog = Catalog(self.retriever.schema, self.metrics, self.concepts,
-                                        JoinGraph(self.retriever.schema, profile), load_catalog(), label_columns(),
-                                        self.con)
-            self.spec_aliases = {alias.lower(): value for value, names in
-                                 self.retriever.glossary.value_aliases.items() for alias in names}
+        schema = load_schema()
+        profile = profile_for(self.con, {**info, "snapshot_signature": self.snapshot})
+        self.catalog = Catalog(schema, self.metrics, load_concepts(), JoinGraph(schema, profile), load_catalog(),
+                               label_columns(), self.con)
+        self.aliases = {alias.lower(): value for value, names in self.glossary.value_aliases.items()
+                        for alias in names}
+        self._cache: OrderedDict[str, tuple[pd.DataFrame, bool]] = OrderedDict()
+        self._cache_lock = threading.Lock()
         self._llms: dict[str, LLM] = {}
         self._memories: dict[str, Any] = {}          # run_id -> memory scope for that question
         self._checkpoint_context = None
@@ -261,6 +206,20 @@ class Agent:
     def mem(self, state: State):
         return self._memories.get(state["run_id"], self.memory)
 
+    def query(self, sql: str) -> tuple[pd.DataFrame, bool]:
+        """Run verified SQL, cached by (SQL, data snapshot): a repeat question is exact and instant."""
+        key = f"{self.snapshot}|{sql}"
+        with self._cache_lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._cache[key]
+        result = run_query(self.con, sql)
+        with self._cache_lock:
+            self._cache[key] = (result.frame, result.truncated)
+            while len(self._cache) > CACHE_SIZE:
+                self._cache.popitem(last=False)
+        return result.frame, result.truncated
+
     # ------------------------------------------------------------------ nodes
     @step("check_input")
     def check_input(self, state: State) -> dict:
@@ -268,491 +227,147 @@ class Agent:
         if not verdict.ok:
             return {"status": "declined", "message": verdict.reason, "route": "finish", "_status": "blocked",
                     "_detail": {"reason": verdict.reason}}
-        first = "interpret" if self.features.verified else "retrieve"
-        return {"status": "running", "route": first, "attempts": 0, "warnings": [], "feedback": [],
-                "pipeline": "v2" if self.features.verified else "v1"}
+        return {"status": "running", "route": "interpret", "warnings": []}
 
     @step("interpret")
     def interpret(self, state: State) -> dict:
-        """v2: question -> QuerySpec (checked, agreed by independent readings) -> confirmation -> execute."""
-        from .interpret import CANNOT_BUILD, READINGS, Decision, decide, readback
-        from .spec import QuerySpec
-
+        """Question -> spec or template, with every doubt turned into a question and a read-back to confirm."""
         answers, choices = dict(state.get("answers") or {}), dict(state.get("choices") or {})
         rounds = state.get("clarify_rounds", 0)
         pick = choices.pop("reading", None)
-        if pick is not None and state.get("readings"):          # the user chose one of the readings
+        if pick is not None and state.get("readings"):           # the user chose one of the readings
             spec = QuerySpec.model_validate(state["readings"][int(pick)])
             decision = Decision("spec", spec=spec, restated=state.get("restated", state["question"]))
         else:
-            decision = decide(self.llm(state), self.spec_catalog, self.retriever.glossary.terms, self.spec_aliases,
-                              self.data, state["question"], state.get("history", ""), answers,
-                              agreement=get_settings().v2_agreement)
-        detail = {"decision": decision.kind, "readings": decision.readings, "restated": decision.restated}
+            decision = decide(self.llm(state), self.catalog, self.glossary.terms, self.aliases, self.data,
+                              state["question"], state.get("history", ""), answers, self.glossary.ambiguous,
+                              run=lambda sql: self.query(sql)[0], contrast=get_settings().contrast_check,
+                              background=self.mem(state).context(state["question"], as_of=self.data["last_day"]))
+        detail = {"decision": decision.kind, "restated": decision.restated, "reason": decision.reason}
         if decision.kind == "decline":
             return {"status": "declined", "message": decision.reason, "route": "finish", "_status": "declined",
-                    "_detail": {**detail, "decision": "decline", "reason": decision.reason}}
-        if decision.kind == "analysis":                         # multi-step: the exploratory pipeline, labelled
-            return {"trust": "exploratory", "route": "retrieve", "_detail": {**detail, "reason": decision.reason}}
+                    "_detail": {**detail, "decision": "decline"}}
+        if decision.kind == "unanswerable":
+            message = f"I can't answer this as a verified number yet. {decision.reason}"
+            return {"status": "declined", "message": message, "route": "finish", "_detail": detail}
         if decision.kind == "clarify":
             if rounds >= MAX_CLARIFY_ROUNDS:
                 return {"status": "declined", "route": "finish", "open_points": [],
                         "message": "The question is still unclear. Please restate the metric, period and filters; "
                                    "nothing was computed from guessed values."}
-            readings = [r for r in (decision.detail.get("first"), decision.detail.get("second"),
-                                    decision.detail.get("third")) if r and r.get("spec")]
             points = []
             for q in decision.questions:
                 if q.question.startswith(READINGS):
-                    meaning = {o: str(i) for i, o in enumerate(q.options) if o != "None of these"}
-                    points.append(OpenPoint("reading", q.question, q.options, q.default, q.why, meaning,
-                                            required=True))
-                else:                                       # an unbuildable spec is never answered by a default
-                    points.append(OpenPoint(f"llm:{q.question}", q.question, q.options, q.default, q.why,
-                                            required=q.question.startswith(CANNOT_BUILD)))
-            pending = [p for p in points if p.question.strip().lower() not in {a.strip().lower() for a in answers}]
-            if state.get("use_defaults") and not any(p.required for p in pending):
-                for p in pending:
-                    answers[p.question] = p.default
+                    meaning = {o: str(i) for i, o in enumerate(q.options)}
+                    points.append(OpenPoint("reading", q.question, q.options, q.default, q.why, meaning, True))
+                else:
+                    points.append(OpenPoint(f"q:{q.question}", q.question, q.options, q.default, q.why,
+                                            required=decision.required))
+            done = {a.strip().lower() for a in answers}
+            pending = [p for p in points if p.question.strip().lower() not in done]
+            if state.get("use_defaults") and pending and not any(p.required for p in pending):
+                answers.update({p.question: p.default for p in pending})
                 return {"answers": answers, "clarify_rounds": rounds + 1, "route": "interpret",
                         "_detail": {**detail, "defaults": [p.question for p in pending]}}
             return {"open_points": [p.__dict__ for p in pending], "route": "clarify", "_status": "needs_input",
-                    "readings": [r["spec"] for r in readings], "restated": decision.restated,
+                    "readings": [r.model_dump(mode="json") for r in decision.readings],
+                    "restated": decision.restated,
                     "_detail": {**detail, "round": rounds + 1, "questions": [p.question for p in pending]}}
-        spec = decision.spec
-        summary = readback(spec, self.spec_catalog, decision.assumptions)
-        out = {"spec": spec.model_dump(mode="json"), "readback": summary, "restated": decision.restated,
-               "trust": "verified", "open_points": [], "answers": answers, "choices": choices,
-               "_detail": {**detail, "spec": spec.model_dump(mode="json"), "readback": summary}}
+        if decision.kind == "template":
+            _, summary = build_template(decision.template.name, decision.template.params)
+            summary = f"**Analysis:** {summary}" + (f"\n**Assumed:** {'; '.join(decision.assumptions)}"
+                                                     if decision.assumptions else "")
+            out = {"template": decision.template.model_dump(), "spec": None}
+        else:
+            summary = readback(decision.spec, self.catalog, decision.assumptions)
+            out = {"spec": decision.spec.model_dump(mode="json"), "template": None}
+        out.update({"readback": summary, "restated": decision.restated, "notes": decision.assumptions,
+                    "trust": "verified", "open_points": [], "answers": answers, "choices": choices,
+                    "_detail": {**detail, "readback": summary}})
         if not state.get("use_defaults") and not state.get("confirmed"):
             point = OpenPoint("confirm", CONFIRM_QUESTION, [CONFIRM_YES, CONFIRM_NO], CONFIRM_YES,
                               "nothing is computed until you confirm", {CONFIRM_YES: "yes"})
             return {**out, "open_points": [point.__dict__], "route": "clarify", "_status": "needs_input"}
         return {**out, "route": "execute"}
 
-    @step("execute")
-    def execute(self, state: State) -> dict:
-        """v2: compile the confirmed spec (no model writes SQL) and run it."""
-        from .spec import QuerySpec, SpecError, compile_spec
-
-        spec = QuerySpec.model_validate(state["spec"])
-        try:
-            sql = compile_spec(spec, self.spec_catalog)
-            result = run_query(self.con, sql)
-        except (SpecError, Exception) as error:              # noqa: BLE001 - reported, never guessed around
-            return {"status": "failed", "route": "finish", "message": f"The verified query could not run: {error}"}
-        metrics = [m.metric for m in spec.measures if m.metric]
-        plan = agents.AnalysisPlan(decision="proceed", restated_question=state.get("restated") or state["question"],
-                                   metrics=metrics, assumptions=[])
-        return {"sql": sql, "attempts": 1, "plan": plan.model_dump(), "metric_names": metrics,
-                "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"])
-                if self.features.memory else "(memory disabled)",
-                "result": _result(result.frame, result.truncated),
-                "verification": {"status": "verified", "metrics": {m: "verified" for m in metrics},
-                                 "how": "compiled from the semantic layer"},
-                "route": "analyse", "_detail": {"sql": sql, "rows": len(result.frame),
-                                                "query_seconds": round(result.seconds, 2)}}
-
-    @step("retrieve")
-    def retrieve(self, state: State) -> dict:
-        f = self.features
-        query = state["question"]
-        if state.get("history"):
-            query += "\nEarlier chat: " + state["history"]
-        context = self.retriever.retrieve(query, set(state.get("exclude_examples") or []))
-        if not f.retrieval:
-            prompt = "## Tables\n" + self.retriever.schema.describe() + "\n\n## How tables join\n" + "\n".join(
-                f"- {j}" for j in self.retriever.schema.joins)
-            if f.semantic:
-                prompt += "\n\n## Metric definitions (use these exactly)\n" + self.metrics.describe()
-                prompt += "\n\n## Business terms\n" + "\n".join(
-                    f"- {t}: {m}" for t, m in self.retriever.glossary.terms.items())
-            return {"context": prompt, "retrieved": {}, "metric_names": [],
-                    "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"])
-                    if f.memory else "(memory disabled)",
-                    "_detail": {"tables": list(self.retriever.schema.tables), "mode": "full schema"}}
-        retrieved = {"tables": context.tables, "metrics": context.metrics, "joins": context.joins,
-                     "values": [[v.value, v.columns, v.score] for v in context.values],
-                     "examples": [e.id for e in context.examples], "terms": context.terms}
-        return {"context": context.to_prompt(self.retriever.schema, self.metrics), "retrieved": retrieved,
-                "metric_names": context.metrics,
-                "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"])
-                if f.memory else "(memory disabled)",
-                "_detail": {"tables": context.tables, "metrics": context.metrics,
-                            "values": [v.value for v in context.values[:6]],
-                            "examples": [e.question for e in context.examples[:3]]}}
-
-    @step("understand")
-    def understand(self, state: State) -> dict:
-        """What exactly is asked? The LLM reads the question (with every answer so far); code resolves the words
-        to columns and joins and adds what the LLM missed. Anything unclear goes to the user, round after round,
-        until nothing is left (or the safety stop is reached, or the user asked for defaults)."""
-        if not self.features.understand:
-            return {"route": "plan", "_status": "skipped", "_detail": {"reason": "understanding disabled"}}
-        answers, choices = dict(state.get("answers") or {}), dict(state.get("choices") or {})
-        rounds = state.get("clarify_rounds", 0)
-        frame = agents.understand(self.llm(state), state["question"], state["context"], self.data, self.concepts,
-                                  state.get("history", ""), answers)
-        grains = [b for b in frame.breakdowns if b in ("day", "week", "month", "quarter", "year")]
-        if grains:                                         # "month" given as a cut is the date grain
-            frame.time_grain = frame.time_grain or grains[0]
-            frame.breakdowns = [b for b in frame.breakdowns if b not in grains]
-        if frame.decline_reason and frame.decline_category == "raw_dump":
-            # Too many valid lists ("out-of-stock SKUs of active products") look like dumps to this step; the
-            # planner (whose rule allows lists of up to 100 items) and the SQL guardrails decide those.
-            return {"frame": frame.model_dump(), "route": "plan",
-                    "_detail": {"decision": "planner decides", "reason": frame.decline_reason}}
-        if frame.decline_reason:                           # decided first, before the question is resolved
-            return {"status": "declined", "message": frame.decline_reason, "route": "finish", "_status": "declined",
-                    "_detail": {"decision": "decline", "reason": frame.decline_reason}}
-        ids = self.ids.find(state["question"])
-        res = resolve(frame, self.concepts, self.joins, self.value_columns, ids, choices, self.aliases,
-                      self.retriever.glossary.terms, list(answers.values()))
-        for view in res.subjects:                          # "share of reviews that are negative": not a filter
-            for f in list(view.filters):
-                owner = next((m for m in frame.measures if m in self.metrics.metrics and _defines(
-                    self.metrics.metrics[m].numerator, f.column, f.value)), None)
-                if owner:
-                    view.filters.remove(f)
-                    res.notes.append(f"'{f.value}' is the condition of {self.metrics.metrics[owner].label} "
-                                     f"(its numerator), not a filter on all rows")
-        asked = {q.strip().lower() for q in answers}
-        pending = [OpenPoint(f"llm:{q.question}", q.question, q.options, q.default, q.why)
-                   for q in frame.open_points if q.question.strip().lower() not in asked] + \
-                  [p for p in res.open_points if p.key not in choices]
-        warnings = list(state.get("warnings", []))
-        if pending and rounds >= MAX_CLARIFY_ROUNDS:
-            return {"status": "declined", "route": "finish", "open_points": [],
-                    "message": "The question is still unclear. Please restate the metric, period and filters; "
-                               "nothing was computed from guessed values."}
-        if pending and (not state.get("use_defaults") or any(p.required for p in pending)):
-            return {"frame": frame.model_dump(), "open_points": [p.__dict__ for p in pending], "route": "clarify",
-                    "_status": "needs_input",
-                    "_detail": {"round": rounds + 1, "questions": [p.question for p in pending],
-                                "understood": frame.restated_question}}
-        if pending:                                        # defaults: the user asked for them, or the safety stop
-            for p in pending:
-                answers[p.question] = p.default
-                if p.meaning:
-                    choices[p.key] = p.meaning.get(p.default, p.default)
-            return {"answers": answers, "choices": choices, "clarify_rounds": rounds + 1, "route": "understand"}
-        # Refresh RAG after the stakeholder's intent and values are known, including after clarification.
-        if self.features.retrieval:
-            query = " ".join([frame.restated_question, *frame.measures,
-                              *(f"{v.name} {f.text} {f.value}" for v in res.subjects for f in v.filters),
-                              *(c for v in res.subjects for c, _ in v.breakdowns)])
-            context = self.retriever.retrieve(query, set(state.get("exclude_examples") or []))
-            needed = res.tables()
-            for view in res.subjects:
-                needed += [step.right for step in self.joins.path(view.table, [t for t in res.tables()
-                                                                            if t != view.table])]
-            known_metrics = [m for m in frame.measures if m in self.metrics.metrics or m in self.metrics.custom_metrics]
-            for metric in known_metrics:
-                needed += self.retriever._metric_tables(metric)
-            context.tables = list(dict.fromkeys([*needed, *context.tables]))
-            context.metrics = list(dict.fromkeys([*known_metrics, *context.metrics]))
-            context.joins = [j for j in self.retriever.schema.joins
-                             if all(side.strip().split(".")[0] in context.tables for side in j.split("="))]
-            refreshed = {"context": context.to_prompt(self.retriever.schema, self.metrics),
-                         "retrieved": {"tables": context.tables, "metrics": context.metrics, "joins": context.joins,
-                                       "values": [[v.value, v.columns, v.score] for v in context.values],
-                                       "examples": [e.id for e in context.examples], "terms": context.terms},
-                         "metric_names": context.metrics}
-        else:
-            refreshed = {}
-        text = res.to_prompt(period=frame.period, time_grain=frame.time_grain)
-        used_terms = self.retriever.glossary.terms_in(state["question"])
-        if text and used_terms:                            # definitions the question relies on are binding, not hints
-            text += "\n\nBusiness terms in this question (apply each definition):\n" + "\n".join(
-                f"- {t}: {m}" for t, m in used_terms.items())
-        filters = [[f.column, f.value] for v in res.subjects for f in v.filters if not f.expression] + \
-                  [[i.column, i.value] for v in res.subjects for i in v.id_filters]
-        columns = {c for v in res.subjects for c in [v.time_column, *(c for _, c in v.breakdowns),
-                                                    *(f.column for f in v.filters)]}
-        wanted = set(frame.measures) | set(state.get("metric_names") or [])
-        shown = set((state.get("retrieved") or {}).get("examples") or [])
-        refs = self.references.pick(set(res.tables()), columns, wanted,
-                                    exclude=set(state.get("exclude_examples") or []) | shown)
-        scope = None
-        if len(res.subjects) == 1:                         # one subject: its metrics can be recomputed for the scope
-            v = res.subjects[0]
-            dates = re.findall(r"\d{4}-\d{2}-\d{2}", frame.period or "")
-            period_valid = frame.period.strip().lower() == "all data"
-            if len(dates) == 2:
-                try:
-                    period_valid = date.fromisoformat(dates[0]) <= date.fromisoformat(dates[1])
-                except ValueError:
-                    period_valid = False
-            by = v.breakdown_sql()
-            if frame.time_grain:                           # a date split is part of the grain the check recomputes
-                by[frame.time_grain] = f"date_trunc('{frame.time_grain}', {v.time_column})"
-            scope = {"table": v.table, "metrics": [m for m in frame.measures if m in self.metrics.metrics],
-                     "by": by,
-                     "filters": [[f.column, f.value] for f in v.filters if not f.expression]
-                     + [[i.column, i.value] for i in v.id_filters],
-                     "conditions": [f.sql() for f in v.filters if f.expression],
-                     "period": dates if len(dates) == 2 else None, "time": v.time_column,
-                     "supported": period_valid and not frame.comparison and not v.own_joins,
-                     "ranking": frame.ranking,
-                     "limit": (frame.row_limit or 10) if frame.ranking else None}
-        out = {**refreshed, "frame": frame.model_dump(), "understanding": text, "understood_tables": res.tables(),
-               "verify_scope": scope,
-               "resolved_filters": filters, "references": self.references.render(refs),
-               "answers": answers, "choices": choices, "open_points": [], "warnings": warnings, "route": "plan"}
-        detail = {"understood": frame.restated_question, "rounds": rounds, "subjects": [v.name for v in res.subjects],
-                  "notes": res.notes, "resolved": text, "references": [e.id for e in refs], "verify_scope": scope}
-        # read back what will be computed and wait for the user's confirmation (defaults: confirmed automatically)
-        if not state.get("use_defaults") and not state.get("confirmed") and res.subjects:
-            if rounds < MAX_CLARIFY_ROUNDS:
-                point = OpenPoint("confirm", CONFIRM_QUESTION, [CONFIRM_YES, CONFIRM_NO], CONFIRM_YES,
-                                  "nothing is computed until you confirm", {CONFIRM_YES: "yes"})
-                summary = readback(frame, res, self.concepts, self.metrics)
-                return {**out, "open_points": [point.__dict__], "readback": summary, "route": "clarify",
-                        "_status": "needs_input", "_detail": {**detail, "round": rounds + 1, "readback": summary}}
-            return {**out, "status": "declined", "route": "finish",
-                    "message": "The clarification limit was reached before confirmation. Please restate the question."}
-        return {**out, "_detail": detail}
-
-    @step("plan")
-    def plan(self, state: State) -> dict:
-        if not self.features.planner:                      # ablation: no planning, question goes to the writer
-            plan = agents.AnalysisPlan(decision="proceed", restated_question=state["question"])
-            return {"plan": plan.model_dump(), "route": "write_sql", "_detail": {"decision": "skipped"}}
-        result = agents.plan(self.llm(state), state["question"], state["context"], state["memory"], self.data,
-                             state.get("history", ""), state.get("answers"), state.get("use_defaults", False),
-                             state.get("understanding", ""))
-        detail = {"decision": result.decision, "plan": agents.plan_text(result)}
-        if result.decision == "decline":
-            return {"plan": result.model_dump(), "status": "declined", "route": "finish", "_detail": detail,
-                    "message": result.decline_reason or "This question can't be answered from the shop's data."}
-        if result.decision == "clarify" and result.clarifying_questions:
-            if state.get("clarify_rounds", 0) >= MAX_CLARIFY_ROUNDS:
-                return {"status": "declined", "route": "finish",
-                        "message": "The analysis still needs clarification; no query was executed."}
-            return {"plan": result.model_dump(), "route": "clarify", "_status": "needs_input", "_detail": detail}
-        return {"plan": result.model_dump(), "route": "write_sql", "_detail": detail}
-
     def clarify(self, state: State) -> dict:
-        """Pause for the user's answers, then go back to wherever the questions came from."""
-        if state.get("open_points"):                                        # from the understanding step
-            points = [OpenPoint(**p) for p in state["open_points"]]
-            questions = [p.public() for p in points]
-        else:                                                               # planner (understanding disabled)
-            points, questions = [], state["plan"]["clarifying_questions"]
+        """Pause for the user's answers (or confirmation), then go back to interpret or on to execute."""
+        points = [OpenPoint(**p) for p in state.get("open_points") or []]
+        questions = [p.public() for p in points]
         rounds = state.get("clarify_rounds", 0) + 1
         confirming = any(p.key == "confirm" for p in points)
         payload = {"type": "clarify", "kind": "confirm" if confirming else "clarify", "questions": questions,
                    "round": rounds}
         if confirming:
-            payload["readback"] = state.get("readback", "")
+            payload.update(readback=state.get("readback", ""), spec=state.get("spec"), template=state.get("template"))
         given = interrupt(payload)                                          # pauses the run here
         if not isinstance(given, dict) or not given:                        # "just use defaults"
             given = {q["question"]: q["default"] for q in questions}
         if confirming:
             answer = (given.get(CONFIRM_QUESTION) or CONFIRM_YES).strip()
-            if answer == CONFIRM_YES:                                       # confirmed: plan with what was resolved
-                return {"confirmed": True, "clarify_rounds": rounds, "open_points": [], "status": "running",
-                        "route": "execute" if state.get("pipeline") == "v2" and state.get("spec") else "plan"}
+            if answer == CONFIRM_YES:
+                return {"confirmed": True, "clarify_rounds": rounds, "open_points": [], "route": "execute"}
             correction = "The user wants something changed but did not say what: ask what to change" \
                 if answer == CONFIRM_NO else answer
-            answers = {**(state.get("answers") or {}), CORRECTION: correction}
-            return {"answers": answers, "confirmed": False, "clarify_rounds": rounds, "open_points": [],
-                    "status": "running", "route": "interpret" if state.get("pipeline") == "v2" else "understand"}
-        answers = {**(state.get("answers") or {}), **given}
-        choices = dict(state.get("choices") or {})
+            return {"answers": {**(state.get("answers") or {}), CORRECTION: correction}, "confirmed": False,
+                    "clarify_rounds": rounds, "open_points": [], "spec": None, "template": None, "route": "interpret"}
+        answers, choices = {**(state.get("answers") or {}), **given}, dict(state.get("choices") or {})
         for p in points:
             answer = given.get(p.question, p.default)
-            if p.meaning and answer in p.meaning:                           # a choice code can act on
+            if p.meaning and answer in p.meaning:
                 choices[p.key] = p.meaning[answer]
-        back = "interpret" if state.get("pipeline") == "v2" and state.get("trust") != "exploratory" else \
-            "understand" if self.features.understand else "plan"
         return {"answers": answers, "choices": choices, "clarify_rounds": rounds, "open_points": [],
-                "confirmed": False, "status": "running", "route": back}
+                "confirmed": False, "route": "interpret"}
 
-    def narrowed_context(self, state: State, plan: agents.AnalysisPlan) -> tuple[str, list[str]]:
-        """Context limited to the plan's source tables (less distraction for the SQL writer).
-        Falls back to the full context when the plan names no valid tables."""
-        from .retrieval import Context, Value
-
-        r = state.get("retrieved") or {}
-        tables = [t for t in dict.fromkeys(plan.source_tables + list(state.get("understood_tables") or []))
-                  if t in self.retriever.schema.tables]
-        if not r or not tables:
-            return state["context"], list(r.get("tables", []))
-        keep = set(tables)
-        joins = [j for j in self.retriever.schema.joins
-                 if all(side.strip().split(".")[0] in keep for side in j.split("="))]
-        values = [Value(v, [c for c in cols if c.split(".")[0] in keep], sc) for v, cols, sc in r["values"]]
-        examples = [self.retriever.examples[i] for i in r["examples"] if i in self.retriever.examples]
-        examples = [e for e in examples if tables_in(e.sql) & keep] or examples[:1]
-        ctx = Context(state["question"], tables, r["metrics"], examples, [v for v in values if v.columns], joins,
-                      r.get("terms", {}))
-        return ctx.to_prompt(self.retriever.schema, self.metrics), tables
-
-    @step("write_sql")
-    def write_sql(self, state: State) -> dict:
-        plan = agents.AnalysisPlan.model_validate(state["plan"])
-        if (get_settings().enable_sql_compiler and self.features.understand
-                and not state.get("attempts") and state.get("verify_scope")):
-            from .sql_compiler import compile_standard
-
-            compiled = compile_standard(state["verify_scope"], self.joins)
-            if compiled is not None:
-                return {"sql": compiled, "explanation": "Deterministic metric SQL from the semantic layer",
-                        "attempts": 1, "feedback": [],
-                        "_detail": {"attempt": 1, "sql": compiled,
-                                    "explanation": "Compiled without an LLM; metric and joins are code-defined.",
-                                    "context_tables": state.get("understood_tables") or []}}
-        first = state.get("attempts", 0) == 0 and self.features.narrow
-        # first attempt: only the plan's tables; retries get the full context so recovery stays possible
-        context, tables = self.narrowed_context(state, plan) if first else (
-            state["context"], list((state.get("retrieved") or {}).get("tables", [])))
-        draft = agents.write_sql(self.llm(state), state["question"], plan, context,
-                                 state.get("feedback") or None, state.get("sql"), state.get("understanding", ""),
-                                 state.get("references", ""))
-        attempt = state.get("attempts", 0) + 1
-        return {"sql": draft.sql.strip().rstrip(";"), "explanation": draft.explanation, "attempts": attempt,
-                "feedback": [], "_detail": {"attempt": attempt, "sql": draft.sql.strip(),
-                                            "explanation": draft.explanation, "context_tables": tables}}
-
-    def _retry_or_fail(self, state: State, problems: list[str], step_name: str) -> dict:
-        if state.get("attempts", 0) < get_settings().max_sql_attempts:
-            return {"feedback": problems, "route": "write_sql", "_status": "retry", "_detail": {"problems": problems}}
-        return {"status": "failed", "route": "finish", "_status": "failed", "_detail": {"problems": problems},
-                "message": f"Could not produce a valid query after {state.get('attempts', 0)} attempts "
-                           f"({step_name}): " + "; ".join(problems)}
-
-    @step("check_sql")
-    def check_sql(self, state: State) -> dict:
-        if not (state.get("sql") or "").strip():          # the writer declined or ran out of room: say so
-            reason = (state.get("explanation") or "").strip()[:300] or "no reason given"
-            return self._retry_or_fail(state, [
-                f"No SQL was returned (writer's note: {reason}). Return exactly one SELECT statement in the "
-                "sql field. Aggregates by region, city or tier, and questions about email or SMS campaigns, "
-                "are allowed; only the hidden personal columns are unavailable."], "safety checks")
-        verdict = check_sql(state["sql"])
-        if not verdict.ok:
-            return self._retry_or_fail(state, verdict.errors, "safety checks")
-        merged = label_grain_problems(verdict.sql)          # names several IDs share must not be the grain
-        if merged:
-            return self._retry_or_fail(state, merged, "safety checks")
-        return {"sql": verdict.sql, "route": "run_query", "_detail": {"tables": sorted(verdict.tables)}}
-
-    @step("run_query")
-    def run_query(self, state: State) -> dict:
-        if self.snapshot and snapshot_signature() != self.snapshot:
-            return {"status": "failed", "route": "finish",
-                    "message": "The data was refreshed while this question was open. Please ask again against "
-                               "the new snapshot; the old interpretation was not executed."}
+    @step("execute")
+    def execute(self, state: State) -> dict:
+        """Compile the confirmed spec (or build the template) and run it. No model writes this SQL."""
         try:
-            result = run_query(self.con, state["sql"])
-        except QueryTimeout as error:
-            return self._retry_or_fail(state, [f"{error}. Simplify the query or aggregate earlier."], "database")
-        except Exception as error:                                          # DuckDB error: let the writer fix it
-            return self._retry_or_fail(state, [f"Database error: {str(error).splitlines()[0][:300]}"], "database")
-        # code checks first (filters used, no repeated rows, no empty columns, rates within 0-100%); 0 rows is not
-        # automatically wrong (e.g. no orders before launch): the validator decides
-        problems = result_problems(result.frame, state["sql"], [tuple(f) for f in state.get("resolved_filters") or []])
-        if problems:
-            return self._retry_or_fail(state, problems, "result checks")
-        state_warnings = state.get("warnings", [])
-        verification = self.verify_numbers(state, result.frame)
-        if verification["status"] == "mismatch":
-            return self._retry_or_fail(state, verification["problems"], "number check")
-        return {"result": _result(result.frame, result.truncated), "warnings": state_warnings,
-                "verification": {k: v for k, v in verification.items() if k != "problems"},
-                "route": "validate" if self.features.validator else "analyse",
-                "_detail": {"rows": len(result.frame), "columns": list(result.frame.columns),
-                            "query_seconds": round(result.seconds, 2), "truncated": result.truncated}}
-
-    def verify_numbers(self, state: State, frame: pd.DataFrame) -> dict:
-        """Recompute each confirmed metric from metrics.yaml for the confirmed scope and compare (recompute.py)."""
-        scope = state.get("verify_scope")
-        if not self.features.understand or not scope or not scope.get("metrics") or not scope.get("supported", True):
-            return {"status": "unverified", "metrics": {}, "problems": []}
-        allowed = {c.split(".")[-1].lower() for c in [scope["time"], *(f[0] for f in scope["filters"])]}
-        allowed |= {c.name.lower() for cond in scope.get("conditions") or []
-                    for c in sqlglot.parse_one(f"SELECT 1 WHERE {cond}", read="duckdb").find_all(exp.Column)}
-        allowed |= {"line_type"}                               # the sales source's own filter (sale lines)
-        extra = extra_filter_columns(state["sql"], allowed)
-        if extra:                                              # the query's population is not the confirmed scope
-            return {"status": "unverified", "metrics": {m: "unverified" for m in scope["metrics"]}, "problems": [],
-                    "reason": f"the query also filters on {', '.join(sorted(extra))}"}
-        statuses, problems = {}, []
-        grain = (state.get("frame") or {}).get("time_grain")
-        if grain and grain in scope["by"] and grain not in frame:   # the date column under another name
-            dated = [c for c in frame.columns if pd.api.types.is_datetime64_any_dtype(frame[c]) or grain in c.lower()]
-            if len(dated) == 1:
-                frame = frame.rename(columns={dated[0]: grain})
-        for metric in scope["metrics"]:
-            m = self.metrics.metrics[metric]
-            if self.metrics.sources[m.source].from_.split()[0] != scope["table"]:
-                statuses[metric] = "unverified"                # another subject's metric: not this scope
-                continue
-            period = tuple(scope["period"]) if scope.get("period") else None
-            sql = canonical_sql(metric, self.joins, by=scope["by"], filters=[tuple(f) for f in scope["filters"]],
-                                period=period, time_column=scope["time"], conditions=scope.get("conditions"))
-            if sql is None:
-                statuses[metric] = "unverified"
-                continue
-            try:
-                canonical = run_query(self.con, sql, max_rows=100_000).frame
-            except Exception:                                    # never fail an answer because a check failed
-                statuses[metric] = "unverified"
-                continue
-            status, found = check_answer(frame, canonical, list(scope["by"]), ratio=m.unit == "ratio", column=metric,
-                                         limit=scope.get("limit"), ranking=scope.get("ranking"))
-            statuses[metric] = status
-            problems += [f"{m.label}: {p}" for p in found]
-        values = set(statuses.values())
-        overall = "mismatch" if "mismatch" in values else "verified" if values == {"verified"} else "unverified"
-        return {"status": overall, "metrics": statuses, "problems": problems}
-
-    @step("validate")
-    def validate(self, state: State) -> dict:
-        plan = agents.AnalysisPlan.model_validate(state["plan"])
-        verdict = agents.validate(self.llm(state), state["question"], plan, state["sql"], _frame(state["result"]),
-                                  self.metrics.describe(state.get("metric_names") or None),
-                                  state.get("understanding", ""))
-        if verdict.ok:
-            return {"route": "analyse", "_detail": {"ok": True}}
-        if state.get("attempts", 0) < get_settings().max_sql_attempts:
-            return {"feedback": verdict.problems, "route": "write_sql", "_status": "retry",
-                    "_detail": {"ok": False, "problems": verdict.problems}}
-        return self._retry_or_fail(state, verdict.problems, "reviewer")
+            if state.get("template"):
+                call = TemplateCall.model_validate(state["template"])
+                sql, _ = build_template(call.name, call.params)
+                metrics: list[str] = []
+            else:
+                spec = QuerySpec.model_validate(state["spec"])
+                sql = compile_spec(spec, self.catalog)
+                metrics = [m.metric for m in spec.measures if m.metric]
+            if not check_sql(sql).ok:                                       # defence in depth: same safety rules
+                raise SpecError("the verified query failed the safety checks")
+            started = time.perf_counter()
+            frame, truncated = self.query(sql)
+        except (SpecError, TemplateError) as error:
+            return {"status": "failed", "route": "finish", "message": f"The verified query could not be built: {error}"}
+        return {"sql": sql, "metric_names": metrics, "result": _result(frame, truncated),
+                "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"]),
+                "verification": {"status": "verified", "how": "compiled from the governed definitions"},
+                "route": "analyse",
+                "_detail": {"sql": sql, "rows": len(frame), "columns": list(frame.columns), "truncated": truncated,
+                            "query_seconds": round(time.perf_counter() - started, 2)}}
 
     @step("analyse")
     def analyse(self, state: State) -> dict:
-        plan = agents.AnalysisPlan.model_validate(state["plan"])
         frame = _frame(state["result"])
-        notes = "\n".join(f"- {n}: {self.metrics.metrics[n].notes}" for n in plan.metrics
-                          if n in self.metrics.metrics and self.metrics.metrics[n].notes)
-        args = (self.llm(state), state["question"], plan, state["sql"], frame, state["memory"], notes, self.data)
-        concerns = list(state.get("warnings", []))
-        if (state.get("verification") or {}).get("status") != "verified":
-            concerns.append("These metrics could not be independently verified against the confirmed scope.")
+        notes = "\n".join(f"- {n}: {self.metrics.metrics[n].notes}" for n in state.get("metric_names") or []
+                          if self.metrics.metrics[n].notes)
+        facts = list(state.get("notes") or [])
         if state["result"].get("truncated"):
-            concerns.append("The result is truncated; do not treat partial rows as the complete population.")
-        analysis = agents.analyse(*args, concerns=concerns)
+            facts.append("The result is truncated; do not treat partial rows as the complete population.")
+        args = (self.llm(state), state["question"], state.get("readback", ""), state["sql"], frame, state["memory"],
+                notes, self.data)
+        analysis = agents.analyse(*args, concerns=facts)
         check = verify(frame, analysis.claims, analysis.texts())
-        rewrote = False
-        if not check.ok:                                   # one rewrite with the exact problems
-            analysis = agents.analyse(*args, fix_numbers=check.problems, concerns=concerns)
-            rewrote = True
+        rewrote = not check.ok
+        if rewrote:                                                         # one rewrite with the exact problems
+            analysis = agents.analyse(*args, fix_numbers=check.problems, concerns=facts)
             check = verify(frame, analysis.claims, analysis.texts())
-        warnings = list(state.get("warnings", []))
-        if not check.ok and state.get("pipeline") == "v2":
-            # a number that cannot be checked is removed from the text; the verified table still answers
+        if not check.ok:                     # an uncheckable sentence is removed; the verified table still answers
             analysis = drop_unverified(analysis, check.problems)
             check = verify(frame, analysis.claims, analysis.texts())
-        if not check.ok:
-            warnings.append("Unverified claims: " + "; ".join(check.problems[:6]))
         shown = analysis.rendered()
-        return {"analysis": shown.model_dump(), "grounded": check.ok, "warnings": warnings,
-                "route": "chart" if check.ok else "finish", "status": "running" if check.ok else "failed",
-                "message": None if check.ok else "The answer's claims could not be verified after a rewrite.",
-                "_detail": {"headline": shown.headline, "number_check": "passed" if check.ok else "unverified",
-                            "claims": check.checked, "rewritten": rewrote, "unverified": check.problems[:6]}}
+        warnings = [*state.get("warnings", []), *facts]
+        return {"analysis": shown.model_dump(), "grounded": check.ok, "warnings": warnings, "route": "chart",
+                "_detail": {"headline": shown.headline, "number_check": "passed" if check.ok else "removed",
+                            "claims": check.checked, "rewritten": rewrote}}
 
     @step("chart")
     def chart(self, state: State) -> dict:
@@ -764,28 +379,17 @@ class Agent:
     @step("remember")
     def remember(self, state: State) -> dict:
         a = state["analysis"]
-        memory = self.mem(state)
         if self.snapshot and snapshot_signature() != self.snapshot:
             return {"insight_id": None, "status": "failed",
                     "message": "The data changed during analysis. Please ask again; no insight was saved."}
-        if not self.features.memory:
+        if state.get("grounded") is not True or (state.get("result") or {}).get("truncated"):
             return {"insight_id": None, "status": "done", "_status": "skipped",
-                    "_detail": {"saved": False, "reason": "memory disabled"}}
-        if self.features.understand and (state.get("verification") or {}).get("status") != "verified":
-            return {"insight_id": None, "status": "done", "_status": "skipped",
-                    "_detail": {"saved": False, "reason": "not independently verified; not saved to memory"}}
-        concerns = [w for w in state.get("warnings", []) if w.startswith(
-            ("Reviewer concern", "Result check", "Numbers not confirmed"))]
-        if (state.get("verification") or {}).get("status") == "mismatch":
-            concerns.append("canonical metric mismatch")
-        if (state.get("result") or {}).get("truncated"):
-            concerns.append("truncated result")
-        if concerns or state.get("grounded") is not True:
-            reason = "validator raised concerns" if concerns else "claims did not verify"
-            return {"insight_id": None, "status": "done", "_status": "skipped",
-                    "_detail": {"saved": False, "reason": f"not saved to memory: {reason}"}}
-        item = memory.save_insight(question=state["question"], plan=state["plan"], sql=state["sql"],
-                                   analysis=a, data_as_of=self.data["last_day"], chat_id=state.get("chat_id"))
+                    "_detail": {"saved": False, "reason": "not saved: the summary or result is incomplete"}}
+        memory = self.mem(state)
+        plan = {"reading": state.get("readback"), "spec": state.get("spec"), "template": state.get("template"),
+                "metrics": state.get("metric_names") or []}
+        item = memory.save_insight(question=state["question"], plan=plan, sql=state["sql"], analysis=a,
+                                   data_as_of=self.data["last_day"], chat_id=state.get("chat_id"))
         closed = memory.close_gaps(a.get("explains_gap_ids", []), item["id"], self.data["last_day"])
         return {"insight_id": item["id"], "status": "done",
                 "_detail": {"facts": len(a.get("memory", [])), "gaps_closed": closed}}
@@ -796,38 +400,29 @@ class Agent:
     # ------------------------------------------------------------------ graph
     def _build(self) -> StateGraph:
         g = StateGraph(State)
-        for name in ["check_input", "interpret", "execute", "retrieve", "understand", "plan", "clarify", "write_sql",
-                     "check_sql", "run_query", "validate", "analyse", "chart", "remember", "finish"]:
+        for name in ["check_input", "interpret", "clarify", "execute", "analyse", "chart", "remember", "finish"]:
             g.add_node(name, getattr(self, name))
-        g.add_edge(START, "check_input")
         route = lambda s: s["route"]                                       # noqa: E731
-        g.add_conditional_edges("check_input", route, ["interpret", "retrieve", "finish"])
-        g.add_conditional_edges("interpret", route, ["clarify", "execute", "interpret", "retrieve", "finish"])
+        g.add_edge(START, "check_input")
+        g.add_conditional_edges("check_input", route, ["interpret", "finish"])
+        g.add_conditional_edges("interpret", route, ["clarify", "execute", "interpret", "finish"])
+        g.add_conditional_edges("clarify", route, ["interpret", "execute"])
         g.add_conditional_edges("execute", route, ["analyse", "finish"])
-        g.add_edge("retrieve", "understand")
-        g.add_conditional_edges("understand", route, ["clarify", "plan", "understand", "finish"])
-        g.add_conditional_edges("plan", route, ["clarify", "write_sql", "finish"])
-        g.add_conditional_edges("clarify", route, ["understand", "plan", "interpret", "execute"])
-        g.add_edge("write_sql", "check_sql")
-        for name in ["check_sql", "run_query"]:
-            g.add_conditional_edges(name, route, ["write_sql", "run_query", "validate", "analyse", "finish"])
-        g.add_conditional_edges("validate", route, ["write_sql", "analyse", "finish"])
-        g.add_conditional_edges("analyse", route, ["chart", "finish"])
+        g.add_edge("analyse", "chart")
         g.add_edge("chart", "remember")
         g.add_edge("remember", "finish")
         g.add_edge("finish", END)
         return g
 
     # ------------------------------------------------------------------ running
-    def start(self, question: str, chat_id: str | None = None, history: str = "",
-              use_defaults: bool = False, memory: Any = None,
-              exclude_examples: list[str] | None = None) -> tuple[str, Iterator[dict]]:
+    def start(self, question: str, chat_id: str | None = None, history: str = "", use_defaults: bool = False,
+              memory: Any = None) -> tuple[str, Iterator[dict]]:
         """memory: a scope with context(), save_insight() and close_gaps(); defaults to the file memory."""
         run_id = uuid.uuid4().hex[:12]
         if memory is not None:
             self._memories[run_id] = memory
         state = {"run_id": run_id, "chat_id": chat_id, "question": question, "history": history,
-                 "use_defaults": use_defaults, "exclude_examples": list(exclude_examples or [])}
+                 "use_defaults": use_defaults}
         return run_id, self._stream(run_id, state)
 
     def resume(self, run_id: str, answers: dict[str, str] | None) -> Iterator[dict]:
@@ -845,8 +440,7 @@ class Agent:
                            "cost": llm.tracker.summary() if llm else None}
                     return
         except BudgetExceeded as error:
-            final = self.final(run_id)
-            yield {**final, "status": "failed", "message": str(error)}
+            yield {**self.final(run_id), "status": "failed", "message": str(error)}
             return
         except Exception:
             self._llms.pop(run_id, None)
@@ -859,49 +453,30 @@ class Agent:
         llm = self._llms.pop(run_id, None)
         self._memories.pop(run_id, None)
         return {"type": "final", "run_id": run_id, "status": state.get("status"), "message": state.get("message"),
-                "question": state.get("question"), "plan": state.get("plan"), "sql": state.get("sql"),
+                "question": state.get("question"), "restated": state.get("restated"),
+                "readback": state.get("readback"), "spec": state.get("spec"),
+                "template": state.get("template"), "trust": state.get("trust"), "sql": state.get("sql"),
                 "result": state.get("result"), "analysis": state.get("analysis"), "chart": state.get("chart"),
                 "warnings": state.get("warnings", []), "insight_id": state.get("insight_id"),
                 "grounded": state.get("grounded"), "verification": state.get("verification"),
-                "attempts": state.get("attempts"), "data_as_of": self.data["last_day"],
-                "data_size": self.data["size"], "cost": llm.tracker.summary() if llm else None,
-                "trust": state.get("trust"), "spec": state.get("spec"),
+                "data_as_of": self.data["last_day"], "data_size": self.data["size"],
+                "cost": llm.tracker.summary() if llm else None,
                 "calls": [c.__dict__ for c in llm.tracker.calls] if llm else []}
 
 
+def spec_key(spec: dict | None) -> str | None:
+    """What a spec computes, for comparing with an intended spec (evaluation)."""
+    return canonical(QuerySpec.model_validate(spec)) if spec else None
+
+
 # ----------------------------------------------------------------------------- command line
-def _print_event(event: dict) -> None:
-    if event.get("type") != "step":
-        return
-    detail = event.get("detail", {})
-    mark = {"started": "…", "done": "✓", "retry": "↻", "failed": "✗", "warning": "!", "blocked": "✗",
-            "needs_input": "?"}.get(event["status"], "·")
-    if event["status"] == "started":
-        return
-    extra = ""
-    if event["step"] == "retrieve":
-        extra = f" tables={detail.get('tables')} values={detail.get('values')}"
-    elif event["step"] == "understand":
-        extra = f" {detail.get('understood', '')}" + (f"\n    asking: {detail['questions']}" if detail.get("questions")
-                                                     else "")
-    elif event["step"] == "plan":
-        extra = "\n    " + detail.get("plan", "").replace("\n", "\n    ")
-    elif event["step"] == "write_sql":
-        extra = f" (attempt {detail.get('attempt')})\n    " + detail.get("sql", "").replace("\n", "\n    ")
-    elif detail.get("problems"):
-        extra = " " + "; ".join(detail["problems"])
-    elif event["step"] == "run_query":
-        extra = f" {detail.get('rows')} rows"
-    print(f"  {mark} {event['step']} {detail.get('seconds', '')}s{extra}")
-
-
 def main() -> None:
     """pantree-ask [--defaults] "question": ask the agent from the terminal."""
     import argparse
 
     parser = argparse.ArgumentParser(prog="pantree-ask")
     parser.add_argument("question", nargs="+")
-    parser.add_argument("--defaults", action="store_true", help="never ask clarifying questions")
+    parser.add_argument("--defaults", action="store_true", help="answer questions with their defaults")
     args = parser.parse_args()
     question = " ".join(args.question)
     agent = Agent()
@@ -910,17 +485,16 @@ def main() -> None:
     while True:
         final = None
         for event in events:
-            _print_event(event)
+            if event.get("type") == "step" and event["status"] != "started":
+                print(f"  · {event['step']} {event['status']} {event.get('detail', {}).get('seconds', '')}s")
             if event["type"] in ("clarify", "final"):
                 final = event
         if final and final["type"] == "clarify":
-            answers = {}
             if final.get("readback"):
                 print("\nHere's what I'll compute:\n  " + final["readback"].replace("**", "").replace("\n", "\n  "))
-            print(f"\nQuestions, round {final.get('round', 1)} (press Enter for the default, or type your own answer):")
+            answers = {}
             for q in final["questions"]:
-                options = " / ".join(q["options"])
-                answer = input(f"  {q['question']} [{options}] (default: {q['default']}): ").strip()
+                answer = input(f"  {q['question']} [{' / '.join(q['options'])}] (default: {q['default']}): ").strip()
                 answers[q["question"]] = answer or q["default"]
             events = agent.resume(run_id, answers)
             continue
@@ -929,18 +503,5 @@ def main() -> None:
         print(f"\n{final['status'].upper()}: {final.get('message')}")
         return
     a = final["analysis"]
-    print(f"\n{a['headline']}\n")
-    for f in a["findings"]:
-        print(f"  • {f}")
-    if a.get("recommendations"):
-        print("\nRecommendations:")
-        for r in a["recommendations"]:
-            print(f"  → {r}")
-    if a.get("caveats") or final["warnings"]:
-        print("\nCaveats:")
-        for c in a.get("caveats", []) + final["warnings"]:
-            print(f"  ! {c}")
-    cost = final.get("cost") or {}
-    print(f"\nChart: {(final.get('chart') or {}).get('kind')} | data as of {final['data_as_of']} | "
-          f"{cost.get('calls')} LLM calls, {cost.get('input')} in / {cost.get('output')} out tokens, "
-          f"${cost.get('usd', 0):.4f}")
+    print(f"\n{a['headline']}\n" + "".join(f"  • {f}\n" for f in a["findings"]))
+    print(f"SQL (verified):\n{final['sql']}")

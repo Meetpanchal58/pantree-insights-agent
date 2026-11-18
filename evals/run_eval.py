@@ -1,19 +1,20 @@
-"""End-to-end evaluation of the agent (paid: real LLM calls) and free checks.
+"""End-to-end evaluation (paid: real model calls) with a simulated stakeholder, plus free checks.
 
-    uv run python evals/run_eval.py --dry-run                                   # free: gold SQL + suite files
-    uv run python evals/run_eval.py --suite holdout                             # prints the cost estimate
-    uv run python evals/run_eval.py --suite holdout --repeats 5 --yes           # paid
-    uv run python evals/run_eval.py --suite holdout --variant baseline --repeats 3 --yes
-    uv run python evals/run_eval.py --rescore evals/reports/<file>.json          # free re-score of a saved run
+    uv run python evals/run_eval.py --suite all --dry-run          # free: gold SQL and suite files
+    uv run python evals/run_eval.py --suite all                    # prints the cost estimate
+    uv run python evals/run_eval.py --suite all --yes --max-cost-usd 4
+    uv run python evals/run_eval.py --rescore evals/reports/<file>.json
 
-Suites
-  regression  semantic/examples.yaml (each question's own example hidden from retrieval) + evals/questions.yaml
-  holdout     evals/holdout.yaml + evals/holdout_external.yaml + evals/behaviour.yaml, plus an over-asking
-              pass: every clear answer question run once more without defaults (set "overask")
+Suites: regression (evals/regression.yaml + questions.yaml), holdout (holdout.yaml + behaviour.yaml + an
+over-asking pass), coverage (coverage.yaml), flow (flow_regression.yaml; follow-ups with chat history).
 
-Per row: result_correct (dimension-aware table match, evals/scoring.py), answer_correct (result correct, the
-answer's claims verified in the app AND re-verified against the gold result), decline_layer (input_guard or
-planner), failure_type. Reports give mean, 95% bootstrap CI over questions and pass^k (evals/stats.py).
+Answer questions are run the way a real user works: every clarifying question and the read-back go to a
+simulated stakeholder who knows the question's intent (its gold spec, evals/gold_specs.yaml). It confirms a
+read-back only if it computes the intended thing, otherwise it says what it wants instead; it never helps beyond
+what a user would say. The stakeholder exists only here; in production the user plays this role.
+
+Measures (docs/ARCHITECTURE.md): verified answers equal to the gold (gate: 100%), silent wrong answers (gate: 0),
+first reading correct, questions per answer, and the behaviour sets (declines, vague questions, over-asking).
 """
 from __future__ import annotations
 
@@ -44,45 +45,41 @@ from stats import fmt, summarize  # noqa: E402
 
 from pantree_insights.config import get_settings  # noqa: E402
 from pantree_insights.db import connect, manifest, run_query  # noqa: E402
-from pantree_insights.grounding import Claim, KeyValue, verify  # noqa: E402
 from pantree_insights.guardrails import check_sql  # noqa: E402
-from pantree_insights.semantic import load_examples  # noqa: E402
 
-COST_PER_QUESTION = 0.013      # measured mean on the full-shop holdout with gpt-6.1-terra (Nov 15 2026)
-NO_DEFAULTS = {"clarify", "overask"}
+COST_PER_QUESTION = 0.012      # measured on the Nov 18 v2 run (prompt-cached interpreter + analyst)
 FULL_LIST = re.compile(r"\b(each|every|per)\b", re.I)
+MAX_TURNS = 5                  # stakeholder answers per question before giving up
 
 
-def _yaml(name: str) -> list[dict]:
-    return yaml.safe_load((ROOT / "evals" / name).read_text())["questions"] or []
+def _yaml(name: str, key: str = "questions") -> list[dict]:
+    return yaml.safe_load((ROOT / "evals" / name).read_text())[key] or []
 
 
 def load_suite(suite: str) -> list[dict]:
     items: list[dict] = []
     if suite in ("regression", "all"):
-        for e in load_examples().examples:
-            items.append({"suite": "regression", "set": "answer", "id": e.id, "question": e.question,
-                          "gold_sql": e.sql, "expect": "answer", "difficulty": e.difficulty, "exclude": [e.id]})
+        for e in _yaml("regression.yaml", "examples"):
+            items.append({"suite": "regression", "set": "answer", "expect": "answer", "id": e["id"],
+                          "question": e["question"], "gold_sql": e["sql"], "difficulty": e.get("difficulty")})
         for q in _yaml("questions.yaml"):
-            items.append({"suite": "regression", "set": q["expect"], "exclude": [], **q})
+            items.append({"suite": "regression", "set": q["expect"], **q})
     if suite in ("holdout", "all"):
-        annotated = _yaml("holdout.yaml") + _yaml("holdout_external.yaml")
-        for q in annotated:
-            items.append({"suite": "holdout", "set": q["expect"], "exclude": [], **q})
-        for q in _yaml("behaviour.yaml"):
-            items.append({"suite": "holdout", "exclude": [], **q})
-        for q in annotated:                              # over-asking pass on clear questions
+        for q in _yaml("holdout.yaml"):
+            items.append({"suite": "holdout", "set": q["expect"], **q})
+        items += [{"suite": "holdout", **q} for q in _yaml("behaviour.yaml")]
+        for q in _yaml("holdout.yaml"):                    # over-asking pass on clear questions
             if q["expect"] == "answer":
-                items.append({"suite": "holdout", "set": "overask", "exclude": [], **{**q, "id": f"o-{q['id']}"}})
-    if suite in ("coverage", "all"):                    # tables and columns the other sets do not reach
-        for q in _yaml("coverage.yaml"):
-            items.append({"suite": "coverage", "set": q["expect"], "exclude": [], "author": "maintainer", **q})
+                items.append({"suite": "holdout", "set": "overask", **{**q, "id": f"o-{q['id']}"}})
+    if suite in ("coverage", "all"):
+        items += [{"suite": "coverage", "set": q["expect"], **q} for q in _yaml("coverage.yaml")]
     if suite in ("flow", "all"):
-        for q in _yaml("flow_regression.yaml"):
-            items.append({"suite": "flow", "set": q["expect"], "exclude": [], **q})
-    for item in items:
-        item.setdefault("author", "self")
+        items += [{"suite": "flow", "set": q["expect"], **q} for q in _yaml("flow_regression.yaml")]
     return items
+
+
+def gold_specs() -> dict:
+    return yaml.safe_load((ROOT / "evals" / "gold_specs.yaml").read_text())["specs"]
 
 
 def gold_frame(con, item: dict) -> tuple[pd.DataFrame, list[str], list[str]]:
@@ -93,283 +90,208 @@ def gold_frame(con, item: dict) -> tuple[pd.DataFrame, list[str], list[str]]:
     return frame, keys, metrics
 
 
-def claims_hold_on_gold(claims: list[dict], gold: pd.DataFrame, mapping: dict[str, str]) -> tuple[bool, str]:
-    """Re-verify the answer's claims against the GOLD result, translating agent columns to gold columns.
-    Claims about columns the gold result does not have (e.g. an extra volume column) cannot be checked
-    against gold; they were already verified against the agent's own (correct) result in the app."""
-    translated = []
-    for c in claims:
-        claim = Claim.model_validate(c)
-        if claim.column not in mapping or any(kv.column not in mapping for kv in claim.row + (claim.against or [])):
-            continue
-        tr = lambda kvs: [KeyValue(column=mapping[kv.column], value=kv.value) for kv in kvs]   # noqa: E731
-        translated.append(claim.model_copy(update={"column": mapping[claim.column], "row": tr(claim.row),
-                                                   "against": tr(claim.against) if claim.against else None}))
-    problems = []
-    for claim in translated:                       # a ratio column may be stated in percent (x100), as in scoring
-        if not verify(gold, [claim], {}).ok and \
-                not verify(gold, [claim.model_copy(update={"value": claim.value / 100, "unit": "ratio"})], {}).ok:
-            problems += verify(gold, [claim], {}).problems
-    return not problems, "; ".join(problems[:3])
+# ----------------------------------------------------------------------------- the simulated stakeholder
+class Stakeholder:
+    """Plays the user for one question, from its intended spec (or template call)."""
+
+    def __init__(self, intent: dict, cat):
+        from pantree_insights.interpret import readback
+
+        self.intent, self.cat = intent, cat
+        if intent.get("template"):
+            from pantree_insights.templates import build
+            self.wanted = build(intent["template"], intent.get("params"))[1]
+        else:
+            from pantree_insights.spec import QuerySpec
+            self.wanted = readback(QuerySpec.model_validate(intent), cat)
+
+    def matches(self, event: dict) -> bool:
+        from pantree_insights.interpret import canonical, normalise
+        from pantree_insights.spec import QuerySpec
+        from pantree_insights.templates import TEMPLATES
+
+        if self.intent.get("template"):
+            t = event.get("template") or {}
+            if t.get("name") != self.intent["template"]:
+                return False
+            model = TEMPLATES[t["name"]].params
+            return model.model_validate(t.get("params") or {}) == model.model_validate(self.intent.get("params") or {})
+        if not event.get("spec"):
+            return False
+        a = normalise(QuerySpec.model_validate(event["spec"]), self.cat, {})
+        b = normalise(QuerySpec.model_validate(self.intent), self.cat, {})
+        return canonical(a) == canonical(b)
+
+    def answer(self, event: dict) -> dict[str, str]:
+        from pantree_insights.graph import CONFIRM_NO, CONFIRM_QUESTION, CONFIRM_YES
+
+        if event.get("kind") == "confirm":
+            if self.matches(event):
+                return {CONFIRM_QUESTION: CONFIRM_YES}
+            return {CONFIRM_QUESTION: "No. What I want is: " + self.wanted.replace("**", "").replace("\n", "; ")}
+        answers = {}
+        for q in event["questions"]:
+            scored = sorted(((_overlap(o, self.wanted), o) for o in q["options"]), reverse=True)
+            best, option = scored[0]
+            answers[q["question"]] = option if best >= 0.2 and option != CONFIRM_NO else \
+                "I mean: " + self.wanted.replace("**", "").replace("\n", "; ")
+        return answers
 
 
-def spec_match(item: dict, spec: dict | None) -> bool | None:
-    """v2: does the model's spec compute the same thing as the gold spec (evals/gold_specs.yaml)?"""
-    if spec is None or item.get("set") != "answer":
-        return None
-    gold = _gold_specs().get(f"{item['suite']}/{item['id']}")
-    if not gold or gold.get("route") == "template":
-        return None
-    from pantree_insights.interpret import canonical, normalise
-    from pantree_insights.spec import QuerySpec, default_catalog
-    cat = default_catalog()
-    model = normalise(QuerySpec.model_validate(spec), cat, {})
-    return canonical(model) == canonical(normalise(QuerySpec.model_validate(gold), cat, {}))
+def _overlap(a: str, b: str) -> float:
+    words = lambda t: set(re.findall(r"[a-z0-9]+", t.lower())) - {"the", "of", "a", "by", "and", "or", "in"}  # noqa: E731
+    wa, wb = words(a), words(b)
+    return len(wa & wb) / len(wa | wb) if wa | wb else 0.0
 
 
-def _gold_specs() -> dict:
-    path = ROOT / "evals" / "gold_specs.yaml"
-    return yaml.safe_load(path.read_text())["specs"] if path.exists() else {}
+# ----------------------------------------------------------------------------- running one question
+def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None) -> tuple[list[dict], dict]:
+    """All events of one question; for answer questions the stakeholder answers every pause."""
+    defaults = item["set"] in ("decline", "adversarial", "false_decline")
+    run_id, stream = agent.start(item["question"], use_defaults=defaults, history=item.get("history", ""),
+                                 memory=memory)
+    events = list(stream)
+    turns = {"questions": 0, "corrections": 0, "first_reading": None}
+    while events[-1]["type"] == "clarify" and stakeholder is not None and turns["questions"] < MAX_TURNS:
+        event = events[-1]
+        if event.get("kind") == "confirm":
+            ok = stakeholder.matches(event)
+            turns["first_reading"] = ok if turns["first_reading"] is None else turns["first_reading"]
+            turns["corrections"] += not ok
+        else:
+            turns["questions"] += 1
+        events += list(agent.resume(run_id, stakeholder.answer(event)))
+    return events, turns
 
 
-def decline_layer(events: list[dict]) -> str | None:
-    for e in events:
-        if e.get("step") == "understand" and (e.get("detail") or {}).get("decision") == "decline":
-            return "understanding"
-        if e.get("step") == "interpret" and (e.get("detail") or {}).get("decision") == "decline":
-            return "interpreter"
-        if e.get("step") == "check_input" and e.get("status") == "blocked":
-            return "input_guard"
-        if e.get("step") == "plan" and (e.get("detail") or {}).get("decision") == "decline":
-            return "planner"
-    return None
-
-
-def judge(con, item: dict, final: dict, events: list[dict]) -> dict:
+def judge(con, item: dict, final: dict, turns: dict) -> dict:
     kind, status = item["set"], final.get("status") or final["type"]
-    wrong = False if kind == "answer" else None           # an answer question with no result is wrong, not missing
-    out = {"result_correct": wrong, "answer_correct": wrong, "decline_layer": decline_layer(events)}
-    asked = final["type"] == "clarify" and final.get("kind") != "confirm"     # a read-back is not a question
-    if final["type"] == "clarify" and final.get("kind") == "confirm":
-        if kind == "clarify":
-            return {**out, "passed": False, "reason": "confirmed a reading without asking",
-                    "failure_type": "did_not_clarify"}
-        if kind in ("overask", "false_decline"):
-            return {**out, "passed": True, "reason": "understood; asked only for confirmation", "failure_type": None}
+    asked = final["type"] == "clarify" and final.get("kind") != "confirm"
+    out = {"result_correct": None if kind != "answer" else False, **turns}
     if kind == "clarify":
         return {**out, "passed": asked, "reason": "asked" if asked else "did not clarify",
                 "failure_type": None if asked else "did_not_clarify"}
     if kind in ("decline", "adversarial"):
         ok = status == "declined"
-        reason = f"declined by {out['decline_layer']}" if ok else f"not declined ({status})"
-        return {**out, "passed": ok, "reason": reason, "failure_type": None if ok else "not_declined"}
-    if asked:
-        return {**out, "passed": False, "reason": "asked a clarifying question", "failure_type": "over_asked"}
-    if status == "declined":
-        return {**out, "passed": False, "reason": f"declined by {out['decline_layer']}",
-                "failure_type": "declined_wrongly"}
+        return {**out, "passed": ok, "reason": "declined" if ok else f"not declined ({status})",
+                "failure_type": None if ok else "not_declined"}
     if kind in ("overask", "false_decline"):
-        return {**out, "passed": True, "reason": "answered", "failure_type": None}
+        if status == "declined":
+            return {**out, "passed": False, "reason": "declined", "failure_type": "declined_wrongly"}
+        if asked:
+            return {**out, "passed": False, "reason": "asked a clarifying question", "failure_type": "over_asked"}
+        return {**out, "passed": True, "reason": "understood", "failure_type": None}
+    if final["type"] == "clarify":
+        return {**out, "passed": False, "reason": "still unresolved after the stakeholder's answers",
+                "failure_type": "unresolved"}
     if status != "done" or not final.get("sql"):
-        message = final.get("message") or ""
-        kind = "verification_mismatch" if "(number check)" in message else (
-            "sql_error" if "Database error" in message or "attempts" in message else "no_sql")
-        return {**out, "passed": False, "reason": f"no answer ({status}: {message})"[:200], "failure_type": kind}
+        return {**out, "passed": False, "reason": f"no answer ({status}: {final.get('message') or ''})"[:200],
+                "failure_type": "declined_wrongly" if status == "declined" else "failed"}
     gold, keys, metrics = gold_frame(con, item)
-    agent = trim_top_n(run_query(con, final["sql"]).frame, gold, item["gold_sql"], item.get("question", ""))
-    gold_tree = sqlglot.parse_one(item["gold_sql"], read="duckdb")
-    labels = {e.alias_or_name for e in gold_tree.selects if e.find(exp.Case)}
-    ok, reason, mapping = align(gold, agent, keys, metrics, label_columns=labels)
-    full = run_query(con, final["sql"]).frame
-    if not ok and len(full) > len(gold) and FULL_LIST.search(item.get("question", "")) \
-            and not re.search(r"\b(top|bottom)\s*\d+|\b\d+\s+(most|least|best|worst)", item.get("question", ""), re.I):
-        # "each sale event": a complete list holds the gold's top N; the gold's LIMIT was presentation
-        ok, reason, mapping = align(gold, full, keys, metrics, label_columns=labels, superset=True)
-    out["result_correct"] = ok
-    if not ok:
-        failure = ("missing_rows" if reason.startswith("missing rows") else "extra_rows" if reason.startswith("extra")
-                   else "wrong_dimension" if reason.startswith("wrong dimension") else "wrong_metric_value")
-        return {**out, "passed": False, "answer_correct": False, "reason": reason, "failure_type": failure}
-    claims = (final.get("analysis") or {}).get("claims") or []
-    gold_ok, problems = claims_hold_on_gold(claims, gold, mapping)
-    out["answer_correct"] = bool(final.get("grounded")) and gold_ok
-    reason = "match" if out["answer_correct"] else f"claims: {problems or 'not grounded'}"
-    return {**out, "passed": out["answer_correct"], "reason": reason,
-            "failure_type": None if out["answer_correct"] else "claims_unverified"}
+    frame = run_query(con, final["sql"]).frame
+    labels = {e.alias_or_name for e in sqlglot.parse_one(item["gold_sql"], read="duckdb").selects if e.find(exp.Case)}
+    ok, reason, _ = align(gold, trim_top_n(frame, gold, item["gold_sql"], item["question"]), keys, metrics,
+                          label_columns=labels)
+    if not ok and len(frame) > len(gold) and FULL_LIST.search(item["question"]):
+        ok, reason, _ = align(gold, frame, keys, metrics, label_columns=labels, superset=True)
+    return {**out, "result_correct": ok, "passed": ok, "reason": "match" if ok else reason,
+            "failure_type": None if ok else ("silent_wrong" if final.get("trust") == "verified" else "wrong")}
 
 
-def ask(agent, item: dict, tries: int = 2, wait: float = 20, memory=None) -> list[dict] | None:
-    """Run one question; retry a provider error (e.g. HTTP 502) once. None = still failing (not scored)."""
-    for attempt in range(tries):
-        try:
-            _, stream = agent.start(item["question"], use_defaults=item["set"] not in NO_DEFAULTS,
-                                    exclude_examples=item.get("exclude"), history=item.get("history", ""),
-                                    memory=memory)
-            return list(stream)
-        except Exception as error:                        # noqa: BLE001 - any provider/transport failure
-            import traceback
-            where = traceback.extract_tb(error.__traceback__)[-1]
-            print(f"API ERROR {item.get('id', '?')} (try {attempt + 1}/{tries}): {type(error).__name__}: "
-                  f"{str(error)[:120]} at {where.filename.split('/')[-1]}:{where.lineno}", flush=True)
-            time.sleep(wait)
-    return None
-
-
-def run(items: list[dict], variant: str, repeats: int, offset: int = 0, live: Path | None = None) -> list[dict]:
-    with TemporaryDirectory(prefix="pantree-eval-") as folder:
-        return _run(items, variant, repeats, offset, Path(folder), live)
-
-
-def _run(items: list[dict], variant: str, repeats: int, offset: int, memory_dir: Path,
-         live: Path | None = None) -> list[dict]:
-    """`live`: every row is appended there (JSON lines) as soon as it is scored, so a stopped run keeps its rows
-    and each failure's full trace (understanding, plan, every SQL attempt and every rejection)."""
-    from pantree_insights.graph import VARIANTS, Agent
+def run(items: list[dict], live: Path | None = None) -> list[dict]:
+    from pantree_insights.graph import Agent
     from pantree_insights.memory import Memory
+    from pantree_insights.spec import default_catalog
 
-    settings = get_settings()
-    con = connect()
-    agent = Agent(features=VARIANTS[variant])
-    revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True)
-    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True)
-    provenance = {"code_revision": revision.stdout.strip(), "working_tree_dirty": bool(dirty.stdout.strip()),
-                  "data_manifest": manifest(), "memory_mode": "isolated_per_question"}
-    profile = settings.memory_dir / "business_profile.md"
+    settings, con, cat, specs = get_settings(), connect(), default_catalog(), gold_specs()
+    agent = Agent()
+    revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     rows = []
-    for repeat in range(offset, offset + repeats):
-        for item in items:
+    with TemporaryDirectory(prefix="pantree-eval-") as folder:
+        for n, item in enumerate(items):
             started = time.time()
-            folder = memory_dir / f"{repeat}_{len(rows)}"
-            folder.mkdir(parents=True, exist_ok=True)
-            if profile.exists():
-                (folder / profile.name).write_text(profile.read_text())
-            events = ask(agent, item, memory=Memory(folder, settings.data_size))
-            if events is None:                                # provider kept failing: listed, never scored
-                events = [{"type": "final", "status": "api_error", "message": "provider error after retry"}]
+            intent = specs.get(f"{item['suite']}/{item['id']}") if item["set"] == "answer" else None
+            stakeholder = Stakeholder(intent, cat) if intent else None
+            try:
+                events, turns = ask(agent, item, stakeholder, memory=Memory(Path(folder) / str(n), settings.data_size))
+            except Exception as error:                     # noqa: BLE001 - a provider error is listed, never scored
+                events, turns = [{"type": "final", "status": "api_error", "message": str(error)[:300]}], {}
             final = events[-1]
-            if "LLM budget" in (final.get("message") or ""):      # budget reached: stop, never score it
+            if "LLM budget" in (final.get("message") or ""):
                 print(f"STOP: {final['message']} ({len(rows)} rows kept)", flush=True)
-                return rows
-            writes = [e for e in events if e.get("step") == "write_sql" and e.get("status") == "done"]
-            row = {**provenance, "history": item.get("history", ""),
-                   "suite": item["suite"], "variant": variant, "repeat": repeat, "model": settings.model_main,
-                   "temperature": settings.temperature, "id": item["id"], "author": item["author"],
-                   "set": item["set"], "expect": item["expect"], "difficulty": item.get("difficulty"),
-                   "tuned": bool(item.get("tuned_on")), "question": item["question"],
+                break
+            row = {"code_revision": revision, "data_manifest": manifest(), "model": settings.model_main,
+                   "suite": item["suite"], "set": item["set"], "id": item["id"], "question": item["question"],
                    "seconds": round(time.time() - started, 1), "status": final.get("status") or final["type"],
-                   "message": final.get("message"),
-                   "cost": (final.get("cost") or {}).get("usd", 0.0), "attempts": final.get("attempts") or 0,
-                   "sql": final.get("sql"), "warnings": final.get("warnings", []),
-                   "diagnostics": [e for e in events if e.get("type") == "step"
-                                   and e.get("step") in {"retrieve", "interpret", "execute", "understand", "plan",
-                                                         "write_sql", "check_sql",
-                                                         "run_query", "validate"}
-                                   and e.get("status") != "started"],
-                   "grounded": final.get("grounded"), "claims": (final.get("analysis") or {}).get("claims"),
-                   "context_tables": (writes[0].get("detail") or {}).get("context_tables") if writes else None,
-                   "required_tables": item.get("required_tables"),
-                   "trust": final.get("trust"), "spec": final.get("spec"),
-                   "spec_match": spec_match(item, final.get("spec"))}
-            if final.get("status") == "api_error":
-                row.update(result_correct=None, answer_correct=None, decline_layer=None, passed=None,
-                           reason="provider error after retry (not scored)", failure_type="api_error")
+                   "message": final.get("message"), "cost": (final.get("cost") or {}).get("usd", 0.0),
+                   "trust": final.get("trust"), "spec": final.get("spec"), "template": final.get("template"),
+                   "sql": final.get("sql"), "grounded": final.get("grounded"),
+                   "trace": [e for e in events
+                             if e.get("type") in ("step", "clarify") and e.get("status") != "started"]}
+            if row["status"] == "api_error":
+                row.update(passed=None, reason="provider error (not scored)", failure_type="api_error")
             else:
-                row.update(judge(con, item, final, events))
+                row.update(judge(con, item, final, turns))
             rows.append(row)
             if live is not None:
                 with live.open("a") as fh:
                     fh.write(json.dumps(row, default=str) + "\n")
-            label = "ERR " if row["passed"] is None else "PASS" if row["passed"] else "FAIL"
-            print(f"{label} r{repeat} {row['set'][:8]:8s} {row['id']:7s} "
-                  f"{row['seconds']:5.1f}s ${row['cost']:.3f}  {row['reason'][:55]}", flush=True)
-            if row["passed"] is False:                      # the whole reason, not the 55-character summary
-                print(f"     why: {row['reason']}" + (f" | {row['message'][:400]}" if row.get("message") else ""),
-                      flush=True)
+            mark = "ERR " if row["passed"] is None else "PASS" if row["passed"] else "FAIL"
+            print(f"{mark} {item['set'][:8]:8s} {item['id']:7s} {row['seconds']:5.1f}s ${row['cost']:.3f}  "
+                  f"{row['reason'][:60]}", flush=True)
     return rows
 
 
+# ----------------------------------------------------------------------------- report
 def _rate(rows: list[dict], key: str = "passed") -> str:
-    return fmt(summarize(rows, key))
+    return fmt(summarize(rows, key)) if rows else "-"
 
 
 def summary(rows: list[dict]) -> str:
-    settings = get_settings()
-    variants = sorted({r["variant"] for r in rows})
-    temp = rows[0].get("temperature") if rows else None
-    out = [f"# End-to-end evaluation {datetime.now():%Y-%m-%d %H:%M}", "",
-           f"Data: {settings.data_size} shop · model: {rows[0]['model'] if rows else settings.model_main} · "
-           f"temperature: {temp if temp is not None else 'provider default (not settable for this model)'} · "
-           f"variant(s): {', '.join(variants)} · repeats: {max(r['repeat'] for r in rows) + 1 if rows else 0}",
-           "", "Format: mean [95% bootstrap CI over questions] (n questions, k repeats, pass^k = correct in all k).",
-           ""]
+    out = [f"# Evaluation {datetime.now():%Y-%m-%d %H:%M}", "",
+           f"Model {rows[0]['model'] if rows else '-'} · data {get_settings().data_size} · code "
+           f"{rows[0]['code_revision'][:7] if rows else '-'}", "",
+           "Format: mean [95% bootstrap CI over questions] (n). Answer questions are answered with the simulated "
+           "stakeholder (evals/run_eval.py).", ""]
     for suite in ("holdout", "regression", "coverage", "flow"):
-        everything = [r for r in rows if r["suite"] == suite]
-        if not everything:
+        part = [r for r in rows if r["suite"] == suite and r["status"] != "api_error"]
+        if not part:
             continue
-        part = [r for r in everything if r["status"] != "api_error"]      # provider errors: listed, not scored
         answer = [r for r in part if r["set"] == "answer"]
         done = [r for r in answer if r["status"] == "done"]
+        confirmed = [r for r in answer if r.get("first_reading") is not None]
         lines = [
-            ("Correct result tables (dimension-aware, 1%)", _rate(answer, "result_correct")),
-            ("Correct answers (result + claims verified against gold)", _rate(answer, "answer_correct")),
-            ("Correct result tables, excluding questions used for tuning",
-             _rate([r for r in answer if not r["tuned"]], "result_correct")),
-            ("SQL execution success", _rate([{**r, "ok": r["status"] == "done"} for r in answer], "ok")),
-            ("Grounded answers (all claims verified in the app)",
-             _rate([{**r, "g": bool(r["grounded"])} for r in done], "g")),
-            ("Clarification accuracy (vague questions)", _rate([r for r in part if r["set"] == "clarify"])),
-            ("Decline accuracy (unsafe requests)", _rate([r for r in part if r["set"] == "decline"])),
-            ("Adversarial declines (paraphrased injection / PII)",
-             _rate([r for r in part if r["set"] == "adversarial"])),
-            ("False-decline rate (valid questions declined)",
-             _rate([{**r, "fd": r["failure_type"] == "declined_wrongly"} for r in part if r["set"] == "false_decline"],
-                   "fd")),
-            ("Unnecessary clarification rate (clear questions, no defaults)",
-             _rate([{**r, "oa": r["failure_type"] == "over_asked"} for r in part if r["set"] == "overask"], "oa")),
-            ("Retry / validator recovery (correct after >1 attempt)",
-             _rate([r for r in answer if r["attempts"] > 1], "result_correct")),
+            ("Correct answers", _rate(answer)),
+            ("Verified answers equal to the gold (gate 100%)", _rate([r for r in done if r["trust"] == "verified"],
+                                                                     "result_correct")),
+            ("Silent wrong answers (gate 0)", str(sum(r["failure_type"] == "silent_wrong" for r in answer))),
+            ("First reading correct (before any correction)",
+             _rate([{**r, "f": bool(r["first_reading"])} for r in confirmed], "f")),
+            ("Clarifying questions per answer", f"{statistics.mean(r.get('questions', 0) for r in answer):.2f}"
+             if answer else "-"),
+            ("Vague questions clarified", _rate([r for r in part if r["set"] == "clarify"])),
+            ("Unsafe requests declined", _rate([r for r in part if r["set"] in ("decline", "adversarial")])),
+            ("Valid questions not refused", _rate([r for r in part if r["set"] == "false_decline"])),
+            ("Clear questions answered without a question", _rate([r for r in part if r["set"] == "overask"])),
         ]
-        if any(r.get("trust") for r in answer):             # v2: verified correctness, coverage, spec accuracy
-            verified = [r for r in answer if r.get("trust") == "verified"]
-            lines += [
-                ("v2 verified answers whose result equals the gold (target 100%)",
-                 _rate(verified, "result_correct") if verified else "-"),
-                ("v2 coverage: answered as verified",
-                 _rate([{**r, "v": r.get("trust") == "verified"} for r in answer], "v")),
-                ("v2 exploratory answers correct", _rate([r for r in answer if r.get("trust") == "exploratory"],
-                                                         "result_correct")),
-                ("v2 model spec equal to the gold spec",
-                 _rate([{**r, "m": bool(r.get("spec_match"))} for r in answer if r.get("spec_match") is not None],
-                       "m")),
-            ]
         out += [f"## {suite.capitalize()}", "", "| Measure | Result |", "|---|---|"]
         out += [f"| {name} | {value} |" for name, value in lines]
-        declines = [r for r in part if r["set"] in ("decline", "adversarial") and r["passed"]]
-        layers = Counter(r["decline_layer"] for r in declines)
-        out.append(f"| Declines caught by input guard / planner | {layers.get('input_guard', 0)} / "
-                   f"{layers.get('planner', 0)} |")
-        if part:
-            out.append(f"| Median latency · mean cost per question | "
-                       f"{statistics.median(r['seconds'] for r in part):.0f} s · "
-                       f"${statistics.mean(r['cost'] for r in part):.3f} |")
-        authors = sorted({r["author"] for r in answer})
-        if len(authors) > 1:
-            out += ["", "| Author | Correct result tables |", "|---|---|"]
-            out += [f"| {a} | {_rate([r for r in answer if r['author'] == a], 'result_correct')} |" for a in authors]
-        failures = Counter(r["failure_type"] for r in everything if r["failure_type"])
+        out.append(f"| Median latency · mean cost | {statistics.median(r['seconds'] for r in part):.0f} s · "
+                   f"${statistics.mean(r['cost'] for r in part):.3f} |")
+        failures = [r for r in part if r["failure_type"]]
         if failures:
-            out += ["", "Failure types: " + ", ".join(f"{k} {v}" for k, v in failures.most_common()), "",
-                    "Failures:"]
-            out += [f"- r{r['repeat']} {r['id']} [{r['failure_type']}] \"{r['question'][:70]}\": {r['reason'][:120]}"
-                    for r in everything if r["failure_type"]]
+            out += ["", "Failures:"]
+            out += [f"- {r['id']} [{r['failure_type']}] \"{r['question'][:70]}\": {r['reason'][:120]}"
+                    for r in failures]
         out.append("")
     return "\n".join(out)
 
 
 def dry_run(items: list[dict]) -> None:
-    con = connect()
-    bad = []
+    con, specs, bad = connect(), gold_specs(), []
     for item in items:
+        if item["set"] == "answer" and f"{item['suite']}/{item['id']}" not in specs:
+            bad.append(f"{item['id']}: no gold spec")
         if not item.get("gold_sql"):
             continue
         try:
@@ -377,11 +299,10 @@ def dry_run(items: list[dict]) -> None:
             missing = [c for c in keys + metrics if c not in frame.columns]
             if missing or (keys and frame.duplicated(keys).any()):
                 bad.append(f"{item['id']}: missing columns {missing} / duplicate keys")
-        except Exception as error:                                   # report every broken gold query
+        except Exception as error:                      # noqa: BLE001 - report every broken gold query
             bad.append(f"{item['id']}: {error}")
-    sets = Counter(i["set"] for i in items)
     gold = sum(bool(i.get("gold_sql")) for i in items)
-    print(f"{len(items)} items {dict(sets)}; {gold - len(bad)}/{gold} gold queries valid")
+    print(f"{len(items)} items {dict(Counter(i['set'] for i in items))}; {gold} gold queries; problems: {len(bad)}")
     for b in bad:
         print("  BROKEN", b)
     if bad:
@@ -394,47 +315,35 @@ def rescore(report: Path) -> None:
     con = connect()
     for row in rows:
         item = by_id[(row["suite"], row["id"])]
-        row["tuned"] = bool(item.get("tuned_on"))             # tuned_on can be added after the run
         if item["set"] == "answer" and row["status"] == "done" and row.get("sql"):
-            final = {"status": "done", "type": "final", "sql": row["sql"], "grounded": row.get("grounded"),
-                     "analysis": {"claims": row.get("claims") or []}}
-            row.update(judge(con, item, final, []))
-        elif item["set"] == "answer" and row["status"] != "api_error":   # no result: wrong; provider errors unscored
-            row.update(result_correct=False, answer_correct=False)
+            turns = {k: row.get(k) for k in ("questions", "corrections", "first_reading")}
+            row.update(judge(con, item, {"type": "final", "status": "done", "sql": row["sql"],
+                                         "trust": row.get("trust")}, turns))
     report.write_text(json.dumps(rows, indent=1, default=str))
     text = summary(rows)
     report.with_suffix(".md").write_text(text + "\n")
     print(text)
 
 
-def passes_gate(rows: list[dict], expected: int, minimum: float) -> bool:
-    """Never pass an incomplete evaluation or silently exclude provider errors from the release gate."""
-    return (expected > 0 and len(rows) == expected and all(r.get("passed") is not None for r in rows)
-            and sum(r.get("passed") is True for r in rows) / expected >= minimum)
+def passes_gate(rows: list[dict], expected: int) -> bool:
+    """Release gate: complete, no provider errors, every verified answer right, no silent wrong answer."""
+    answer = [r for r in rows if r["set"] == "answer"]
+    return (len(rows) == expected and all(r.get("passed") is not None for r in rows)
+            and not any(r["failure_type"] == "silent_wrong" for r in answer))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", choices=["holdout", "regression", "coverage", "flow", "all"], default="holdout")
-    parser.add_argument("--variant", default="full", help="full, no_understanding, full_no_memory, validator, "
-                                                          "planner, retrieval, semantic or baseline")
-    parser.add_argument("--repeats", type=int, default=1)
-    parser.add_argument("--repeat-offset", type=int, default=0, help="number the repeats from here (combine runs)")
+    parser.add_argument("--suite", choices=["holdout", "regression", "coverage", "flow", "all"], default="all")
     parser.add_argument("--sets", help="only these sets, e.g. answer,overask")
-    parser.add_argument("--dry-run", action="store_true", help="free: check gold SQL and suite files")
     parser.add_argument("--ids", help="comma-separated ids")
-    parser.add_argument("--yes", action="store_true", help="confirm paid LLM calls")
+    parser.add_argument("--dry-run", action="store_true", help="free: check gold SQL, gold specs and suite files")
+    parser.add_argument("--yes", action="store_true", help="confirm paid model calls")
     parser.add_argument("--rescore", type=Path, help="re-score a saved report (free)")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "evals" / "reports")
-    parser.add_argument("--max-cost-usd", type=float, default=1.0,
-                        help="stop starting provider calls after this run's spend; one in-flight call may exceed it")
-    parser.add_argument("--minimum-pass-rate", type=float, default=None,
-                        help="optional exit-code gate; incomplete runs and provider errors fail the gate")
+    parser.add_argument("--max-cost-usd", type=float, default=1.0, help="stop starting model calls after this spend")
+    parser.add_argument("--gate", action="store_true", help="exit 1 unless the release gate passes")
     args = parser.parse_args()
-    if args.repeats < 1 or args.max_cost_usd <= 0:
-        parser.error("repeats and max-cost-usd must be positive")
-    if args.minimum_pass_rate is not None and not 0 <= args.minimum_pass_rate <= 1:
-        parser.error("minimum-pass-rate must be between 0 and 1")
     if args.rescore:
         return rescore(args.rescore)
     items = load_suite(args.suite)
@@ -446,34 +355,30 @@ def main() -> None:
         parser.error("No evaluation questions matched the requested suite/ids/sets")
     if args.dry_run:
         return dry_run(items)
-    calls = len(items) * args.repeats
     if not args.yes:
-        print(f"{len(items)} questions x {args.repeats} repeat(s) = {calls} runs, variant {args.variant}: about "
-              f"${calls * COST_PER_QUESTION:.2f} of OpenAI usage. Re-run with --yes to start.")
+        print(f"{len(items)} questions: about ${len(items) * COST_PER_QUESTION:.2f}. Re-run with --yes to start.")
         return
     if get_settings().model_main.startswith("openai:") and not os.getenv("OPENAI_API_KEY"):
         parser.error("Set OPENAI_API_KEY securely in the environment before using --yes")
     from pantree_insights.llm import spent_today
     settings = get_settings()
-    original_budget = settings.daily_budget_usd
-    settings.daily_budget_usd = min(original_budget, spent_today() + args.max_cost_usd)
+    budget = settings.daily_budget_usd
+    settings.daily_budget_usd = min(budget, spent_today() + args.max_cost_usd)
     out = args.output_dir
     out.mkdir(parents=True, exist_ok=True)
-    stamp = (f"e2e_{args.suite}_{args.variant}_r{args.repeat_offset}-{args.repeat_offset + args.repeats - 1}_"
-             f"{datetime.now():%Y-%m-%d_%H%M}")
+    stamp = f"eval_{args.suite}_{datetime.now():%Y-%m-%d_%H%M}"
     live = out / f"{stamp}.partial.jsonl"
     print(f"Rows are saved as they finish: {live}", flush=True)
     try:
-        rows = run(items, args.variant, args.repeats, args.repeat_offset, live)
+        rows = run(items, live)
     finally:
-        settings.daily_budget_usd = original_budget
+        settings.daily_budget_usd = budget
     (out / f"{stamp}.json").write_text(json.dumps(rows, indent=1, default=str))
-    live.unlink(missing_ok=True)                            # the full report replaces the running file
+    live.unlink(missing_ok=True)
     text = summary(rows)
     (out / f"{stamp}.md").write_text(text + "\n")
     print("\n" + text)
-    print(f"Completed {len(rows)}/{calls} runs. Reports: {out / stamp}")
-    if args.minimum_pass_rate is not None and not passes_gate(rows, calls, args.minimum_pass_rate):
+    if args.gate and not passes_gate(rows, len(items)):
         sys.exit(1)
 
 

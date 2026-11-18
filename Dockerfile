@@ -21,10 +21,6 @@ COPY memory ./memory
 COPY demo_runs ./demo_runs
 RUN uv sync --frozen --no-dev
 
-# Download the embedding model now, so cold starts do not fetch it
-RUN uv run --no-sync python -c "from fastembed import TextEmbedding; \
-TextEmbedding('BAAI/bge-small-en-v1.5', cache_dir='/app/.cache/models')"
-
 RUN useradd --create-home --uid 1000 app && chown -R app:app /app
 USER app
 EXPOSE 8080

@@ -1,7 +1,7 @@
 [project]
 name = "pantree-insights"
 version = "0.1.0"
-description = "AI data analyst for Pantree, a simulated Indian fashion shop: text -> SQL -> business insights."
+description = "Verified AI data analyst for Pantree, a simulated Indian fashion shop: question -> confirmed spec -> compiled SQL -> insight."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -14,10 +14,6 @@ dependencies = [
     "pyyaml>=6.0",
     "sqlglot>=25.0",
     "huggingface_hub>=0.24",
-    "llama-index-core>=0.14.26",
-    "llama-index-retrievers-bm25>=0.9.0",
-    "llama-index-embeddings-fastembed>=0.8.0",
-    "fastembed>=0.9.1",
     "langchain>=1.5.0",
     "langchain-openai>=1.8.0",
     "langgraph>=1.2.22",
@@ -41,7 +37,6 @@ dev = [
 [project.scripts]
 pantree-data = "pantree_insights.db:main"
 pantree-pulse = "pantree_insights.pulse:main"
-pantree-context = "pantree_insights.retrieval:main"
 pantree-profile = "pantree_insights.profile:main"
 pantree-catalog = "pantree_insights.catalog:main"
 pantree-ask = "pantree_insights.graph:main"

@@ -1,219 +1,70 @@
-"""Evaluation runner logic without LLM calls: judging, failure types, decline layer, reports."""
-import json
+"""The evaluation runner: suites, the simulated stakeholder, judging and the release gate (no model calls)."""
 import sys
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-import ablation_report  # noqa: E402
 import run_eval  # noqa: E402
 
+from pantree_insights.graph import CONFIRM_QUESTION, CONFIRM_YES  # noqa: E402
 
-def test_load_suite_has_all_sets():
-    items = run_eval.load_suite("holdout")
-    sets = {i["set"] for i in items}
-    assert {"answer", "clarify", "decline", "false_decline", "adversarial", "overask"} <= sets
-    assert len([i for i in items if i["set"] == "false_decline"]) >= 15
-    assert len([i for i in items if i["set"] == "adversarial"]) >= 10
-    assert all(i["author"] in ("self", "external") for i in items)
+pytestmark = pytest.mark.data
 
 
-def test_decline_layer_and_behaviour_judging():
-    guard = [{"type": "step", "step": "check_input", "status": "blocked"}]
-    planner = [{"type": "step", "step": "plan", "status": "done", "detail": {"decision": "decline"}}]
-    declined = {"type": "final", "status": "declined"}
-    assert run_eval.judge(None, {"set": "adversarial"}, declined, guard)["decline_layer"] == "input_guard"
-    assert run_eval.judge(None, {"set": "adversarial"}, declined, planner)["passed"]
-    fd = run_eval.judge(None, {"set": "false_decline"}, declined, guard)
-    assert not fd["passed"] and fd["failure_type"] == "declined_wrongly"
-    oa = run_eval.judge(None, {"set": "overask"}, {"type": "clarify"}, [])
-    assert not oa["passed"] and oa["failure_type"] == "over_asked"
+def test_load_suite_has_every_set_and_a_gold_spec_for_every_answer():
+    items = run_eval.load_suite("all")
+    assert {i["set"] for i in items} == {"answer", "clarify", "decline", "false_decline", "adversarial", "overask"}
+    specs = run_eval.gold_specs()
+    assert all(f"{i['suite']}/{i['id']}" in specs for i in items if i["set"] == "answer")
 
 
-@pytest.mark.data
-def test_result_and_answer_correctness_against_gold(con):
-    item = {"set": "answer", "gold_sql": "SELECT payment_method, COUNT(DISTINCT order_id) AS orders FROM sales "
-                                         "WHERE line_type = 'Sale' GROUP BY 1",
-            "key_columns": ["payment_method"], "metric_columns": ["orders"]}
-    gold = con.execute(item["gold_sql"]).df()
-    top = gold.sort_values("orders").iloc[-1]
-    claim = {"id": "c1", "value": float(top.orders), "unit": "count", "column": "n_orders",
-             "row": [{"column": "method", "value": top.payment_method}], "op": "value"}
-    agent_sql = ("SELECT payment_method AS method, COUNT(DISTINCT order_id) AS n_orders FROM sales "
-                 "WHERE line_type = 'Sale' GROUP BY 1")
-    final = {"type": "final", "status": "done", "sql": agent_sql, "grounded": True, "analysis": {"claims": [claim]}}
-    ok = run_eval.judge(con, item, final, [])
-    assert ok["result_correct"] and ok["answer_correct"]
-    wrong = {**claim, "value": float(top.orders) * 1.3}
-    bad = run_eval.judge(con, item, {**final, "analysis": {"claims": [wrong]}}, [])
-    assert bad["result_correct"] and not bad["answer_correct"] and not bad["passed"]
-    assert bad["failure_type"] == "claims_unverified"
-    missing = run_eval.judge(con, item, {**final, "sql": agent_sql + " HAVING COUNT(*) > 99999999"}, [])
-    assert missing["failure_type"] in ("missing_rows", "wrong_dimension")
+def test_stakeholder_confirms_only_the_intended_reading():
+    from pantree_insights.spec import default_catalog
+    intent = {"table": "sales", "measures": [{"name": "r", "metric": "realized_revenue"}], "dimensions": ["category"]}
+    who = run_eval.Stakeholder(intent, default_catalog())
+    same = {"kind": "confirm", "spec": {**intent, "measures": [{"name": "rev", "metric": "realized_revenue"}]}}
+    other = {"kind": "confirm", "spec": {**intent, "dimensions": ["brand"]}}
+    assert who.answer(same) == {CONFIRM_QUESTION: CONFIRM_YES}
+    assert who.answer(other)[CONFIRM_QUESTION].startswith("No. What I want is")
 
 
-def fake_rows(variant, pattern):
-    return [{"suite": "holdout", "variant": variant, "repeat": r, "model": "m", "temperature": None, "id": q,
-             "author": "self", "set": "answer", "expect": "answer", "tuned": False, "question": q, "seconds": 10.0,
-             "status": "done", "cost": 0.01, "attempts": 1, "grounded": True, "passed": v, "result_correct": v,
-             "answer_correct": v, "decline_layer": None, "failure_type": None if v else "wrong_metric_value",
-             "reason": "x"} for q, vals in pattern.items() for r, v in enumerate(vals)]
+def test_stakeholder_picks_the_option_matching_its_intent():
+    from pantree_insights.spec import default_catalog
+    intent = {"table": "sales", "measures": [{"name": "r", "metric": "return_rate"}],
+              "dimensions": ["category", "size_fit"]}
+    who = run_eval.Stakeholder(intent, default_catalog())
+    question = {"kind": "clarify", "questions": [{"question": "What do you mean by 'wrong size'?", "options": [
+        "The item did not fit: delivered lines with size fit Too Small or Too Large (sales.size_fit)",
+        "The return reason given was Size Issue (sales.return_reason)"]}]}
+    assert "size fit" in who.answer(question)["What do you mean by 'wrong size'?"]
 
 
-def test_summary_and_ablation_report(tmp_path):
-    full = fake_rows("full", {"q1": [True, True], "q2": [True, False], "q3": [True, True]})
-    base = fake_rows("baseline", {"q1": [False, False], "q2": [True, False], "q3": [True, False]})
-    text = run_eval.summary(full)
-    assert "Correct result tables" in text and "pass^2" in text and "provider default" in text
-    for name, rows in [("f.json", full), ("b.json", base)]:
-        (tmp_path / name).write_text(json.dumps(rows))
-    table = ablation_report.build([tmp_path / "f.json", tmp_path / "b.json"])
-    assert "| baseline |" in table and "| full |" in table and "pairs=6" in table
-    assert pd.notna(len(table))
-
-
-def test_answer_question_without_a_result_counts_as_wrong_not_missing():
-    """An answer question with no SQL, a decline or a clarification is a wrong result, not an excluded one."""
-    item = {"set": "answer"}
-    for final in ({"type": "final", "status": "failed", "message": "Could not produce a valid query after 3 attempts"},
-                  {"type": "final", "status": "declined"}, {"type": "clarify"}):
-        out = run_eval.judge(None, item, final, [])
-        assert out["result_correct"] is False and out["answer_correct"] is False, final
-    for kind in ("false_decline", "overask"):                 # behaviour sets have no result measure
-        out = run_eval.judge(None, {"set": kind}, {"type": "final", "status": "declined"}, [])
-        assert out["result_correct"] is None
-
-
-def test_runtime_number_mismatch_is_not_reported_as_a_sql_execution_error():
-    final = {"type": "final", "status": "failed", "message":
-             "Could not produce a valid query after 3 attempts (number check): Orders: disagrees"}
-    out = run_eval.judge(None, {"set": "answer"}, final, [])
-    assert out["failure_type"] == "verification_mismatch"
-    assert not out["passed"]
-
-
-def test_failed_run_preserves_the_scope_sql_attempts_and_full_error(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    from pantree_insights import graph
-
-    message = "Could not produce a valid query after 3 attempts (number check): " + "mismatch " * 40
-    scope = {"period": None, "time": "sales.shipped_at"}
-    events = [
-        {"type": "step", "step": "understand", "status": "done", "detail": {"verify_scope": scope}},
-        {"type": "step", "step": "write_sql", "status": "done", "detail": {"sql": "SELECT 1 AS orders"}},
-        {"type": "step", "step": "run_query", "status": "failed", "detail": {"problems": [message]}},
-        {"type": "final", "status": "failed", "message": message},
-    ]
-    monkeypatch.setattr(graph, "Agent", lambda **kwargs: object())
-    monkeypatch.setattr(run_eval, "connect", lambda: None)
-    monkeypatch.setattr(run_eval, "manifest", lambda: {})
-    monkeypatch.setattr(run_eval, "ask", lambda *args, **kwargs: events)
-    monkeypatch.setattr(run_eval, "get_settings", lambda: SimpleNamespace(
-        memory_dir=tmp_path / "profile", data_size="small", model_main="fake", temperature=None))
-    item = {"id": "x", "suite": "flow", "set": "answer", "expect": "answer", "author": "self", "question": "q"}
-    row, = run_eval._run([item], "full", 1, 0, tmp_path / "isolated")
-    assert row["message"] == message
-    assert row["diagnostics"] == events[:-1]
-    assert row["failure_type"] == "verification_mismatch"
-
-
-def test_transient_api_error_is_retried_then_recorded_not_crashed():
-    """A provider error (e.g. HTTP 502) must not end the whole run: retry once, then return None."""
-    class Flaky:
-        def __init__(self, failures):
-            self.failures, self.calls = failures, 0
-
-        def start(self, question, **kwargs):
-            self.calls += 1
-            if self.calls <= self.failures:
-                def boom():
-                    raise RuntimeError("Error code: 502")
-                    yield
-                return "run", boom()
-            return "run", iter([{"type": "final", "status": "done"}])
-
-    item = {"question": "q", "set": "answer"}
-    once = Flaky(1)
-    assert run_eval.ask(once, item, wait=0) == [{"type": "final", "status": "done"}] and once.calls == 2
-    always = Flaky(5)
-    assert run_eval.ask(always, item, wait=0) is None and always.calls == 2
-
-
-def test_provider_errors_are_listed_but_not_scored():
-    base = {"suite": "holdout", "variant": "full", "repeat": 0, "model": "m", "temperature": None, "author": "self",
-            "set": "answer", "tuned": False, "question": "q", "seconds": 1.0, "cost": 0.01, "attempts": 1,
-            "grounded": True, "decline_layer": None}
-    ok = {**base, "id": "a1", "status": "done", "result_correct": True, "answer_correct": True, "passed": True,
-          "failure_type": None, "reason": "match"}
-    err = {**base, "id": "a2", "status": "api_error", "result_correct": None, "answer_correct": None,
-           "passed": None, "failure_type": "api_error", "reason": "provider error after retry (not scored)"}
-    text = run_eval.summary([ok, err])
-    assert "| SQL execution success | 100% [100%-100%] (n=1) |" in text
-    assert "api_error 1" in text and "a2 [api_error]" in text
-
-
-def test_claims_in_percent_points_hold_on_a_ratio_gold_column():
-    gold = pd.DataFrame({"prime_share": [0.102012]})
-    claims = [{"id": "c1", "value": 10.2, "unit": "number", "column": "prime_share_pct", "row": []}]
-    ok, _ = run_eval.claims_hold_on_gold(claims, gold, {"prime_share_pct": "prime_share"})
-    assert ok
-    bad = [{"id": "c1", "value": 12.0, "unit": "number", "column": "prime_share_pct", "row": []}]
-    assert not run_eval.claims_hold_on_gold(bad, gold, {"prime_share_pct": "prime_share"})[0]
-
-
-def test_rescore_keeps_provider_errors_unscored(tmp_path, monkeypatch):
-    row = {"suite": "holdout", "variant": "full", "repeat": 0, "model": "m", "temperature": None, "id": "x02",
-           "author": "self", "set": "answer", "tuned": False, "question": "q", "seconds": 1.0, "cost": 0.0,
-           "attempts": 0, "status": "api_error", "sql": None, "grounded": None, "claims": None,
-           "result_correct": None, "answer_correct": None, "passed": None, "decline_layer": None,
-           "failure_type": "api_error", "reason": "provider error after retry (not scored)"}
-    path = tmp_path / "run.json"
-    path.write_text(json.dumps([row]))
-    monkeypatch.setattr(run_eval, "connect", lambda: None)
-    run_eval.rescore(path)
-    saved = json.loads(path.read_text())[0]
-    assert saved["result_correct"] is None and saved["failure_type"] == "api_error"
-
-
-def test_a_readback_confirmation_is_not_a_clarifying_question():
+def test_judging_behaviour_sets():
+    asked = {"type": "clarify", "kind": "clarify"}
     confirm = {"type": "clarify", "kind": "confirm"}
-    vague = run_eval.judge(None, {"set": "clarify"}, confirm, [])
-    assert not vague["passed"] and vague["failure_type"] == "did_not_clarify"
-    clear = run_eval.judge(None, {"set": "overask"}, confirm, [])
-    assert clear["passed"] and clear["failure_type"] is None
-    asked = run_eval.judge(None, {"set": "clarify"}, {"type": "clarify", "kind": "clarify"}, [])
-    assert asked["passed"]
+    declined = {"type": "final", "status": "declined"}
+    assert run_eval.judge(None, {"set": "clarify"}, asked, {})["passed"]
+    assert not run_eval.judge(None, {"set": "clarify"}, confirm, {})["passed"]
+    assert run_eval.judge(None, {"set": "decline"}, declined, {})["passed"]
+    assert run_eval.judge(None, {"set": "overask"}, confirm, {})["passed"]
+    assert run_eval.judge(None, {"set": "false_decline"}, declined, {})["failure_type"] == "declined_wrongly"
 
 
-def test_flow_cases_are_separate_from_unseen_holdout():
-    cases = run_eval.load_suite("flow")
-    assert len(cases) == 6 and all(c["tuned_on"] for c in cases)
-    assert any(c.get("history") for c in cases)
-    assert not ({c["id"] for c in cases} & {c["id"] for c in run_eval.load_suite("holdout")})
+def test_a_wrong_verified_answer_is_a_silent_wrong_and_fails_the_gate(con):
+    item = {"set": "answer", "question": "Orders?", "gold_sql": "SELECT COUNT(DISTINCT order_id) AS orders "
+                                                               "FROM sales WHERE line_type = 'Sale'"}
+    wrong = {"type": "final", "status": "done", "trust": "verified", "sql": "SELECT COUNT(*) AS orders FROM sales"}
+    right = {**wrong, "sql": item["gold_sql"]}
+    bad = run_eval.judge(con, item, wrong, {})
+    assert bad["failure_type"] == "silent_wrong" and run_eval.judge(con, item, right, {})["passed"]
+    rows = [{**bad, "set": "answer"}]
+    assert not run_eval.passes_gate(rows, 1)
 
 
-def test_release_gate_rejects_missing_runs_errors_and_low_accuracy():
-    assert run_eval.passes_gate([{"passed": True}], 1, 1.)
-    assert not run_eval.passes_gate([], 1, 0.)
-    assert not run_eval.passes_gate([{"passed": None}], 1, 0.)
-    assert not run_eval.passes_gate([{"passed": True}, {"passed": False}], 2, .9)
-
-
-def test_history_is_forwarded_to_the_agent():
-    seen = {}
-
-    class Agent:
-        def start(self, question, **kwargs):
-            seen.update(kwargs)
-            return "r", iter([{"type": "final", "status": "done"}])
-
-    run_eval.ask(Agent(), {"question": "Now by channel", "history": "Orders from Mumbai", "set": "answer"})
-    assert seen["history"] == "Orders from Mumbai"
-
-
-def test_decline_by_the_understanding_step_is_recognised():
-    events = [{"type": "step", "step": "understand", "status": "declined", "detail": {"decision": "decline"}}]
-    assert run_eval.decline_layer(events) == "understanding"
+def test_summary_reports_the_gate_measures():
+    rows = [{"suite": "holdout", "set": "answer", "id": "a", "question": "q", "status": "done", "trust": "verified",
+             "passed": True, "result_correct": True, "failure_type": None, "reason": "match", "questions": 0,
+             "first_reading": True, "seconds": 3.0, "cost": 0.01, "model": "m", "code_revision": "abc1234"}]
+    text = run_eval.summary(rows)
+    assert "Silent wrong answers (gate 0) | 0" in text and "Verified answers equal to the gold" in text

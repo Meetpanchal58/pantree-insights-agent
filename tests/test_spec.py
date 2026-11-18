@@ -6,10 +6,11 @@ import pytest
 
 from pantree_insights.db import run_query
 from pantree_insights.guardrails import check_sql
-from pantree_insights.recompute import canonical_sql, check_answer
 from pantree_insights.spec import Filter, Measure, QuerySpec, compile_spec, default_catalog, validate
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from reference_sql import canonical_sql, same_numbers  # noqa: E402
 from run_eval import load_suite  # noqa: E402
 from spec_eval import check, load_gold_specs  # noqa: E402
 
@@ -22,13 +23,13 @@ def test_every_answer_question_has_a_gold_spec():
     assert set(ITEMS) <= set(GOLD), sorted(set(ITEMS) - set(GOLD))
 
 
-@pytest.mark.parametrize("key", sorted(k for k, v in GOLD.items() if v.get("route") != "template"))
-def test_compiled_gold_spec_returns_the_gold_answer(key):
+@pytest.mark.parametrize("key", sorted(GOLD))
+def test_gold_spec_or_template_returns_the_gold_answer(key):
     result = check(ITEMS[key], GOLD[key], CAT)
     assert result["ok"], f"{key}: {result['reason']}\n{result['sql']}"
 
 
-@pytest.mark.parametrize("key", sorted(k for k, v in GOLD.items() if v.get("route") != "template"))
+@pytest.mark.parametrize("key", sorted(k for k, v in GOLD.items() if not v.get("template")))
 def test_compiled_sql_passes_the_safety_checks(key):
     sql = compile_spec(QuerySpec.model_validate(GOLD[key]), CAT)
     verdict = check_sql(sql)
@@ -75,9 +76,8 @@ def test_every_metric_by_every_dimension_agrees_with_the_recompute(metric, conce
     if reference is None:
         return
     canonical = run_query(CAT.con, reference, max_rows=100_000).frame
-    status, found = check_answer(frame[[key, "value_out"]], canonical, [key],
-                                 ratio=CAT.metrics.metrics[metric].unit == "ratio", column="value_out")
-    assert status == "verified", (metric, concept, found)
+    problems = same_numbers(frame, canonical, key, "value_out")
+    assert not problems, (metric, concept, problems[:3])
 
 
 # ----------------------------------------------------------------------------- validation answers with questions

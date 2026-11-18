@@ -6,7 +6,8 @@ import pytest
 from pantree_insights.config import ROOT
 from pantree_insights.db import QueryTimeout, run_query
 from pantree_insights.guardrails import check_sql
-from pantree_insights.semantic import load_examples, load_metrics, load_schema
+from pantree_insights.semantic import load_metrics, load_schema
+from pantree_insights.templates import TEMPLATES, build
 
 pytestmark = pytest.mark.data
 
@@ -50,9 +51,9 @@ def test_custom_metric_runs(con, name):
     assert len(run_query(con, sql).frame) > 0
 
 
-@pytest.mark.parametrize("example", load_examples().examples, ids=lambda e: e.id)
-def test_example_passes_guardrails_and_returns_rows(con, example):
-    result = check_sql(example.sql)
+@pytest.mark.parametrize("name", sorted(TEMPLATES))
+def test_template_passes_guardrails_and_returns_rows(con, name):
+    result = check_sql(build(name, {})[0])
     assert result.ok, result.errors
     assert len(run_query(con, result.sql).frame) > 0
 

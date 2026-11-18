@@ -32,7 +32,7 @@ value_aliases:
   paid_social: [social ads traffic]
   Tier 1: [metro, metros, big cities]
   Tier 3: [small towns, smaller cities]
-  Size Issue: [wrong size, sizing problem]
+  Size Issue: [sizing problem]
   Fit Issue: [bad fit, does not fit]
   Out of Stock: [stockout, stock out, sold out]
   Prime: [prime members, loyalty members, paid members]
@@ -81,14 +81,31 @@ terms:
     over all sale lines, not by sales.event_id (events overlap; event_id only says which price applied).
     "How did an event do" = its orders, net sales and realized revenue in that window.
 
-# Phrases that need a table retrieval might not rank highly; these tables are added to the context first.
-term_tables:
-  delivery region: [sales, customer_addresses]
-  delivery address: [sales, customer_addresses]
-  delivered to: [sales, customer_addresses]
-  shipped to: [sales, customer_addresses]
-  delivery state: [sales, customer_addresses]
-  delivery city: [sales, customer_addresses]
-  city tier: [sales, customer_addresses]
-  last-click: [marketing_attribution, campaigns]
-  credited revenue: [marketing_attribution, campaigns]
+# Phrases with more than one meaning in this shop: always asked, whatever the interpreter thinks (the first meaning
+# is the suggested default). Add a phrase here when two readings give different numbers.
+ambiguous:
+  wrong size:
+    - "The item did not fit: delivered lines with size fit Too Small or Too Large (sales.size_fit)"
+    - "The return reason given was Size Issue (sales.return_reason)"
+  worst reviews:
+    - "Lowest average star rating of published reviews"
+    - "Highest share of negative reviews"
+  best reviews:
+    - "Highest average star rating of published reviews"
+    - "Lowest share of negative reviews"
+  best customers:
+    - "Customers with the most realized revenue"
+    - "Customers with the most orders"
+    - "Customers who order most often (repeat buyers)"
+  active customers:
+    - "Customers who placed an order in the period"
+    - "Customers whose account status is Active"
+  performing:
+    - "Realized revenue"
+    - "Orders"
+    - "Conversion rate"
+  performance:
+    - "Realized revenue"
+    - "Orders"
+    - "Conversion rate"
+

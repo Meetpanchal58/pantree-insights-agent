@@ -382,7 +382,7 @@ class Store:
                 lines.append(f"User: {m['content']}")
             else:
                 run = m.get("run") or {}
-                plan = (run.get("plan") or {}).get("restated_question")
+                plan = run.get("restated") or (run.get("plan") or {}).get("restated_question")
                 lines.append(f"Analyst: {m['content']}" + (f" (analysed: {plan})" if plan else ""))
         return "\n".join(lines)
 

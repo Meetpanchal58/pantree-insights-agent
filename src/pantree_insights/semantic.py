@@ -156,55 +156,16 @@ class Metrics(BaseModel):
         return "\n\n".join(out)
 
 
-# ----------------------------------------------------------------------------- examples.yaml
-class VerifySpec(BaseModel):
-    """How to recompute one result column from metrics.yaml (recompute.py) to check a reference query's numbers."""
-    metric: str
-    column: str                      # result column holding the metric
-    by: dict[str, str] = {}          # result key column -> SQL expression with full table names
-    where: list[str] = []            # extra conditions with full table names
-    time: str | None = None          # time column if not the metric source's default
-    partial: bool = False            # the query returns only some rows (top-N, HAVING): compare those
-
-
-class Example(BaseModel):
-    id: str
-    question: str
-    sql: str
-    difficulty: Literal["easy", "medium", "hard"]
-    tags: list[str] = []
-    notes: str | None = None
-    area: str | None = None          # query library only: sales, funnel, customers, marketing, ...
-    variants: list[str] = []         # other ways people ask the same thing (searched by retrieval)
-    metrics: list[str] = []          # metrics.yaml names the query computes (checked by tests)
-    verify: list[VerifySpec] = []    # recomputation checks of its numbers (tests/test_library.py)
-
-
-class Examples(BaseModel):
-    examples: list[Example]
-
-    @model_validator(mode="after")
-    def _unique(self) -> Examples:
-        ids = [e.id for e in self.examples]
-        if len(ids) != len(set(ids)):
-            raise ValueError("duplicate example ids")
-        return self
-
-
 # ----------------------------------------------------------------------------- glossary.yaml
 class Glossary(BaseModel):
     value_aliases: dict[str, list[str]] = {}     # stored value -> other names people use
     terms: dict[str, str] = {}                   # business word -> meaning
-    term_tables: dict[str, list[str]] = {}       # business phrase -> tables it needs (added by retrieval)
+    ambiguous: dict[str, list[str]] = {}         # phrase with several meanings here -> the meanings (always asked)
 
     def terms_in(self, text: str) -> dict[str, str]:
         """Glossary terms mentioned in a question (whole words, any case)."""
         return {term: meaning for term, meaning in self.terms.items() if _mentions(term, text)}
 
-    def tables_in(self, text: str) -> list[str]:
-        """Tables named by the glossary phrases a question uses, in glossary order."""
-        return list(dict.fromkeys(t for phrase, tables in self.term_tables.items() if _mentions(phrase, text)
-                                  for t in tables))
 
 
 def _mentions(phrase: str, text: str) -> bool:
@@ -298,7 +259,7 @@ def load_concepts(folder: Path | None = None) -> Concepts:
 def with_catalog_concepts(raw: dict, folder: Path) -> dict:
     """Every category or yes/no column of a subject's own table is a cut of that subject, even when concepts.yaml
     does not list it (order status, cancel reason, list surface, colour ...): without it, a split by that column
-    would be silently dropped from the understanding, the read-back and the number check. Hand-written concepts
+    would be impossible to request. Hand-written concepts
     win; these only fill the gaps, named after the column."""
     from .catalog import load_catalog  # catalog.py imports this module
 
@@ -321,19 +282,6 @@ def with_catalog_concepts(raw: dict, folder: Path) -> dict:
     return {**raw, "concepts": concepts, "concept_info": info}
 
 
-def load_library(folder: Path | None = None) -> list[Example]:
-    """The query library: semantic/library/<area>.yaml, each {area, queries: [...]}. Reference queries for
-    retrieval only; evaluation scores the verified examples in examples.yaml (load_examples)."""
-    out: list[Example] = []
-    for path in sorted(((folder or get_settings().semantic_dir) / "library").glob("*.yaml")):
-        raw = _read(path)
-        out += [Example(**{"area": raw["area"], **q}) for q in raw["queries"]]
-    ids = [e.id for e in out]
-    if len(ids) != len(set(ids)):
-        raise ValueError("duplicate query ids in semantic/library")
-    return out
-
-
 @lru_cache
 def load_schema(folder: Path | None = None) -> Schema:
     return Schema.model_validate(_read((folder or get_settings().semantic_dir) / "schema.yaml"))
@@ -345,15 +293,5 @@ def load_metrics(folder: Path | None = None) -> Metrics:
 
 
 @lru_cache
-def load_examples(folder: Path | None = None) -> Examples:
-    return Examples.model_validate(_read((folder or get_settings().semantic_dir) / "examples.yaml"))
-
-
-@lru_cache
 def load_glossary(folder: Path | None = None) -> Glossary:
     return Glossary.model_validate(_read((folder or get_settings().semantic_dir) / "glossary.yaml"))
-
-
-def tables_in(sql: str) -> set[str]:
-    """Rough list of table names a SQL string mentions (for picking relevant examples)."""
-    return {name.lower() for name in re.findall(r"(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)", sql, re.I)}

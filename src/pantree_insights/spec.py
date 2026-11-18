@@ -25,13 +25,33 @@ from typing import Literal
 
 import sqlglot
 from pydantic import BaseModel, Field, model_validator
+from sqlglot import exp
 
 from .joins import JoinGraph
-from .recompute import _aliases, _full_names
 from .semantic import ConceptEntry, Concepts, Metrics, Schema
 
 GRAINS = ("day", "week", "month", "quarter", "year")
 TICKETS = "tickets"                          # virtual table: the tickets source (one row per support ticket)
+
+
+def _aliases(from_: str) -> dict[str, str] | None:
+    """{'s': 'sales', 'p': 'product_master'} for a metric source's FROM clause; None if it is a subquery."""
+    tree = sqlglot.parse_one(f"SELECT 1 FROM {from_}", read="duckdb")
+    if tree.find(exp.Subquery):
+        return None
+    return {t.alias_or_name.lower(): t.name.lower() for t in tree.find_all(exp.Table)}
+
+
+def _full_names(expression: str, aliases: dict[str, str]) -> tuple[str, set[str]]:
+    """Rewrite alias.column to table.column (s.net_amount -> sales.net_amount); also return the tables used."""
+    tree = sqlglot.parse_one(f"SELECT {expression}", read="duckdb")
+    used = set()
+    for col in tree.find_all(exp.Column):
+        table = aliases.get((col.table or "").lower())
+        if table:
+            col.set("table", exp.to_identifier(table))
+            used.add(table)
+    return tree.selects[0].sql(dialect="duckdb"), used
 
 
 # ----------------------------------------------------------------------------- the spec
