@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import sqlglot
@@ -35,6 +36,7 @@ def load_gold_specs() -> dict[str, dict]:
 
 def check(item: dict, raw: dict, cat) -> dict:
     """{route, ok, reason, sql} for one question."""
+    started = time.perf_counter()
     if raw.get("template"):
         route = "template"
         try:
@@ -48,18 +50,24 @@ def check(item: dict, raw: dict, cat) -> dict:
         if problems:
             return {"route": route, "ok": False, "reason": "invalid: " + "; ".join(problems), "sql": None}
         sql = compile_spec(spec, cat)
+    compile_seconds = time.perf_counter() - started
     try:
-        frame = run_query(cat.con, sql).frame
+        result = run_query(cat.con, sql)
+        frame = result.frame
+        if result.truncated:
+            return {"route": route, "ok": False, "reason": "result exceeded the row limit", "sql": sql}
     except Exception as error:                         # noqa: BLE001 - reported, never hidden
         return {"route": route, "ok": False, "reason": f"database error: {error}", "sql": sql}
     gold, keys, metrics = gold_frame(cat.con, item)
     tree = sqlglot.parse_one(item["gold_sql"], read="duckdb")
     labels = {e.alias_or_name for e in tree.selects if e.find(exp.Case)}
     agent = trim_top_n(frame, gold, item["gold_sql"], item["question"])
-    ok, reason, _ = align(gold, agent, keys, metrics, label_columns=labels)
+    options = {"percent_metrics": set(item.get("percent_metrics", [])), "tolerances": item.get("metric_tolerances")}
+    ok, reason, _ = align(gold, agent, keys, metrics, label_columns=labels, **options)
     if not ok and len(frame) > len(gold) and FULL_LIST.search(item["question"]):
-        ok, reason, _ = align(gold, frame, keys, metrics, label_columns=labels, superset=True)
-    return {"route": route, "ok": ok, "reason": reason, "sql": sql}
+        ok, reason, _ = align(gold, frame, keys, metrics, label_columns=labels, superset=True, **options)
+    return {"route": route, "ok": ok, "reason": reason, "sql": sql,
+            "compile_seconds": compile_seconds, "query_seconds": result.seconds}
 
 
 def main() -> None:

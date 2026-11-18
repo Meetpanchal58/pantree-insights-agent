@@ -1,13 +1,15 @@
 # Architecture
 
-## The guarantee
+## The design target
 
 > Every number the user is shown is correct for the confirmed question, the governed definitions and the data
 > snapshot. When the system cannot reach that bar it asks, or says it cannot answer as a verified number yet. It
 > never guesses.
 
-A question ends in one of three ways only: a **verified answer**, a **question back to the user**, or **"I can't
-answer this as a verified number yet"** (with what it can answer). There is no path for a plausible wrong number.
+A question can produce an answer, clarification, a refusal, or a recoverable failure. A compiled query and
+checked numeric claims reduce errors, but do not prove the interpretation, definitions or compiler are correct.
+The [evaluation baseline](evaluation-baseline.md) measures these limits; its compiler results are not a claim
+of perfect model or business-answer accuracy.
 
 The design follows *structural abstention* ([Never the Number, 2026](https://arxiv.org/html/2608.13926)): a
 language model may decide **which question** is answered, never **which value** is returned. The model reads and

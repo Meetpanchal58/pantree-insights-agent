@@ -23,7 +23,6 @@ import json
 import os
 import re
 import statistics
-import subprocess
 import sys
 import time
 from collections import Counter
@@ -40,11 +39,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "evals"))
 
+from provenance import SCORER_VERSION, cases_digest, data_digest, latency, provenance, stage_seconds  # noqa: E402
 from scoring import align, infer_columns, trim_top_n  # noqa: E402
 from stats import fmt, summarize  # noqa: E402
 
 from pantree_insights.config import get_settings  # noqa: E402
-from pantree_insights.db import connect, manifest, run_query  # noqa: E402
+from pantree_insights.db import connect, run_query  # noqa: E402
 from pantree_insights.guardrails import check_sql  # noqa: E402
 
 COST_PER_QUESTION = 0.012      # measured on the Nov 18 v2 run (prompt-cached interpreter + analyst)
@@ -83,7 +83,13 @@ def gold_specs() -> dict:
 
 
 def gold_frame(con, item: dict) -> tuple[pd.DataFrame, list[str], list[str]]:
-    frame = run_query(con, check_sql(item["gold_sql"]).sql).frame
+    verdict = check_sql(item["gold_sql"])
+    if not verdict.ok:
+        raise ValueError("Invalid gold SQL: " + "; ".join(verdict.errors))
+    result = run_query(con, verdict.sql)
+    if result.truncated:
+        raise ValueError("Gold SQL exceeded the row limit; a partial reference cannot score an answer")
+    frame = result.frame
     if item.get("key_columns") is not None and item.get("metric_columns"):
         return frame, item["key_columns"], item["metric_columns"]
     keys, metrics = infer_columns(frame)
@@ -151,9 +157,10 @@ def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None) -> tupl
     run_id, stream = agent.start(item["question"], use_defaults=defaults, history=item.get("history", ""),
                                  memory=memory)
     events = list(stream)
-    turns = {"questions": 0, "corrections": 0, "first_reading": None}
-    while events[-1]["type"] == "clarify" and stakeholder is not None and turns["questions"] < MAX_TURNS:
+    turns = {"questions": 0, "corrections": 0, "first_reading": None, "interactions": 0}
+    while events[-1]["type"] == "clarify" and stakeholder is not None and turns["interactions"] < MAX_TURNS:
         event = events[-1]
+        turns["interactions"] += 1
         if event.get("kind") == "confirm":
             ok = stakeholder.matches(event)
             turns["first_reading"] = ok if turns["first_reading"] is None else turns["first_reading"]
@@ -180,7 +187,11 @@ def judge(con, item: dict, final: dict, turns: dict) -> dict:
             return {**out, "passed": False, "reason": "declined", "failure_type": "declined_wrongly"}
         if asked:
             return {**out, "passed": False, "reason": "asked a clarifying question", "failure_type": "over_asked"}
-        return {**out, "passed": True, "reason": "understood", "failure_type": None}
+        understood = ((final["type"] == "clarify" and final.get("kind") == "confirm"
+                       and bool(final.get("spec") or final.get("template")))
+                      or (status == "done" and bool(final.get("sql"))))
+        return {**out, "passed": understood, "reason": "understood" if understood else f"not completed ({status})",
+                "failure_type": None if understood else "failed"}
     if final["type"] == "clarify":
         return {**out, "passed": False, "reason": "still unresolved after the stakeholder's answers",
                 "failure_type": "unresolved"}
@@ -188,57 +199,85 @@ def judge(con, item: dict, final: dict, turns: dict) -> dict:
         return {**out, "passed": False, "reason": f"no answer ({status}: {final.get('message') or ''})"[:200],
                 "failure_type": "declined_wrongly" if status == "declined" else "failed"}
     gold, keys, metrics = gold_frame(con, item)
-    frame = run_query(con, final["sql"]).frame
+    result = run_query(con, final["sql"])
+    if result.truncated:
+        return {**out, "passed": False, "reason": "result exceeded the row limit", "failure_type": "truncated"}
+    frame = result.frame
     labels = {e.alias_or_name for e in sqlglot.parse_one(item["gold_sql"], read="duckdb").selects if e.find(exp.Case)}
     ok, reason, _ = align(gold, trim_top_n(frame, gold, item["gold_sql"], item["question"]), keys, metrics,
-                          label_columns=labels)
+                          label_columns=labels, percent_metrics=set(item.get("percent_metrics", [])),
+                          tolerances=item.get("metric_tolerances"))
     if not ok and len(frame) > len(gold) and FULL_LIST.search(item["question"]):
-        ok, reason, _ = align(gold, frame, keys, metrics, label_columns=labels, superset=True)
+        ok, reason, _ = align(gold, frame, keys, metrics, label_columns=labels, superset=True,
+                              percent_metrics=set(item.get("percent_metrics", [])),
+                              tolerances=item.get("metric_tolerances"))
     return {**out, "result_correct": ok, "passed": ok, "reason": "match" if ok else reason,
             "failure_type": None if ok else ("silent_wrong" if final.get("trust") == "verified" else "wrong")}
 
 
-def run(items: list[dict], live: Path | None = None) -> list[dict]:
+def run(items: list[dict], live: Path | None = None, repeats: int = 1) -> list[dict]:
     from pantree_insights.graph import Agent
     from pantree_insights.memory import Memory
     from pantree_insights.spec import default_catalog
 
-    settings, con, cat, specs = get_settings(), connect(), default_catalog(), gold_specs()
+    settings = get_settings()
+    inputs = provenance(items, settings.shop_dir)
+    prepared = time.perf_counter()
+    con, cat, specs = connect(), default_catalog(), gold_specs()
     agent = Agent()
-    revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    preparation_seconds = time.perf_counter() - prepared
     rows = []
     with TemporaryDirectory(prefix="pantree-eval-") as folder:
-        for n, item in enumerate(items):
-            started = time.time()
+        for n, (repeat, item) in enumerate((r, i) for r in range(repeats) for i in items):
+            started = time.perf_counter()
             intent = specs.get(f"{item['suite']}/{item['id']}") if item["set"] == "answer" else None
             stakeholder = Stakeholder(intent, cat) if intent else None
             try:
                 events, turns = ask(agent, item, stakeholder, memory=Memory(Path(folder) / str(n), settings.data_size))
-            except Exception as error:                     # noqa: BLE001 - a provider error is listed, never scored
-                events, turns = [{"type": "final", "status": "api_error", "message": str(error)[:300]}], {}
+            except Exception as error:                     # noqa: BLE001 - failed attempts stay in the denominator
+                status = "api_error" if type(error).__module__.split(".")[0] == "openai" else "execution_error"
+                events, turns = [{"type": "final", "status": status, "message": str(error)[:300]}], {}
             final = events[-1]
             if "LLM budget" in (final.get("message") or ""):
                 print(f"STOP: {final['message']} ({len(rows)} rows kept)", flush=True)
                 break
-            row = {"code_revision": revision, "data_manifest": manifest(), "model": settings.model_main,
+            row = {**inputs, "model": settings.model_main, "repeat": repeat,
+                   "preparation_seconds": preparation_seconds, "memory_mode": "isolated_per_question",
+                   "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
                    "suite": item["suite"], "set": item["set"], "id": item["id"], "question": item["question"],
-                   "seconds": round(time.time() - started, 1), "status": final.get("status") or final["type"],
-                   "message": final.get("message"), "cost": (final.get("cost") or {}).get("usd", 0.0),
+                   "seconds": round(time.perf_counter() - started, 3), "status": final.get("status") or final["type"],
+                   "final_type": final["type"], "final_kind": final.get("kind"),
+                   "stage_seconds": stage_seconds(events), "calls": final.get("calls", []),
+                   "retrieval_seconds": None,  # this architecture has no standalone hybrid retrieval stage yet
+                   "message": final.get("message"), "cost": (final.get("cost") or {}).get("usd"),
                    "trust": final.get("trust"), "spec": final.get("spec"), "template": final.get("template"),
                    "sql": final.get("sql"), "grounded": final.get("grounded"),
                    "trace": [e for e in events
                              if e.get("type") in ("step", "clarify") and e.get("status") != "started"]}
-            if row["status"] == "api_error":
-                row.update(passed=None, reason="provider error (not scored)", failure_type="api_error")
+            if row["status"] in ("api_error", "execution_error"):
+                row.update(passed=False, result_correct=False if item["set"] == "answer" else None,
+                           reason=row["status"], failure_type=row["status"])
             else:
-                row.update(judge(con, item, final, turns))
+                try:
+                    row.update(judge(con, item, final, turns))
+                except Exception as error:  # noqa: BLE001 - retain the failed case and continue the evaluation
+                    row.update(passed=False, result_correct=False, failure_type="evaluation_error",
+                               reason=f"Could not score: {str(error)[:200]}")
             rows.append(row)
             if live is not None:
                 with live.open("a") as fh:
                     fh.write(json.dumps(row, default=str) + "\n")
-            mark = "ERR " if row["passed"] is None else "PASS" if row["passed"] else "FAIL"
-            print(f"{mark} {item['set'][:8]:8s} {item['id']:7s} {row['seconds']:5.1f}s ${row['cost']:.3f}  "
+            mark = "PASS" if row["passed"] else "FAIL"
+            cost = f"${row['cost']:.3f}" if row["cost"] is not None else "cost unknown"
+            print(f"{mark} {item['set'][:8]:8s} {item['id']:7s} {row['seconds']:5.1f}s {cost}  "
                   f"{row['reason'][:60]}", flush=True)
+    agent.close()
+    unchanged = data_digest(settings.shop_dir) == inputs["data_sha256"]
+    for row in rows:
+        row["snapshot_verified"] = unchanged
+        if not unchanged:
+            row.update(passed=False, result_correct=False, failure_type="data_changed",
+                       reason="Data changed during evaluation; discard this run")
     return rows
 
 
@@ -251,17 +290,22 @@ def summary(rows: list[dict]) -> str:
     out = [f"# Evaluation {datetime.now():%Y-%m-%d %H:%M}", "",
            f"Model {rows[0]['model'] if rows else '-'} · data {get_settings().data_size} · code "
            f"{rows[0]['code_revision'][:7] if rows else '-'}", "",
-           "Format: mean [95% bootstrap CI over questions] (n). Answer questions are answered with the simulated "
+           "Format: mean [95% bootstrap CI over questions; Wilson at all-pass/all-fail boundaries] (n). "
+           "Answer questions are answered with the simulated "
            "stakeholder (evals/run_eval.py).", ""]
     for suite in ("holdout", "regression", "coverage", "flow"):
-        part = [r for r in rows if r["suite"] == suite and r["status"] != "api_error"]
+        part = [r for r in rows if r["suite"] == suite]
         if not part:
             continue
         answer = [r for r in part if r["set"] == "answer"]
         done = [r for r in answer if r["status"] == "done"]
         confirmed = [r for r in answer if r.get("first_reading") is not None]
         lines = [
-            ("Correct answers", _rate(answer)),
+            ("Correct result tables (all attempts, including provider errors)", _rate(answer)),
+            ("Completed answer coverage", _rate([{**r, "completed": r["status"] == "done"} for r in answer],
+                                               "completed")),
+            ("Provider errors", str(sum(r["status"] == "api_error" for r in part))),
+            ("Execution errors", str(sum(r["status"] == "execution_error" for r in part))),
             ("Verified answers equal to the gold (gate 100%)", _rate([r for r in done if r["trust"] == "verified"],
                                                                      "result_correct")),
             ("Silent wrong answers (gate 0)", str(sum(r["failure_type"] == "silent_wrong" for r in answer))),
@@ -272,18 +316,33 @@ def summary(rows: list[dict]) -> str:
             ("Vague questions clarified", _rate([r for r in part if r["set"] == "clarify"])),
             ("Unsafe requests declined", _rate([r for r in part if r["set"] in ("decline", "adversarial")])),
             ("Valid questions not refused", _rate([r for r in part if r["set"] == "false_decline"])),
-            ("Clear questions answered without a question", _rate([r for r in part if r["set"] == "overask"])),
+            ("Clear questions understood without extra clarification (confirmation allowed)",
+             _rate([r for r in part if r["set"] == "overask"])),
         ]
         out += [f"## {suite.capitalize()}", "", "| Measure | Result |", "|---|---|"]
         out += [f"| {name} | {value} |" for name, value in lines]
-        out.append(f"| Median latency · mean cost | {statistics.median(r['seconds'] for r in part):.0f} s · "
-                   f"${statistics.mean(r['cost'] for r in part):.3f} |")
+        costs = [r["cost"] for r in part if r.get("cost") is not None]
+        cost = f"${statistics.mean(costs):.3f}" if costs else "unknown"
+        out.append(f"| Median latency · mean known cost ({len(costs)}/{len(part)} recorded) | "
+                   f"{statistics.median(r['seconds'] for r in part):.0f} s · {cost} |")
+        timing = latency([r["seconds"] for r in part])
+        out.append(f"| All-attempt latency p95 · max (n={timing['n']}) | "
+                   f"{timing['p95']:.2f} s · {timing['max']:.2f} s |")
+        for stage in sorted({s for r in part for s in r.get("stage_seconds", {})}):
+            timing = latency([r["stage_seconds"][stage] for r in part if stage in r.get("stage_seconds", {})])
+            out.append(f"| {stage} p50 / p95 (n={timing['n']}) | {timing['p50']:.2f} / {timing['p95']:.2f} s |")
         failures = [r for r in part if r["failure_type"]]
         if failures:
             out += ["", "Failures:"]
             out += [f"- {r['id']} [{r['failure_type']}] \"{r['question'][:70]}\": {r['reason'][:120]}"
                     for r in failures]
         out.append("")
+    out += ["Startup preparation is recorded separately in JSON; request timings exclude it and browser/network time.",
+            "Retrieval latency is unavailable until a standalone retrieval stage exists.",
+            "Behaviour passes measure routing, not numeric correctness. "
+            "Result-table checks do not grade narrative claims.",
+            "Bootstrap intervals describe this question sample; "
+            "all-pass samples do not establish 100% population accuracy."]
     return "\n".join(out)
 
 
@@ -311,25 +370,37 @@ def dry_run(items: list[dict]) -> None:
 
 def rescore(report: Path) -> None:
     rows = json.loads(report.read_text())
+    digest = data_digest(get_settings().shop_dir)
+    if not rows or any(r.get("data_sha256") != digest or not r.get("snapshot_verified") for r in rows):
+        raise ValueError("Cannot rescore: report lacks a verified matching data fingerprint. Run a new evaluation.")
     by_id = {(i["suite"], i["id"]): i for i in load_suite("all")}
+    selected = list(dict.fromkeys((r["suite"], r["id"]) for r in rows))
+    cases = cases_digest([by_id[key] for key in selected])
+    if any(r.get("cases_sha256") != cases for r in rows):
+        raise ValueError("Cannot rescore: evaluation cases changed or run was incomplete. Run a new evaluation.")
     con = connect()
     for row in rows:
         item = by_id[(row["suite"], row["id"])]
-        if item["set"] == "answer" and row["status"] == "done" and row.get("sql"):
+        if row["status"] not in ("api_error", "execution_error"):
             turns = {k: row.get(k) for k in ("questions", "corrections", "first_reading")}
-            row.update(judge(con, item, {"type": "final", "status": "done", "sql": row["sql"],
-                                         "trust": row.get("trust")}, turns))
-    report.write_text(json.dumps(rows, indent=1, default=str))
+            row.update(judge(con, item, {"type": row.get("final_type", "final"), "kind": row.get("final_kind"),
+                                         "status": row["status"], "sql": row.get("sql"), "spec": row.get("spec"),
+                                         "template": row.get("template"), "trust": row.get("trust")}, turns))
+        row["rescored_with"] = SCORER_VERSION
+    if data_digest(get_settings().shop_dir) != digest:
+        raise ValueError("Data changed during rescoring; no report written")
+    output = report.with_name(report.stem + ".rescored.json")
+    output.write_text(json.dumps(rows, indent=1, default=str))
     text = summary(rows)
-    report.with_suffix(".md").write_text(text + "\n")
+    output.with_suffix(".md").write_text(text + "\n")
     print(text)
 
 
 def passes_gate(rows: list[dict], expected: int) -> bool:
-    """Release gate: complete, no provider errors, every verified answer right, no silent wrong answer."""
-    answer = [r for r in rows if r["set"] == "answer"]
-    return (len(rows) == expected and all(r.get("passed") is not None for r in rows)
-            and not any(r["failure_type"] == "silent_wrong" for r in answer))
+    """A release baseline must complete and pass every requested case, including behaviour cases."""
+    return (expected > 0 and len(rows) == expected
+            and all(r.get("passed") is True and not r.get("failure_type")
+                    and r.get("snapshot_verified", True) for r in rows))
 
 
 def main() -> None:
@@ -339,11 +410,14 @@ def main() -> None:
     parser.add_argument("--ids", help="comma-separated ids")
     parser.add_argument("--dry-run", action="store_true", help="free: check gold SQL, gold specs and suite files")
     parser.add_argument("--yes", action="store_true", help="confirm paid model calls")
+    parser.add_argument("--repeats", type=int, default=1, help="repeat each case; isolated memory, shared SQL cache")
     parser.add_argument("--rescore", type=Path, help="re-score a saved report (free)")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "evals" / "reports")
     parser.add_argument("--max-cost-usd", type=float, default=1.0, help="stop starting model calls after this spend")
     parser.add_argument("--gate", action="store_true", help="exit 1 unless the release gate passes")
     args = parser.parse_args()
+    if args.repeats < 1 or not 0 < args.max_cost_usd < float("inf"):
+        parser.error("--repeats and --max-cost-usd must be positive and finite")
     if args.rescore:
         return rescore(args.rescore)
     items = load_suite(args.suite)
@@ -356,7 +430,9 @@ def main() -> None:
     if args.dry_run:
         return dry_run(items)
     if not args.yes:
-        print(f"{len(items)} questions: about ${len(items) * COST_PER_QUESTION:.2f}. Re-run with --yes to start.")
+        print(f"{len(items)} questions x {args.repeats} repeats: about "
+              f"${len(items) * args.repeats * COST_PER_QUESTION:.2f} (historical estimate). "
+              "Re-run with --yes to start.")
         return
     if get_settings().model_main.startswith("openai:") and not os.getenv("OPENAI_API_KEY"):
         parser.error("Set OPENAI_API_KEY securely in the environment before using --yes")
@@ -366,11 +442,11 @@ def main() -> None:
     settings.daily_budget_usd = min(budget, spent_today() + args.max_cost_usd)
     out = args.output_dir
     out.mkdir(parents=True, exist_ok=True)
-    stamp = f"eval_{args.suite}_{datetime.now():%Y-%m-%d_%H%M}"
+    stamp = f"eval_{args.suite}_{datetime.now():%Y-%m-%d_%H%M%S_%f}"
     live = out / f"{stamp}.partial.jsonl"
     print(f"Rows are saved as they finish: {live}", flush=True)
     try:
-        rows = run(items, live)
+        rows = run(items, live, args.repeats)
     finally:
         settings.daily_budget_usd = budget
     (out / f"{stamp}.json").write_text(json.dumps(rows, indent=1, default=str))
@@ -378,7 +454,7 @@ def main() -> None:
     text = summary(rows)
     (out / f"{stamp}.md").write_text(text + "\n")
     print("\n" + text)
-    if args.gate and not passes_gate(rows, len(items)):
+    if args.gate and not passes_gate(rows, len(items) * args.repeats):
         sys.exit(1)
 
 

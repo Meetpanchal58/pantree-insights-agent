@@ -5,8 +5,9 @@
    No such column -> "missing dimension". Duplicate key rows -> "duplicate rows".
 2. The set of key rows must be identical: missing or extra rows fail.
 3. Rows are aligned on the keys; each gold metric column must match one agent numeric column on every
-   aligned row within TOLERANCE (1% relative, or 1e-6 absolute). A ratio reported as a percentage
-   (x100) is accepted. Values assigned to the wrong category fail because rows are aligned first.
+   aligned row within tight floating-point tolerances (1e-9 relative, 1e-6 absolute); integer counts match exactly.
+   Percentage scaling (x100) requires explicit metric annotation. Values assigned to the wrong category fail
+   because rows are aligned first.
 Column names and extra columns do not matter.
 
 Fairness rules (each unit-tested in tests/test_scoring.py):
@@ -18,11 +19,12 @@ Fairness rules (each unit-tested in tests/test_scoring.py):
 """
 from __future__ import annotations
 
+import math
 import re
 
 import pandas as pd
 
-TOLERANCE = 0.01
+TOLERANCE = 1e-9
 _FILLER = {"day", "days", "the", "a", "an", "of", "and"}
 
 
@@ -94,12 +96,16 @@ def trim_top_n(agent: pd.DataFrame, gold: pd.DataFrame, gold_sql: str, question:
     return agent.head(len(gold))
 
 
-def _close(a: float, b: float) -> bool:
+def _close(a: float, b: float, *, exact: bool = False, rtol: float = TOLERANCE, atol: float = 1e-6) -> bool:
     if pd.isna(a) and pd.isna(b):
         return True
     if pd.isna(a) or pd.isna(b):
         return False
-    return abs(a - b) <= TOLERANCE * max(abs(a), abs(b)) or abs(a - b) < 1e-6
+    if not math.isfinite(a) or not math.isfinite(b):
+        return False
+    if exact:
+        return a == b
+    return abs(a - b) <= max(atol, rtol * max(abs(a), abs(b)))
 
 
 def _numeric(frame: pd.DataFrame) -> list[str]:
@@ -107,14 +113,17 @@ def _numeric(frame: pd.DataFrame) -> list[str]:
 
 
 def score(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
-          metric_columns: list[str], *, label_columns: set[str] = frozenset()) -> tuple[bool, str]:
-    ok, reason, _ = align(gold, agent, key_columns, metric_columns, label_columns=label_columns)
+          metric_columns: list[str], *, label_columns: set[str] = frozenset(),
+          percent_metrics: set[str] = frozenset(), tolerances: dict | None = None) -> tuple[bool, str]:
+    ok, reason, _ = align(gold, agent, key_columns, metric_columns, label_columns=label_columns,
+                          percent_metrics=percent_metrics, tolerances=tolerances)
     return ok, reason
 
 
 def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
           metric_columns: list[str], *, label_columns: set[str] = frozenset(),
-          superset: bool = False) -> tuple[bool, str, dict[str, str]]:
+          superset: bool = False, percent_metrics: set[str] = frozenset(),
+          tolerances: dict | None = None) -> tuple[bool, str, dict[str, str]]:
     """Like score(), plus the column mapping agent column -> gold column (keys and matched metrics).
     `superset`: the agent may return more rows than the gold (a full list where the gold kept its top N); every
     gold row must be there with the same numbers."""
@@ -178,17 +187,21 @@ def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
             f" (expected {len(gold)}, got {len(agent)})", {}
 
     # 3. metrics on aligned rows
-    numeric = _numeric(agent)
+    numeric = [c for c in _numeric(agent) if c not in mapping.values()]
     for metric in metric_columns:
-        expected = gold[metric].astype(float).tolist()
+        exact = pd.api.types.is_integer_dtype(gold[metric])
+        expected = gold[metric].tolist() if exact else gold[metric].astype(float).tolist()
+        policy = (tolerances or {}).get(metric, {})
         if metric in agent.columns and metric not in numeric:
             return False, f"wrong metric value: '{metric}' is not numeric", {}
-        options = [metric] if metric in numeric else [c for c in numeric if c not in found_map]
+        options = [metric] if metric in numeric and metric not in found_map else \
+            [c for c in numeric if c not in found_map and c not in metric_columns]
         ok = False
         for col in options:
-            got = agent[col].astype(float).tolist()
-            if all(_close(e, g) for e, g in zip(expected, got, strict=True)) or \
-                    all(_close(e * 100, g) for e, g in zip(expected, got, strict=True)):
+            got = agent[col].tolist() if exact else agent[col].astype(float).tolist()
+            if all(_close(e, g, exact=exact, **policy) for e, g in zip(expected, got, strict=True)) or \
+                    (metric in percent_metrics and not exact and
+                     all(_close(e, g / 100, **policy) for e, g in zip(expected, got, strict=True))):
                 ok = True
                 found_map[col] = metric
                 break
@@ -198,15 +211,8 @@ def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
 
 
 def infer_columns(gold: pd.DataFrame) -> tuple[list[str], list[str]]:
-    """For regression items without annotations: keys = non-numeric columns, metric = the main metric."""
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-    from pantree_insights.charts import main_metric
-
+    """For regression items without annotations: keys = non-numeric columns, metrics = every numeric result column."""
     numeric = _numeric(gold)
     keys = [c for c in gold.columns if c not in numeric]
     keys += [c for c in numeric if c in ("year", "position", "month")]
-    metric = main_metric([c for c in numeric if c not in keys])
-    return keys, [metric] if metric else []
+    return keys, [c for c in numeric if c not in keys]

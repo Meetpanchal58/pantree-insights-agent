@@ -25,7 +25,8 @@ def test_ci_is_seeded_and_brackets_the_mean():
     a, b = summarize(FIXTURE), summarize(FIXTURE)
     assert a["ci"] == b["ci"]
     assert a["ci"][0] <= a["mean"] <= a["ci"][1]
-    assert summarize(rows({f"q{i}": [True] for i in range(10)}))["ci"] == (1.0, 1.0)
+    low, high = summarize(rows({f"q{i}": [True] for i in range(10)}))["ci"]
+    assert 0.7 < low < 0.8 and high == 1.0
 
 
 def test_paired_difference_pairs_on_question_and_repeat():
@@ -41,3 +42,8 @@ def test_missing_measure_and_format():
     assert summarize([{"id": "q1", "repeat": 0, "passed": None}])["mean"] is None
     assert fmt(summarize(FIXTURE)).startswith("67% [")
     assert "pass^3 50%" in fmt(summarize(FIXTURE))
+
+
+def test_unequal_repeats_do_not_claim_pass_k():
+    result = summarize(rows({"q1": [True], "q2": [True, True]}))
+    assert result["k"] == 0 and result["pass_k"] is None
