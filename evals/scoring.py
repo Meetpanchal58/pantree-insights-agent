@@ -113,8 +113,11 @@ def score(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
 
 
 def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
-          metric_columns: list[str], *, label_columns: set[str] = frozenset()) -> tuple[bool, str, dict[str, str]]:
-    """Like score(), plus the column mapping agent column -> gold column (keys and matched metrics)."""
+          metric_columns: list[str], *, label_columns: set[str] = frozenset(),
+          superset: bool = False) -> tuple[bool, str, dict[str, str]]:
+    """Like score(), plus the column mapping agent column -> gold column (keys and matched metrics).
+    `superset`: the agent may return more rows than the gold (a full list where the gold kept its top N); every
+    gold row must be there with the same numbers."""
     found_map: dict[str, str] = {}
     if gold.empty:                                    # the correct answer is "no rows"
         return (agent is None or agent.empty), ("match" if agent is None or agent.empty else "extra rows"), {}
@@ -130,7 +133,8 @@ def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
         wanted = sorted(map(_norm, gold[key]))
         candidates = [key] + [c for c in agent.columns if c != key] if key in agent.columns else list(agent.columns)
         found = next((c for c in candidates if c not in mapping.values()
-                      and sorted(map(_norm, agent[c])) == wanted), None)
+                      and (sorted(map(_norm, agent[c])) == wanted
+                           or (superset and set(wanted) <= set(map(_norm, agent[c]))))), None)
         if found is None:                              # computed labels with the same words, or true/false labels
             for c in candidates:
                 if c in mapping.values() or pd.api.types.is_numeric_dtype(agent[c]):
@@ -154,6 +158,10 @@ def align(gold: pd.DataFrame, agent: pd.DataFrame, key_columns: list[str],
     if dropped and (not mapping or gold[list(mapping)].map(_norm).apply(tuple, axis=1).duplicated().any()):
         return False, dropped[0][1], {}
     keys = list(mapping)
+    if keys and superset:                              # keep the agent rows the gold has
+        gold_set = set(gold[keys].map(_norm).apply(tuple, axis=1))
+        rows = agent[list(mapping.values())].map(_norm).apply(tuple, axis=1).isin(gold_set)
+        agent = agent[rows].reset_index(drop=True)
     if keys:
         agent_keys = agent[list(mapping.values())].map(_norm).apply(tuple, axis=1)
         if agent_keys.duplicated().any():

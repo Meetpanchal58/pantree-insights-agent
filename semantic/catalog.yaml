@@ -24,6 +24,7 @@ tables:
         role: text
         distinct: 7534
         structure: free text, 13-77 characters (letters, digits, spaces, punctuation)
+        label_of: product_id
       brand_name:
         meaning: 13 brands are stored in two spellings (e.g. 'ADIDAS' and 'Adidas', 'PUMA' and 'Puma'), so results by brand
           list them separately; keep the stored values and mention it when such a brand appears
@@ -777,6 +778,7 @@ tables:
         - Zoya Kulkarni
         - Zoya Mehta
         - Zoya Sharma
+        label_of: agent_id
       team:
         meaning: Orders, Returns, Payments or Product Support
         type: text
@@ -876,6 +878,7 @@ tables:
         - Women's Day 2025
         - Women's Day 2026
         - Year End Sale 2025
+        label_of: event_id
       event_type:
         meaning: Festival, Mega Sale, Payday, Clearance or Season Sale
         type: text
@@ -1240,6 +1243,7 @@ tables:
         role: text
         distinct: 756
         structure: free text, 21-55 characters (letters, digits, punctuation)
+        label_of: campaign_id
       channel_group:
         meaning: Paid Search, Paid Social, Display, Affiliate or CRM
         type: text

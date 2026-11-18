@@ -315,7 +315,7 @@ examples:
 
   - id: h09
     difficulty: hard
-    question: Which product sizes lose the most sales to stock-outs?
+    question: Which product sizes in each category lose the most sales to stock-outs?
     sql: |
       SELECT p.category, ps.size, SUM(ih.lost_sales_units) AS lost_units, SUM(ih.demand_units) AS demand_units,
              SUM(ih.lost_sales_units) * 1.0 / NULLIF(SUM(ih.demand_units), 0) AS lost_share

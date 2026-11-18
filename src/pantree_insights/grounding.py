@@ -21,7 +21,7 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 REL_TOLERANCE = 0.005
-Op = Literal["value", "diff", "ratio", "pct_change", "share", "sum", "mean"]
+Op = Literal["value", "diff", "ratio", "pct_change", "share", "sum", "mean", "count", "min", "max"]
 Unit = Literal["ratio", "count", "inr", "pct_points", "number", "days", "minutes", "rating"]
 
 
@@ -36,7 +36,8 @@ class Claim(BaseModel):
     unit: Unit = Field(description="ratio (shown as %), pct_points, count, inr, number, days, minutes, rating")
     column: str = Field(description="Result column the number comes from")
     row: list[KeyValue] = Field(default_factory=list, description="Key values identifying the row; [] = all rows")
-    op: Op = Field("value", description="value | diff | ratio | pct_change | share | sum | mean")
+    op: Op = Field("value", description="value | diff | ratio | pct_change | share | sum | mean | count (rows, "
+                   "or distinct values of column, matching row) | min | max")
     against: list[KeyValue] | None = Field(None, description="Comparison row for diff, ratio, pct_change")
     decimals: int = Field(1, description="Decimals shown in the text (for display rounding)")
 
@@ -139,6 +140,11 @@ def actual(frame: pd.DataFrame, claim: Claim) -> float:
         return float(_rows(frame, claim.row)[claim.column].sum())
     if claim.op == "mean":
         return float(_rows(frame, claim.row)[claim.column].mean())
+    if claim.op == "count":                             # "13 SKUs are out of stock": distinct values in the rows
+        return float(_rows(frame, claim.row)[claim.column].nunique())
+    if claim.op in ("min", "max"):
+        values = _rows(frame, claim.row)[claim.column]
+        return float(values.min() if claim.op == "min" else values.max())
     if claim.op == "share":
         return _one(frame, claim.row, claim.column) / float(frame[claim.column].sum())
     if not claim.against:

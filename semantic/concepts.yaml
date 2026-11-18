@@ -127,7 +127,8 @@ concepts:
     support: customers.is_prime
     reviews: customers.is_prime
   new_or_repeat:
-    orders: sales.is_first_order
+    orders: {column: sales.is_first_order, expression: "CASE WHEN sales.is_first_order THEN 'New' ELSE 'Repeat' END",
+      note: the order was the customer's first ever order (New) or a later one (Repeat)}
   # ---- how they came and what they used
   device:
     orders: sales.device
@@ -161,6 +162,12 @@ concepts:
     support: support_contacts.channel
   payment_method:
     orders: sales.payment_method
+  day_type:
+    orders: {column: sales.event_id, expression: "CASE WHEN sales.event_id IS NULL THEN 'Normal day' ELSE 'Sale-event day' END",
+      note: sale-event days versus normal days (a line sold at a sale-event price or not)}
+  payment_type:
+    orders: {column: sales.payment_method, expression: "CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END",
+      note: COD versus prepaid (every method other than COD)}
   coupon:
     orders: sales.coupon_code
   # ---- product
@@ -231,7 +238,8 @@ concepts:
     stock_now: warehouses.city
   sale_event:
     orders: {column: sale_events.name, note: measure an event by its date window (placed_at between start_date and
-      end_date); events overlap, so sales.event_id only says which event's price applied}
+      end_date); events overlap, so sales.event_id only says which event's price applied,
+      join: "sale_events ON sales.placed_at >= sale_events.start_date AND sales.placed_at < sale_events.end_date + INTERVAL 1 DAY"}
     ad_spend: sale_events.name
     prices: sale_events.name
   return_reason:
@@ -242,6 +250,10 @@ concepts:
     reviews: product_reviews.aspect
   sentiment:
     reviews: product_reviews.sentiment
+  list_position:
+    listings: {column: impressions.position, note: 1 = first slot of the list; one row per position}
+  star_rating:
+    reviews: {column: product_reviews.rating, note: review stars 1-5}
 
 # Labels shown in clarifying questions, and groups: a value that fits concepts in DIFFERENT groups is
 # ambiguous ("Mumbai": a customer city, a seller's city, a warehouse, or a brand) and the user is asked;
@@ -264,6 +276,8 @@ concept_info:
   campaign: {label: campaign, group: marketing}
   support_channel: {label: support channel (how the customer contacted us), group: support}
   payment_method: {label: payment method, group: payment}
+  payment_type: {label: payment type (COD or prepaid), group: payment}
+  day_type: {label: sale-event day or normal day, group: event}
   coupon: {label: coupon code, group: payment}
   category: {label: product category, group: product}
   sub_category: {label: product sub-category, group: product}
@@ -282,6 +296,8 @@ concept_info:
   issue: {label: support issue, group: support}
   review_aspect: {label: review aspect, group: reviews}
   sentiment: {label: review sentiment, group: reviews}
+  list_position: {label: position in the list, group: listing}
+  star_rating: {label: review star rating, group: reviews}
 
 # Words for identifiers: "order 12345" -> sales.order_id = 'OD000012345' (format measured by pantree-profile).
 id_entities:

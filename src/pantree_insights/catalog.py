@@ -13,8 +13,7 @@ reviewed like code. For each column:
 - range: for numbers (min / median / max) and dates (first / last)
 - also_in: other tables with a column of the same name, with what it means there
 
-The agent sees this for every table in its context (catalog.describe); the understanding step uses the value lists
-to find which column a word refers to.
+The interpreter sees all of it in its prompt (catalog.describe); validation checks values against it.
 """
 from __future__ import annotations
 
@@ -69,6 +68,9 @@ def build_catalog(con: duckdb.DuckDBPyConnection, schema: Schema | None = None, 
     out = {}
     for t, info in schema.tables.items():
         columns = {}
+        ids = [c for c in info.columns if c.endswith("_id")]
+        key = (ids[0], profile.tables[t].columns[ids[0]].distinct) \
+            if ids and profile.tables[t].columns[ids[0]].distinct == profile.tables[t].rows else None
         for c, d in info.columns.items():
             kind, meaning = (d.split(" - ", 1) + [""])[:2]
             kind = kind.strip()
@@ -94,6 +96,8 @@ def build_catalog(con: duckdb.DuckDBPyConnection, schema: Schema | None = None, 
                     entry["structure"] = _structure(con, t, c, lo, hi)
             elif role in ("measure", "date") and prof.min is not None:
                 entry["range"] = [prof.min, prof.median, prof.max] if role == "measure" else [prof.min, prof.max]
+            if kind == "text" and ("name" in c or c == "title") and key and 0.5 * key[1] <= prof.distinct < key[1]:
+                entry["label_of"] = key[0]                 # looks like a key, but several IDs share a name
             others = [f"{o} ({m or o})" for o, m in by_name[c] if o != t]
             if others and not c.endswith("_id"):
                 entry["also_in"] = others
@@ -125,6 +129,12 @@ def value_columns(catalog: dict | None = None) -> dict[str, list[str]]:
     return out
 
 
+def label_columns(catalog: dict | None = None) -> dict[str, str]:
+    """'table.column' -> id column, for names that several IDs share (grouping by them merges rows)."""
+    return {f"{t}.{c}": e["label_of"] for t, info in (catalog if catalog is not None else load_catalog()).items()
+            for c, e in info["columns"].items() if e.get("label_of")}
+
+
 def describe(tables: list[str], catalog: dict | None = None, schema: Schema | None = None) -> str:
     """Tables for prompts: what a row is, and for each column its meaning plus values, format or range."""
     catalog = catalog if catalog is not None else load_catalog()
@@ -146,6 +156,9 @@ def describe(tables: list[str], catalog: dict | None = None, schema: Schema | No
                                                if len(vals) > INLINE_VALUES else "")
             elif e.get("format"):
                 text += f". Format: {e['format']}"
+            elif e.get("label_of"):
+                text += (f". NOT unique: several {e['label_of']} share one {c} ({e['distinct']} names), so group by "
+                         f"{e['label_of']} and show {c} as its label")
             elif e.get("structure"):
                 shape = e["structure"]
                 text += f". {shape[0].upper()}{shape[1:]}; {e['distinct']} distinct values (not listed)"

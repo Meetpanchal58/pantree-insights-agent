@@ -77,6 +77,16 @@ sources:
       channel: tk.channel
       issue_category: tk.issue_category
 
+  attribution:
+    description: >-
+      Orders credited to campaigns (one row per order and campaign touch). Direct/Organic orders have no
+      campaign and are not credited.
+    from: marketing_attribution a
+    time_column: a.order_at
+    where: a.campaign_id IS NOT NULL
+    dimensions:
+      channel_group: a.channel_group
+
   reviews:
     description: Published product reviews.
     from: product_reviews r LEFT JOIN product_master p ON p.product_id = r.product_id
@@ -349,6 +359,17 @@ metrics:
     unit: ratio
     higher_is_better: false
 
+  last_click_revenue:
+    label: Last-click revenue
+    description: >-
+      Booked order revenue the shop credits to a campaign, channel or channel group under last-click
+      attribution. Use it for "credited", "attributed" or "last-click" revenue; not reduced by later
+      cancellations or refunds.
+    source: attribution
+    numerator: SUM(a.credit_last_click * a.order_revenue)
+    unit: inr
+    higher_is_better: true
+
   lost_sales_units:
     label: Lost sales (units)
     description: Units customers wanted (added to cart) that could not be sold because the size was out of stock.
@@ -359,7 +380,7 @@ metrics:
 
 # Metrics that need more than one source or a per-customer step: full reference SQL.
 custom_metrics:
-  last_click_revenue:
+  last_click_revenue_by_campaign:
     label: Last-click credited revenue
     description: >-
       Booked order revenue the shop credits to a campaign, channel or channel group under last-click

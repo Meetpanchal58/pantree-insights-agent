@@ -37,3 +37,6 @@ node_modules/
 /evals/reports/*.json
 /evals/reports/*.md
 !/evals/reports/README.md
+
+# Live results of a running evaluation (replaced by the full report when the run ends)
+evals/reports/*.partial.jsonl

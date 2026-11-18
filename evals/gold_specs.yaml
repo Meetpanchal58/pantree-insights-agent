@@ -1,0 +1,400 @@
+# Gold QuerySpecs (v2): for every answer question, the structured request a correct reading produces.
+# tests/test_spec.py compiles each one and scores the result against the question's gold SQL (free, no LLM).
+# The phase 2 evaluation scores the model's spec against these (exact comparison) as well as by result.
+#
+# Either a QuerySpec (compiled) or {template: name, params: {...}} (a reviewed multi-step template); both VERIFIED.
+# Keys are "<suite>/<id>". Dates are inclusive. Never shown to the model.
+
+specs:
+  # ------------------------------------------------------------------ regression
+  regression/e01: {table: customers, measures: [{name: customers, agg: count}]}
+  regression/e02:
+    table: product_master
+    measures: [{name: active_products, agg: count}]
+    filters: [{field: product_master.is_active, op: eq, values: [true]}]
+  regression/e03: {table: sales, measures: [{name: orders, metric: orders}]}
+  regression/e04: {table: sales, measures: [{name: orders, metric: orders}], dimensions: [payment_method]}
+  regression/e05:
+    table: customers
+    measures:
+      - {name: prime_share, agg: share, where: [{field: customers.is_prime, op: eq, values: [true]}]}
+      - {name: customers, agg: count}
+  regression/e06: {table: sales, measures: [{name: realized_revenue, metric: realized_revenue}]}
+  regression/m01: {table: sales, measures: [{name: aov, metric: aov}]}
+  regression/m02:
+    table: sales
+    measures: [{name: orders, metric: orders}, {name: realized_revenue, metric: realized_revenue}]
+    time: {grain: month}
+  regression/m03: {table: sales, measures: [{name: realized_revenue, metric: realized_revenue}], dimensions: [category]}
+  regression/m04:
+    table: sales
+    measures:
+      - {name: return_rate, metric: return_rate}
+      - {name: delivered_lines, agg: count, where: [{field: sales.delivered_at, op: is_set}]}
+    dimensions: [category]
+  regression/m05:
+    table: sales
+    measures: [{name: returned_lines, agg: count}]
+    dimensions: [return_reason]
+    filters: [{field: sales.return_requested_at, op: is_set}]
+    shares: [returned_lines]
+  regression/m06:
+    table: sales
+    measures:
+      - {name: rto_rate, metric: rto_rate}
+      - {name: shipped_lines, agg: count, where: [{field: sales.shipped_at, op: is_set}]}
+    dimensions: [payment_type]
+  regression/m07:
+    table: impressions
+    measures: [{name: ctr, metric: ctr}, {name: impressions, agg: count}]
+    dimensions: [list_position]
+    filters: [{field: impressions.position, op: lte, values: [10]}]
+  regression/m08:
+    table: inventory_live
+    columns: [inventory_live.sku_id, product_master.product_name, product_master.category, inventory_live.inbound_qty]
+    filters:
+      - {field: inventory_live.on_hand_qty, op: lte, values: [0]}
+      - {field: product_master.is_active, op: eq, values: [true]}
+    limit: 100
+  regression/m09:
+    table: marketing_spend
+    measures: [{name: spend, metric: marketing_spend}]
+    dimensions: [channel_group, marketing_channel]
+  regression/m10:
+    table: product_reviews
+    measures:
+      - {name: avg_rating, metric: avg_rating}
+      - {name: negative_share, metric: negative_review_share}
+      - {name: reviews, agg: count}
+    dimensions: [category]
+  regression/m11:
+    table: support_contacts
+    measures:
+      - {name: tickets, agg: count_distinct, field: support_contacts.ticket_id}
+      - {name: avg_csat, metric: avg_csat}
+      - {name: avg_first_response_minutes, metric: avg_first_response_minutes}
+    dimensions: [issue]
+  regression/m12:
+    table: sales
+    measures: [{name: orders, metric: orders}, {name: realized_revenue, metric: realized_revenue}]
+    dimensions: [new_or_repeat]
+  regression/h01:
+    table: clickstream
+    measures: [{name: conversion_rate, metric: conversion_rate}, {name: sessions, metric: sessions}]
+    dimensions: [device]
+  regression/h02:
+    table: sales
+    measures:
+      - {name: orders, metric: orders}
+      - {name: realized_revenue, metric: realized_revenue}
+      - {name: net_sales, metric: net_sales}
+    dimensions: [sale_event]
+    filters: [{field: sale_event, op: in, values: [Diwali 2025, Diwali 2026]}]
+  regression/h03: {template: event_lift, params: {days_before: 14}}
+  regression/h04: {template: channel_roas, params: {by: channel}}
+  regression/h05:
+    table: marketing_attribution
+    measures: [{name: last_click_revenue, metric: last_click_revenue}]
+    dimensions: [campaign, channel_group]
+    ranking: {by: last_click_revenue, limit: 10}
+  regression/h06:
+    table: sales
+    measures:
+      - {name: late_delivery_rate, metric: late_delivery_rate}
+      - {name: delivered_lines, agg: count, where: [{field: sales.delivered_at, op: is_set}]}
+    dimensions: [courier]
+  regression/h07: {template: platform_vs_recorded_orders, params: {by: channel}}
+  regression/h08: {template: repeat_within_days, params: {days: 90}}
+  regression/h09:
+    table: inventory_history
+    measures:
+      - {name: lost_units, agg: sum, field: inventory_history.lost_sales_units}
+      - {name: demand_units, agg: sum, field: inventory_history.demand_units}
+      - {name: lost_share, ratio: [lost_units, demand_units]}
+    dimensions: [category, size]
+    ranking: {by: lost_units, limit: 20}
+  regression/h10:
+    table: sales
+    measures:
+      - {name: return_rate, metric: return_rate}
+      - {name: delivered_lines, agg: count}
+    dimensions: [category, size_fit]
+    filters:
+      - {field: sales.delivered_at, op: is_set}
+      - {field: category, op: in, values: [Footwear, Apparel]}
+  regression/n01: {table: sales, measures: [{name: avg_discount_pct, metric: avg_discount_pct}], dimensions: [day_type]}
+  regression/n02: {table: customers, measures: [{name: customers, agg: count}], dimensions: [region]}
+  regression/n03: {table: tickets, measures: [{name: ticket_resolution_rate, metric: ticket_resolution_rate}]}
+  regression/n04:
+    table: marketing_spend
+    measures: [{name: spend, metric: marketing_spend}]
+    time: {start: 2026-01-01, end: 2026-12-31, grain: month}
+  regression/n05:
+    table: sales
+    measures: [{name: rto_rate, metric: rto_rate}]
+    dimensions: [city]
+    ranking: {by: rto_rate, limit: 10}
+  regression/n06: {table: sales, measures: [{name: cancellation_rate, metric: cancellation_rate}], dimensions: [sellers.seller_type]}
+  regression/n07: {table: clickstream, measures: [{name: conversion_rate, metric: conversion_rate}], dimensions: [traffic_source]}
+  regression/n08: {table: sales, measures: [{name: gross_margin_pct, metric: gross_margin_pct}], dimensions: [category]}
+  regression/n09: {table: product_reviews, measures: [{name: avg_rating, metric: avg_rating}]}
+  regression/n10: {table: impressions, measures: [{name: ctr, metric: ctr}], dimensions: [surface]}
+
+  # ------------------------------------------------------------------ holdout
+  holdout/x01:
+    table: sales
+    measures: [{name: realized_revenue, metric: realized_revenue}]
+    dimensions: [region]
+    time: {start: 2025-01-01, end: 2025-12-31}
+  holdout/x02:
+    table: sales
+    measures: [{name: return_rate, metric: return_rate}]
+    dimensions: [sub_category]
+    filters: [{field: category, op: eq, values: [Apparel]}]
+  holdout/x03:
+    table: sales
+    measures: [{name: orders, metric: orders}]
+    dimensions: [prime]
+    time: {start: 2026-01-01, end: 2026-12-31}
+  holdout/x04:
+    table: sales
+    measures: [{name: aov, metric: aov}]
+    dimensions: [device]
+    time: {start: 2026-01-01, end: 2026-12-31}
+  holdout/x05: {table: sales, measures: [{name: late_delivery_rate, metric: late_delivery_rate}], dimensions: [warehouse]}
+  holdout/x06:
+    table: marketing_spend
+    measures: [{name: cpc, metric: cpc}]
+    dimensions: [marketing_channel]
+    filters: [{field: channel_group, op: in, values: [Paid Search, Paid Social, Display]}]
+    time: {start: 2025-01-01, end: 2025-12-31}
+  holdout/x07: {table: support_contacts, measures: [{name: avg_csat, metric: avg_csat}], dimensions: [support_channel]}
+  holdout/x08:
+    table: product_reviews
+    measures: [{name: negative_review_share, metric: negative_review_share}]
+    dimensions: [review_aspect]
+    filters: [{field: category, op: eq, values: [Footwear]}]
+  holdout/x09:
+    table: clickstream
+    measures: [{name: conversion_rate, metric: conversion_rate}]
+    time: {start: 2026-01-01, end: 2026-12-31, grain: month}
+  holdout/x10:
+    table: sales
+    measures: [{name: realized_revenue, metric: realized_revenue}]
+    dimensions: [brand]
+    time: {start: 2026-01-01, end: 2026-12-31}
+    ranking: {by: realized_revenue, limit: 5}
+  holdout/x11: {table: sales, measures: [{name: cancellation_rate, metric: cancellation_rate}], dimensions: [payment_type]}
+  holdout/x12: {table: inventory_history, measures: [{name: lost_sales_units, metric: lost_sales_units}], dimensions: [warehouse]}
+  holdout/x13:
+    table: sales
+    measures: [{name: new_customer_order_share, metric: new_customer_order_share}]
+    time: {start: 2026-01-01, end: 2026-12-31, grain: month}
+  holdout/x14:
+    table: impressions
+    measures: [{name: ctr, metric: ctr}]
+    dimensions: [list_position]
+    filters:
+      - {field: surface, op: eq, values: [home_recs]}
+      - {field: impressions.position, op: lte, values: [5]}
+  holdout/y01:
+    table: sales
+    measures: [{name: units_sold, metric: units_sold}]
+    dimensions: [category]
+    time: {start: 2025-01-01, end: 2025-12-31}
+  holdout/y02: {table: sales, measures: [{name: avg_delivery_days, metric: avg_delivery_days}], dimensions: [courier]}
+  holdout/y03:
+    table: sales
+    measures: [{name: gross_sales, metric: gross_sales}]
+    time: {start: 2025-01-01, end: 2025-12-31, grain: quarter}
+  holdout/y04:
+    table: sales
+    measures: [{name: return_rate, metric: return_rate}]
+    dimensions: [product_gender]
+    filters: [{field: product_gender, op: in, values: [Women, Men]}]
+  holdout/y05:
+    table: clickstream
+    measures: [{name: sessions, metric: sessions}]
+    dimensions: [traffic_source]
+    time: {start: 2026-10-01, end: 2026-10-31}
+  holdout/y06:
+    table: marketing_spend
+    measures: [{name: platform_roas, metric: platform_roas}]
+    dimensions: [channel_group]
+    filters: [{field: channel_group, op: not_in, values: [CRM]}]
+  holdout/y07:
+    table: tickets
+    measures: [{name: support_tickets, metric: support_tickets}]
+    time: {start: 2026-01-01, end: 2026-12-31, grain: month}
+  holdout/y08: {table: support_contacts, measures: [{name: avg_first_response_minutes, metric: avg_first_response_minutes}], dimensions: [support_channel]}
+  holdout/y09: {table: sales, measures: [{name: gross_margin_pct, metric: gross_margin_pct}], dimensions: [product_master.usage]}
+  holdout/y10: {table: sales, measures: [{name: rto_rate, metric: rto_rate}], dimensions: [city_tier]}
+  holdout/y11:
+    table: customers
+    measures: [{name: customers, agg: count}]
+    dimensions: [traffic_source]
+    time: {start: 2026-01-01, end: 2026-12-31}
+  holdout/y12:
+    table: sales
+    measures:
+      - {name: avg_discount_pct, metric: avg_discount_pct}
+      - {name: units, agg: sum, field: sales.quantity}
+    dimensions: [brand]
+    filters: [{field: category, op: eq, values: [Footwear]}]
+    ranking: {by: units, limit: 5}
+  holdout/y13: {table: impressions, measures: [{name: impressions, agg: count}], dimensions: [surface]}
+  holdout/y14: {table: sales, measures: [{name: aov, metric: aov}], dimensions: [prime]}
+  holdout/y15: {table: inventory_live, measures: [{name: on_hand_units, agg: sum, field: inventory_live.on_hand_qty}], dimensions: [warehouse]}
+  holdout/y16: {table: sales, measures: [{name: late_delivery_rate, metric: late_delivery_rate}], dimensions: [region]}
+  holdout/z01:
+    table: sales
+    measures: [{name: orders, metric: orders}]
+    time: {start: 2024-12-01, end: 2024-12-31}
+
+  # ------------------------------------------------------------------ coverage
+  coverage/c01:
+    table: inventory_live
+    measures:
+      - {name: units_on_hand, agg: sum, field: inventory_live.on_hand_qty}
+      - {name: capacity, agg: max, field: warehouses.capacity_units}
+      - {name: capacity_used, ratio: [units_on_hand, capacity]}
+    dimensions: [warehouse_city]
+  coverage/c02:
+    table: support_contacts
+    measures: [{name: escalated_share, agg: share, where: [{field: resolution_status, op: eq, values: [Escalated]}]}]
+    dimensions: [agents.team]
+    time: {start: 2026-01-01, end: 2026-12-31}
+  coverage/c03:
+    table: support_contacts
+    measures: [{name: contacts, agg: count}, {name: avg_csat, metric: avg_csat}]
+    dimensions: [agents.language]
+    time: {start: 2025-01-01, end: 2025-12-31}
+  coverage/c04:
+    table: promotions
+    measures: [{name: coupons, agg: count}, {name: avg_min_order_value, agg: avg, field: promotions.min_order_value}]
+    dimensions: [promotions.eligible_audience]
+  coverage/c05:
+    table: marketing_plan
+    measures:
+      - {name: planned_spend, agg: sum, field: marketing_plan.planned_spend}
+      - {name: target_revenue, agg: sum, field: marketing_plan.target_revenue}
+    dimensions: [channel_group]
+    time: {start: 2025-01-01, end: 2025-12-31}
+  coverage/c06:
+    table: price_history
+    measures: [{name: clearance_price_changes, agg: count}]
+    dimensions: [category]
+    filters: [{field: price_change_reason, op: eq, values: [Clearance]}]
+    time: {start: 2026-01-01, end: 2026-12-31}
+  coverage/c07:
+    table: auth_events
+    measures: [{name: otp_failures, agg: count}]
+    filters: [{field: event_type, op: eq, values: [otp_failed]}]
+    time: {start: 2026-01-01, end: 2026-12-31, grain: month}
+  coverage/c08:
+    table: sellers
+    measures:
+      - {name: avg_rating, agg: avg, field: sellers.rating}
+      - {name: avg_fulfillment_score, agg: avg, field: sellers.fulfillment_score}
+    dimensions: [sellers.seller_type]
+  coverage/c09:
+    table: sales
+    measures: [{name: cancellation_rate, metric: cancellation_rate}]
+    dimensions: [sellers.region]
+    time: {start: 2025-01-01, end: 2025-12-31}
+  coverage/c10:
+    table: sales
+    measures: [{name: units_sold, metric: units_sold}]
+    dimensions: [size]
+    filters: [{field: category, op: eq, values: [Footwear]}]
+    time: {start: 2026-01-01, end: 2026-12-31}
+  coverage/c11:
+    table: inventory_live
+    measures: [{name: skus_to_reorder, agg: count}]
+    dimensions: [category]
+    filters: [{field: inventory_live.on_hand_qty, op: lte_field, other: inventory_live.reorder_point}]
+  coverage/c12:
+    table: product_reviews
+    measures: [{name: rejected_share, agg: share, where: [{field: moderation_status, op: eq, values: [Rejected]}]}]
+    dimensions: [review_aspect]
+    time: {start: 2026-01-01, end: 2026-12-31}
+  coverage/c13: {table: product_reviews, measures: [{name: avg_rating, metric: avg_rating}], dimensions: [product_gender]}
+  coverage/c14:
+    table: customers
+    measures: [{name: prime_customers, agg: count}]
+    dimensions: [age_bracket]
+    filters: [{field: prime, op: eq, values: [true]}]
+  coverage/c15: {table: customers, measures: [{name: customers, agg: count}], dimensions: [city_tier, account_status]}
+  coverage/c16:
+    table: sales
+    measures: [{name: cancelled_lines, agg: count}]
+    dimensions: [cancel_reason, cancelled_by]
+    filters: [{field: sales.cancelled_at, op: is_set}]
+    time: {start: 2026-01-01, end: 2026-12-31}
+  coverage/c17:
+    table: sales
+    measures: [{name: returns, agg: count}]
+    dimensions: [return_type]
+    time: {field: sales.return_requested_at, start: 2025-01-01, end: 2025-12-31}
+    shares: [returns]
+  coverage/c18:
+    table: sales
+    measures: [{name: lines, agg: count}]
+    dimensions: [size_fit]
+    filters: [{field: category, op: eq, values: [Apparel]}]
+    time: {field: sales.delivered_at, start: 2026-01-01, end: 2026-12-31}
+    shares: [lines]
+  coverage/c19:
+    table: sales
+    measures: [{name: aov, metric: aov}]
+    dimensions: [traffic_source]
+    time: {start: 2026-01-01, end: 2026-12-31}
+  coverage/c20: {table: sales, measures: [{name: order_lines, agg: count}], dimensions: [order_status]}
+  coverage/c21:
+    table: clickstream
+    measures:
+      - {name: product_view_sessions, agg: count_distinct, field: clickstream.session_id, where: [{field: event_type, op: eq, values: [pdp_view]}]}
+      - {name: add_to_cart_sessions, agg: count_distinct, field: clickstream.session_id, where: [{field: event_type, op: eq, values: [add_to_cart]}]}
+      - {name: purchase_sessions, agg: count_distinct, field: clickstream.session_id, where: [{field: event_type, op: eq, values: [purchase]}]}
+    time: {start: 2026-10-01, end: 2026-10-31}
+  coverage/c22:
+    table: impressions
+    measures: [{name: add_to_cart_share, agg: share, where: [{field: added_to_cart, op: eq, values: [true]}]}]
+    dimensions: [surface]
+    time: {start: 2026-01-01, end: 2026-12-31}
+  coverage/c23:
+    table: sale_events
+    measures: [{name: events, agg: count}, {name: avg_demand_uplift, agg: avg, field: sale_events.demand_uplift}]
+    dimensions: [sale_events.event_type]
+    time: {field: sale_events.start_date, start: 2026-01-01, end: 2026-12-31}
+  coverage/c24:
+    table: marketing_spend
+    measures:
+      - {name: spend, metric: marketing_spend}
+      - {name: clicks, agg: sum, field: marketing_spend.clicks}
+      - {name: impressions, agg: sum, field: marketing_spend.impressions}
+      - {name: ad_ctr, ratio: [clicks, impressions]}
+    dimensions: [region]
+    time: {start: 2026-01-01, end: 2026-12-31}
+
+  # ------------------------------------------------------------------ conversation flow
+  flow/flow-case:
+    table: sales
+    measures: [{name: realized_revenue, metric: realized_revenue}]
+    filters: [{field: brand, op: eq, values: [ADIDAS]}]
+  flow/flow-complete: {table: sales, measures: [{name: realized_revenue, metric: realized_revenue}], dimensions: [category]}
+  flow/flow-context:
+    table: sales
+    measures: [{name: orders, metric: orders}]
+    dimensions: [payment_method]
+    filters: [{field: city, op: eq, values: [Mumbai]}]
+  flow/flow-values:
+    table: sales
+    measures: [{name: orders, metric: orders}]
+    dimensions: [city]
+    filters: [{field: city, op: in, values: [Mumbai, Pune]}, {field: sales.shipped_at, op: is_set}]
+  flow/flow-destinations:
+    table: sales
+    measures: [{name: orders, metric: orders}]
+    dimensions: [city]
+    filters: [{field: city, op: in, values: [Mumbai, Pune]}]

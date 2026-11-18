@@ -25,19 +25,18 @@ class Settings(BaseSettings):
     memory_dir: Path = ROOT / "memory"
 
     # LLM. Models are "provider:model" (LangChain init_chat_model), so OpenAI/Anthropic is a config change.
-    model_main: str = "openai:gpt-6.1-terra"     # planner, SQL writer, validator, analyst
+    model_main: str = "openai:gpt-6.1-terra"     # interpreter, contrast check, analyst
     model_light: str = "openai:gpt-6-luna"       # cheap jobs (e.g. rewriting the business profile)
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "low"
-    sql_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "medium"
     max_output_tokens: int = 4000
     llm_timeout_s: float = 60.0                  # a slow provider response is cut off ...
     llm_max_retries: int = 1
     max_parallel_llm_calls: int = 2  # bound concurrent provider requests per instance
+    max_concurrent_runs: int = 4     # questions processed at once per instance; the rest queue visibly
+    contrast_check: bool = True      # run materially different readings; ask when their numbers differ
     # Sampling temperature. None = provider default: OpenAI reasoning models (gpt-6.x) do not accept a
     # temperature, so it is only sent when set. Reports record the value used.
     temperature: float | None = None
-    enable_sql_compiler: bool = False  # gated until measured against full live evaluation
-    max_sql_attempts: int = 3                    # SQL writer tries (guardrail / database / validator feedback)
     daily_budget_usd: float = 1.00               # live LLM calls stop for the day after this
 
     # Durable LangGraph checkpoints; use Postgres on Cloud Run, memory only for tests.

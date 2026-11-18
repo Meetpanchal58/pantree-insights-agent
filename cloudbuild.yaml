@@ -25,7 +25,7 @@ steps:
 
 images: ["${_IMAGE}"]
 
-# Installing dependencies and downloading the embedding model can exceed the 10-minute default.
+# Installing dependencies can exceed the 10-minute default.
 timeout: 1800s
 options:
   dynamicSubstitutions: true

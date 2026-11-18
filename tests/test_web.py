@@ -8,13 +8,10 @@ from pantree_insights.config import ROOT
 
 pytestmark = pytest.mark.data
 
-GOOD_SQL = ("SELECT p.category, SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - "
-            "COALESCE(s.refund_amount, 0) ELSE 0 END) AS realized_revenue, COUNT(DISTINCT s.order_id) AS orders "
-            "FROM sales s JOIN product_master p ON p.product_id = s.product_id WHERE s.line_type = 'Sale' "
-            "GROUP BY 1 ORDER BY realized_revenue DESC")
-PLAN = {"decision": "proceed", "restated_question": "Realized revenue by category", "metrics": ["realized_revenue"],
-        "breakdowns": ["category"], "time_window": "all data", "output_shape": "one row per category"}
-CLARIFY = {"decision": "clarify", "restated_question": "Sales", "clarifying_questions": [
+SPEC = {"route": "spec", "restated_question": "Realized revenue by category",
+        "spec": {"table": "sales", "measures": [{"name": "realized_revenue", "metric": "realized_revenue"}],
+                 "dimensions": ["category"]}}
+CLARIFY = {"route": "clarify", "restated_question": "Sales", "questions": [
     {"question": "Which measure?", "options": ["Realized revenue", "Orders"], "default": "Realized revenue",
      "why": "changes the ranking"}]}
 PROMPTS = []
@@ -30,19 +27,15 @@ def analysis(user):
             "chart_metric": "realized_revenue", "claims": [claim]}
 
 
-FRAME = {"restated_question": "Realized revenue by category", "subjects": ["orders"],
-         "measures": ["realized_revenue"], "breakdowns": ["category"]}
-
-
 def responder(agent, schema, system, user):
     PROMPTS.append((agent, user))
-    if agent == "understander":                  # the understanding step asks; the planner no longer does
-        if "clarify me" in user and "answers so far" not in user:
-            return {**FRAME, "open_points": CLARIFY["clarifying_questions"]}
-        return FRAME
-    if agent == "planner":
-        return PLAN
-    return {"sql_writer": {"sql": GOOD_SQL, "explanation": "x"}, "validator": {"ok": True}}.get(agent) or analysis(user)
+    if agent == "interpreter":
+        if "clarify me" in user and "answers" not in user:
+            return CLARIFY
+        return SPEC
+    if agent == "contrast":
+        return {"readings": []}
+    return analysis(user)
 
 
 @pytest.fixture()
@@ -66,9 +59,7 @@ def app_env(tmp_path, monkeypatch, shop_dir, con):
     monkeypatch.setattr(auth, "send_code", lambda email, code: codes.__setitem__(email, code))
 
     from pantree_insights.graph import Agent
-    from pantree_insights.retrieval import Retriever
-    retriever = Retriever(con)
-    web.runner = web.Runner(lambda: Agent(llm_factory=lambda: FakeLLM(responder), retriever=retriever, con=con))
+    web.runner = web.Runner(lambda: Agent(llm_factory=lambda: FakeLLM(responder), con=con))
     monkeypatch.setattr(web, "lifespan", None, raising=False)
     from fastapi.testclient import TestClient
     app = web.create_app()
@@ -142,20 +133,20 @@ def test_ask_in_project_streams_and_remembers(app_env):
     events = run_to_end(client, run_id)
     final = events[-1]
     assert final["type"] == "final" and final["status"] == "done"
-    assert any(e.get("step") == "write_sql" for e in events)
+    assert any(e.get("step") == "execute" for e in events) and final["trust"] == "verified"
     detail = client.get(f"/api/chats/{chat['id']}").json()
     assert [m["role"] for m in detail["messages"]] == ["user", "assistant"]
     assert detail["title"] == "Revenue by category?"
     assert detail["messages"][1]["run"]["events"]                       # saved for replay in the panel
     memory = client.get("/api/memory").json()
     assert memory["insights"][0]["scope"] == "project" and memory["insights"][0]["project_name"] == "Festive"
-    # second question in the project: planner sees project instructions, insight and chat history
+    # second question in the project: the interpreter sees project instructions, insight and chat history
     run_id = client.post(f"/api/chats/{chat['id']}/ask", json={"question": "And by month?"}).json()["run_id"]
     run_to_end(client, run_id)
-    planner_prompt = [u for a, u in PROMPTS if a == "planner"][-1]
-    assert "Focus on Diwali" in planner_prompt
-    assert "Earlier insights in this project" in planner_prompt
-    assert "User: Revenue by category?" in planner_prompt
+    prompt = [u for a, u in PROMPTS if a == "interpreter"][-1]
+    assert "Focus on Diwali" in prompt
+    assert "Earlier insights in this project" in prompt
+    assert "User: Revenue by category?" in prompt
 
 
 def test_clarify_then_answer(app_env):

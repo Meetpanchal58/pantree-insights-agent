@@ -120,6 +120,8 @@ class Runner:
         self._snapshot = None
         self._lock = threading.Lock()
         self.runs: dict[str, Run] = {}
+        self._slots = threading.BoundedSemaphore(max(1, get_settings().max_concurrent_runs))
+        self._waiting = 0                                   # runs queued for a free slot (shown to the user)
 
     @property
     def agent(self):
@@ -191,6 +193,19 @@ class Runner:
 
     def _consume(self, store: Store, run: Run, events) -> None:
         def work():
+            queued = not self._slots.acquire(blocking=False)
+            if queued:                                      # a bounded pool: a burst of users queues, visibly
+                with self._lock:
+                    self._waiting += 1
+                    position = self._waiting
+                started = time.time()
+                run.events.append({"type": "step", "step": "queue", "status": "started", "t": started,
+                                   "detail": {"position": position}})
+                self._slots.acquire()
+                with self._lock:
+                    self._waiting -= 1
+                run.events.append({"type": "step", "step": "queue", "status": "done", "t": time.time(),
+                                   "detail": {"seconds": round(time.time() - started, 2)}})
             try:
                 for event in events:
                     run.events.append({**event, "t": event.get("t", time.time())})
@@ -207,6 +222,7 @@ class Runner:
                 run.events.append(final)
                 self._save(store, run, final)
             finally:
+                self._slots.release()
                 run.segment_done.set()
         threading.Thread(target=work, daemon=True, name=f"run-{run.id}").start()
 
@@ -223,7 +239,7 @@ class Runner:
         calls = final.get("calls") or []
         store.save_run(run.id, final.get("status", "failed"), run.events,
                        {"stages": stage_times, "cost_usd": (final.get("cost") or {}).get("usd", 0),
-                        "llm_calls": len(calls), "sql_attempts": final.get("attempts", 0),
+                        "llm_calls": len(calls), "trust": final.get("trust"),
                         "verification": (final.get("verification") or {}).get("status")})
         store.add_message(run.chat["id"], "assistant", headline, to_json({**final, "events": timeline}))
         if final.get("cost"):

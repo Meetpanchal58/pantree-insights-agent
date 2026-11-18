@@ -28,13 +28,6 @@ jobs:
           key: small-shop-${{ github.run_id }}
           restore-keys: small-shop-
 
-      - name: Cache the embedding model
-        uses: actions/cache@v4
-        with:
-          path: .cache
-          key: models-${{ hashFiles('src/pantree_insights/retrieval.py') }}-${{ github.run_id }}
-          restore-keys: models-${{ hashFiles('src/pantree_insights/retrieval.py') }}-
-
       - name: Download the small shop (refreshed nightly by the simulator)
         run: uv run pantree-data download --size small
 
@@ -43,6 +36,9 @@ jobs:
 
       - name: Validate evaluation gold SQL (no model calls)
         run: DATA_SIZE=small uv run python evals/run_eval.py --suite all --dry-run
+
+      - name: Verified compiler (every gold spec returns the gold answer, no LLM)
+        run: DATA_SIZE=small uv run python evals/spec_eval.py
 
   frontend:
     runs-on: ubuntu-latest

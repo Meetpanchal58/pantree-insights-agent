@@ -3,7 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from pantree_insights.config import ROOT
+# Tests run on the small shop (the one CI downloads) unless DATA_SIZE is set explicitly, e.g. DATA_SIZE=full.
+os.environ.setdefault("DATA_SIZE", "small")
+
+from pantree_insights.config import ROOT  # noqa: E402
 
 SMALL = Path(os.environ.get("DATA_DIR", ROOT / "data")) / "small"
 
