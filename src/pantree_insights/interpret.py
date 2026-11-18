@@ -233,6 +233,8 @@ def readback(spec: QuerySpec, cat: Catalog, assumptions: list[str] | None = None
         if m.metric:
             metric = cat.metrics.metrics[m.metric]
             text = f"{metric.label}: {metric.description}"
+            if m.where:
+                text += " where " + " and ".join(show(f) for f in m.where)
         elif m.ratio:
             text = f"{m.name.replace('_', ' ')} = {m.ratio[0].replace('_', ' ')} / {m.ratio[1].replace('_', ' ')}"
         elif m.agg == "share":

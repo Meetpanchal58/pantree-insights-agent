@@ -9,6 +9,7 @@ Rows are dicts with at least: id (question), repeat, and a boolean measure (e.g.
 """
 from __future__ import annotations
 
+import math
 import random
 from collections import defaultdict
 
@@ -16,11 +17,11 @@ RESAMPLES = 2000
 SEED = 20261115
 
 
-def _by_question(rows: list[dict], key: str) -> dict[str, list[bool]]:
-    out: dict[str, list[bool]] = defaultdict(list)
+def _by_question(rows: list[dict], key: str) -> dict[tuple, list[bool]]:
+    out: dict[tuple, list[bool]] = defaultdict(list)
     for r in rows:
         if r.get(key) is not None:
-            out[r["id"]].append(bool(r[key]))
+            out[(r.get("suite", ""), r.get("set", ""), r["id"])].append(bool(r[key]))
     return out
 
 
@@ -30,7 +31,8 @@ def summarize(rows: list[dict], key: str = "passed", resamples: int = RESAMPLES,
     if not groups:
         return {"n_questions": 0, "k": 0, "mean": None, "ci": (None, None), "pass_k": None}
     ids = sorted(groups)
-    k = min(len(v) for v in groups.values())
+    counts = {len(v) for v in groups.values()}
+    k = counts.pop() if len(counts) == 1 else 0
     totals = [(sum(groups[i]), len(groups[i])) for i in ids]
     mean = sum(t for t, _ in totals) / sum(n for _, n in totals)
     rnd = random.Random(seed)
@@ -40,7 +42,14 @@ def summarize(rows: list[dict], key: str = "passed", resamples: int = RESAMPLES,
         stats.append(sum(t for t, _ in sample) / sum(n for _, n in sample))
     stats.sort()
     low, high = stats[int(0.025 * resamples)], stats[int(0.975 * resamples) - 1]
-    pass_k = sum(all(groups[i]) for i in ids) / len(ids)
+    if mean in (0.0, 1.0):
+        # Bootstrap degenerates at the boundary. Use a Wilson interval over questions,
+        # not repeats, so a small all-pass sample does not imply certain accuracy.
+        z, n = 1.959963984540054, len(ids)
+        center = (mean + z * z / (2 * n)) / (1 + z * z / n)
+        width = z * math.sqrt(mean * (1 - mean) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+        low, high = min(mean, max(0.0, center - width)), max(mean, min(1.0, center + width))
+    pass_k = sum(all(groups[i]) for i in ids) / len(ids) if k else None
     return {"n_questions": len(ids), "k": k, "mean": mean, "ci": (low, high), "pass_k": pass_k}
 
 

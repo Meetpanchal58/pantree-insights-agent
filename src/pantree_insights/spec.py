@@ -180,6 +180,19 @@ def _literal(value) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def _filtered_metric(expression: str, predicate: str) -> str:
+    """Apply a population to every aggregate, including both sides of a named ratio."""
+    tree = sqlglot.parse_one(f"SELECT {expression}", read="duckdb")
+    condition = sqlglot.parse_one(predicate, read="duckdb")
+    for aggregate in list(tree.find_all(exp.AggFunc)):
+        parent = aggregate.parent
+        if isinstance(parent, exp.Filter):
+            parent.set("expression", exp.Where(this=exp.and_(parent.expression.this.copy(), condition.copy())))
+        else:
+            aggregate.replace(exp.Filter(this=aggregate.copy(), expression=exp.Where(this=condition.copy())))
+    return tree.selects[0].sql(dialect="duckdb")
+
+
 # ----------------------------------------------------------------------------- validation
 def validate(spec: QuerySpec, cat: Catalog) -> list[str]:
     """Problems, phrased for the user; [] means the spec can be compiled as asked."""
@@ -208,6 +221,8 @@ def validate(spec: QuerySpec, cat: Catalog) -> list[str]:
             problems.append(f"{m.name}: a share needs the condition (where) it counts")
         if m.ratio and (len(m.ratio) != 2 or any(r not in names for r in m.ratio)):
             problems.append(f"{m.name}: ratio must name two other measures")
+        if m.ratio and m.where:
+            problems.append(f"{m.name}: apply filters to its numerator and denominator measures")
         for f in m.where:
             problems += _check_filter(f, table, cat)
     for d in spec.dimensions:
@@ -291,6 +306,10 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
     where: list[str] = []
     needed: list[str] = []                     # tables the query reads besides the base table
     own_joins: dict[str, str] = {}
+    projected = [*spec.dimensions, *spec.columns, *(m.field for m in spec.measures if m.field)]
+    if spec.time and spec.time.field:
+        projected.append(spec.time.field)
+    projection_tables = {t for field in projected for t in _tables(cat.resolve(field, table)[0])}
 
     def field_sql(field: str) -> tuple[str, str]:
         expression, name, entry = cat.resolve(field, table)
@@ -299,14 +318,14 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
         needed.extend(t for t in _tables(expression) if t != table)
         return expression, name
 
-    def condition(f: Filter) -> str:
-        expression, _ = field_sql(f.field)
+    def condition(f: Filter, register: bool = True) -> str:
+        expression = field_sql(f.field)[0] if register else cat.resolve(f.field, table)[0]
         if f.op == "is_set":
             return f"{expression} IS NOT NULL"
         if f.op == "is_not_set":
             return f"{expression} IS NULL"
         if f.op.endswith("_field"):
-            other, _ = field_sql(f.other)
+            other = field_sql(f.other)[0] if register else cat.resolve(f.other, table)[0]
             op = {"lte_field": "<=", "gte_field": ">=", "lt_field": "<", "gt_field": ">"}[f.op]
             return f"{expression} {op} {other}"
         if f.op in ("lt", "lte", "gt", "gte"):
@@ -316,6 +335,33 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
         if f.op == "not_in":
             return f"{expression} NOT IN ({values})"
         return f"{expression} = {values}" if len(f.values) == 1 else f"{expression} IN ({values})"
+
+    def conditions(filters: list[Filter]) -> list[str]:
+        # A date-window filter selects membership. Joining all matching events would count
+        # a sale repeatedly when events overlap. Keep event breakdowns as explicit joins.
+        memberships: dict[str, list[str]] = {}
+        clauses = []
+        joins = {}
+        for f in filters:
+            _, _, entry = cat.resolve(f.field, table)
+            if entry is not None and entry.join:
+                joins[entry.join.split()[0]] = entry.join
+        # Cross-field predicates retain the existing explicit-join path.
+        joined = projection_tables | {t for f in filters if f.op.endswith("_field")
+                                      for t in _tables(cat.resolve(f.field, table)[0])}
+        for f in filters:
+            expression, _, _ = cat.resolve(f.field, table)
+            targets = _tables(expression)
+            join = joins.get(targets[0]) if len(targets) == 1 else None
+            if join and targets[0] not in joined:
+                memberships.setdefault(join, []).append(condition(f, register=False))
+            else:
+                clauses.append(condition(f))
+        for join, predicates in memberships.items():
+            target, on = join.split(" ON ", 1)
+            clauses.append(f"EXISTS (SELECT 1 FROM {target} WHERE ({on}) AND "
+                           + " AND ".join(f"({p})" for p in predicates) + ")")
+        return clauses
 
     # measures
     sources = {cat.metrics.metrics[m.metric].source for m in spec.measures if m.metric}
@@ -327,9 +373,10 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
             aliases = _aliases(source.from_) or {"tk": TICKETS}
             expression, used = _full_names(metric.expression(), aliases)
             needed.extend(t for t in used if t != table)
-            selects[m.name] = expression
+            cond = " AND ".join(conditions(m.where))
+            selects[m.name] = _filtered_metric(expression, cond) if cond else expression
         elif m.agg:
-            cond = " AND ".join(condition(f) for f in m.where)
+            cond = " AND ".join(conditions(m.where))
             target = field_sql(m.field)[0] if m.field else None
             if m.agg == "share":
                 selects[m.name] = (f"COUNT(*) FILTER (WHERE {cond}) * 1.0 / NULLIF(COUNT(*), 0)")
@@ -339,6 +386,8 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
                 selects[m.name] = f"{fn}({inner})" + (f" FILTER (WHERE {cond})" if cond else "")
     for m in spec.measures:
         if m.ratio:
+            if m.where:
+                raise SpecError(f"{m.name}: apply filters to its numerator and denominator measures")
             a, b = m.ratio
             selects[m.name] = f"({selects[a]}) * 1.0 / NULLIF(({selects[b]}), 0)"
 
@@ -353,8 +402,7 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
     subject = cat.subject_of.get(table)
     if subject and cat.concepts.subjects[subject].where and cat.concepts.subjects[subject].where not in where:
         where.append(cat.concepts.subjects[subject].where)
-    for f in spec.filters:
-        where.append(condition(f))
+    where.extend(conditions(spec.filters))
     time_sql = None
     if spec.time:
         default = _default_time(spec, cat)

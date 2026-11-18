@@ -37,12 +37,14 @@ def _event_lift(p: EventLift) -> str:
   SELECT CAST(placed_at AS DATE) AS day, SUM(CASE WHEN cancelled_at IS NULL THEN net_amount ELSE 0 END) AS net_sales
   FROM sales WHERE line_type = 'Sale' GROUP BY 1)
 SELECT e.event_id, e.name, CAST(e.start_date AS DATE) AS start_date, CAST(e.end_date AS DATE) AS end_date,
-       AVG(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date AND e.end_date) AS event_daily_net_sales,
-       AVG(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date - INTERVAL {d} DAY
-                                            AND e.start_date - INTERVAL 1 DAY) AS before_daily_net_sales,
+       COALESCE(SUM(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date AND e.end_date), 0)
+         / (date_diff('day', e.start_date, e.end_date) + 1) AS event_daily_net_sales,
+       COALESCE(SUM(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date - INTERVAL {d} DAY
+                                            AND e.start_date - INTERVAL 1 DAY), 0) / {d} AS before_daily_net_sales,
        event_daily_net_sales / NULLIF(before_daily_net_sales, 0) - 1 AS lift
-FROM sale_events e JOIN daily d ON d.day BETWEEN e.start_date - INTERVAL {d} DAY AND e.end_date
-WHERE e.end_date <= (SELECT MAX(placed_at) FROM sales)
+FROM sale_events e LEFT JOIN daily d ON d.day BETWEEN e.start_date - INTERVAL {d} DAY AND e.end_date
+WHERE e.end_date <= (SELECT MAX(day) FROM daily)
+  AND e.start_date - INTERVAL {d} DAY >= (SELECT MIN(day) FROM daily)
 GROUP BY e.event_id, e.name, e.start_date, e.end_date
 ORDER BY lift DESC"""
 
@@ -102,7 +104,8 @@ TEMPLATES: dict[str, Template] = {
     "event_lift": Template(
         "Lift of each sale event: average daily net sales during the event vs the days before it", EventLift,
         _event_lift, lambda p: f"For each finished sale event: average daily net sales during the event, compared "
-                               f"with the {p.days_before} days before it (lift = event / before - 1)"),
+                               f"with the {p.days_before} calendar days before it, including zero-sales days; "
+                               "only windows within the recorded sales date range (lift = event / before - 1)"),
     "channel_roas": Template(
         "Return on ad spend per channel using the shop's own last-click attribution (credited revenue / spend)",
         ChannelRoas, _channel_roas,
