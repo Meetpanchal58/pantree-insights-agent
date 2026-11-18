@@ -54,7 +54,8 @@ def provenance(items: list[dict], shop: Path) -> dict:
             "cases_sha256": cases_digest(items),
             "scorer_version": SCORER_VERSION, "python": platform.python_version(), "packages": versions,
             "settings": {name: getattr(settings, name) for name in
-                         ("model_main", "model_light", "temperature", "contrast_check", "query_timeout_s", "max_rows")}}
+                         ("model_main", "model_light", "temperature", "contrast_check", "query_timeout_s", "max_rows",
+                          "retrieval_mode", "retrieval_top_k", "retrieval_max_chars")}}
 
 
 def latency(values: list[float]) -> dict:

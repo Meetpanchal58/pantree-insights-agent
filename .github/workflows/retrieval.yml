@@ -1,0 +1,53 @@
+name: Retrieval benchmark (no LLM)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/pantree_insights/**'
+      - 'semantic/**'
+      - 'evals/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/retrieval.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/pantree_insights/**'
+      - 'semantic/**'
+      - 'evals/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/retrieval.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  retrieval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HF_HUB_DISABLE_XET: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --locked
+      - uses: actions/cache@v4
+        with:
+          path: .cache/retrieval-model
+          key: minilm-onnx-1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+      - name: Build versioned knowledge with the pinned public model
+        run: uv run pantree-knowledge build --download-model
+      - name: Compare keyword, vector and hybrid (held-out gate)
+        run: uv run python evals/retrieval_eval.py --suite all --repeats 3 --gate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retrieval-${{ github.sha }}
+          path: |
+            evals/reports/retrieval_*.json
+            evals/reports/retrieval_*.md
+          if-no-files-found: warn

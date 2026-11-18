@@ -114,9 +114,9 @@ def catalog_text(cat: Catalog, terms: dict[str, str]) -> str:
 
 def ask_model(llm, cat: Catalog, terms: dict[str, str], data: dict, question: str, history: str = "",
               answers: dict[str, str] | None = None, problems: list[str] | None = None,
-              background: str = "") -> Interpretation:
+              background: str = "", catalog_context: str | None = None) -> Interpretation:
     system = system_prompt("interpreter", data_first_day=data["first_day"], data_last_day=data["last_day"]) \
-        + "\n\n" + catalog_text(cat, terms)
+        + "\n\n" + (catalog_text(cat, terms) if catalog_context is None else catalog_context)
     parts = []
     if background:
         parts.append(f"## Project instructions and what we already know\n{background}")
@@ -316,14 +316,15 @@ def _same(a: pd.DataFrame, b: pd.DataFrame) -> bool:
 def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], data: dict, question: str,
            history: str = "", answers: dict[str, str] | None = None, register: dict[str, list[str]] | None = None,
            run: Callable[[str], pd.DataFrame] | None = None, contrast: bool = True,
-           background: str = "") -> Decision:
+           background: str = "", catalog_context: str | None = None) -> Decision:
     """Read the question and decide: answer (spec / template), ask, decline or say it cannot be answered."""
     answers = answers or {}
     unsettled = register_questions(question, register or {}, answers)
     if unsettled:
         return Decision("clarify", questions=unsettled, required=True, reason="ambiguity register")
 
-    reading = ask_model(llm, cat, terms, data, question, history, answers, background=background)
+    reading = ask_model(llm, cat, terms, data, question, history, answers,
+                        background=background, catalog_context=catalog_context)
     detail: dict = {"reading": reading.model_dump(mode="json")}
     for attempt in range(MAX_REPAIRS + 1):
         if reading.decline_reason:
@@ -350,7 +351,7 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             problems = ["no spec, template or question was given"]
         if attempt < MAX_REPAIRS:
             reading = ask_model(llm, cat, terms, data, question, history, answers, problems=problems,
-                                background=background)
+                                background=background, catalog_context=catalog_context)
             detail["repair"] = {"problems": problems, "reading": reading.model_dump(mode="json")}
     else:
         rephrase = "Let me rephrase the question"
@@ -366,7 +367,8 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
         return decision
 
     # contrast: materially different readings, compiled and run; ask only when the numbers differ
-    alternatives = ask_alternatives(llm, cat, terms, data, question, history, answers, spec)
+    alternatives = ask_alternatives(llm, cat, terms, data, question, history, answers, spec,
+                                    catalog_context=catalog_context)
     detail["alternatives"] = alternatives.model_dump(mode="json")
     try:
         base = run(compile_spec(spec, cat))
@@ -401,9 +403,9 @@ def reading_options(readings: list[QuerySpec], cat: Catalog) -> list[str]:
 
 
 def ask_alternatives(llm, cat: Catalog, terms: dict[str, str], data: dict, question: str, history: str,
-                     answers: dict[str, str], spec: QuerySpec) -> Alternatives:
+                     answers: dict[str, str], spec: QuerySpec, catalog_context: str | None = None) -> Alternatives:
     system = system_prompt("contrast", data_first_day=data["first_day"], data_last_day=data["last_day"]) \
-        + "\n\n" + catalog_text(cat, terms)
+        + "\n\n" + (catalog_text(cat, terms) if catalog_context is None else catalog_context)
     parts = [f"## Earlier in this chat\n{history}"] if history else []
     parts.append(f"## Question\n{question}")
     if answers:

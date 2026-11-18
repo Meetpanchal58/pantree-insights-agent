@@ -20,6 +20,9 @@ the SQL behind it, a chart and an explanation.
 Every answer is labelled **Verified**. A question it cannot answer that way gets "I can't answer this as a verified
 number yet", never a guess. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+Optional [hybrid knowledge retrieval](docs/hybrid-retrieval.md) combines keyword and local vector search.
+It includes a free accuracy/latency benchmark; the full catalog remains the default pending live answer evaluation.
+
 ## Repository
 
 ```

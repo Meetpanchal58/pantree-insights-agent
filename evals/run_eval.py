@@ -248,7 +248,7 @@ def run(items: list[dict], live: Path | None = None, repeats: int = 1) -> list[d
                    "seconds": round(time.perf_counter() - started, 3), "status": final.get("status") or final["type"],
                    "final_type": final["type"], "final_kind": final.get("kind"),
                    "stage_seconds": stage_seconds(events), "calls": final.get("calls", []),
-                   "retrieval_seconds": None,  # this architecture has no standalone hybrid retrieval stage yet
+                   "retrieval_seconds": stage_seconds(events).get("retrieve"),
                    "message": final.get("message"), "cost": (final.get("cost") or {}).get("usd"),
                    "trust": final.get("trust"), "spec": final.get("spec"), "template": final.get("template"),
                    "sql": final.get("sql"), "grounded": final.get("grounded"),
