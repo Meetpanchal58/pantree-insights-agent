@@ -21,6 +21,10 @@ COPY memory ./memory
 COPY demo_runs ./demo_runs
 RUN uv sync --frozen --no-dev
 
+# Pin and build shared semantic knowledge at image build time; no download on a user request.
+# Runtime remains RETRIEVAL_MODE=full until the live answer evaluation justifies enabling hybrid.
+RUN HF_HOME=/app/.cache/huggingface HF_HUB_DISABLE_XET=1 uv run --no-sync pantree-knowledge build --download-model
+
 RUN useradd --create-home --uid 1000 app && chown -R app:app /app
 USER app
 EXPOSE 8080

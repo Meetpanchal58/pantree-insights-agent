@@ -73,6 +73,7 @@ class State(TypedDict, total=False):
     chat_id: str | None
     question: str
     history: str
+    catalog_context: str | None
     use_defaults: bool
     answers: dict[str, str]
     choices: dict[str, str]
@@ -179,6 +180,13 @@ class Agent:
         log.info("agent_prepare phase=joins seconds=%.2f", time.monotonic() - started)
         self.aliases = {alias.lower(): value for value, names in self.glossary.value_aliases.items()
                         for alias in names}
+        self.knowledge = None
+        if settings.retrieval_mode != "full":
+            from .retrieval import KnowledgeSearch
+
+            self.knowledge = KnowledgeSearch(settings)
+            log.info("agent_prepare phase=retrieval mode=%s seconds=%.3f fallback=%s",
+                     settings.retrieval_mode, self.knowledge.startup_seconds, self.knowledge.fallback)
         self._cache: OrderedDict[str, tuple[pd.DataFrame, bool]] = OrderedDict()
         self._cache_lock = threading.Lock()
         self._llms: dict[str, LLM] = {}
@@ -240,6 +248,14 @@ class Agent:
                     "_detail": {"reason": verdict.reason}}
         return {"status": "running", "route": "interpret", "warnings": []}
 
+    @step("retrieve")
+    def retrieve(self, state: State) -> dict:
+        if self.knowledge is None:  # a checkpoint may outlive a change back to full mode
+            return {"catalog_context": None, "_detail": {"mode": "full", "used_context": "full"}}
+        context, detail = self.knowledge.context(state["question"], state.get("history", ""),
+                                                 state.get("answers") or {})
+        return {"catalog_context": context, "_detail": detail}
+
     @step("interpret")
     def interpret(self, state: State) -> dict:
         """Question -> spec or template, with every doubt turned into a question and a read-back to confirm."""
@@ -253,7 +269,8 @@ class Agent:
             decision = decide(self.llm(state), self.catalog, self.glossary.terms, self.aliases, self.data,
                               state["question"], state.get("history", ""), answers, self.glossary.ambiguous,
                               run=lambda sql: self.query(sql)[0], contrast=get_settings().contrast_check,
-                              background=self.mem(state).context(state["question"], as_of=self.data["last_day"]))
+                              background=self.mem(state).context(state["question"], as_of=self.data["last_day"]),
+                              catalog_context=state.get("catalog_context") if self.knowledge is not None else None)
         detail = {"decision": decision.kind, "restated": decision.restated, "reason": decision.reason}
         if decision.kind == "decline":
             return {"status": "declined", "message": decision.reason, "route": "finish", "_status": "declined",
@@ -411,13 +428,16 @@ class Agent:
     # ------------------------------------------------------------------ graph
     def _build(self) -> StateGraph:
         g = StateGraph(State)
-        for name in ["check_input", "interpret", "clarify", "execute", "analyse", "chart", "remember", "finish"]:
+        for name in ["check_input", "retrieve", "interpret", "clarify", "execute", "analyse", "chart",
+                     "remember", "finish"]:
             g.add_node(name, getattr(self, name))
-        route = lambda s: s["route"]                                       # noqa: E731
+        def route(s):
+            return "retrieve" if s["route"] == "interpret" and self.knowledge is not None else s["route"]
         g.add_edge(START, "check_input")
-        g.add_conditional_edges("check_input", route, ["interpret", "finish"])
-        g.add_conditional_edges("interpret", route, ["clarify", "execute", "interpret", "finish"])
-        g.add_conditional_edges("clarify", route, ["interpret", "execute"])
+        g.add_conditional_edges("check_input", route, ["retrieve", "interpret", "finish"])
+        g.add_edge("retrieve", "interpret")
+        g.add_conditional_edges("interpret", route, ["clarify", "execute", "retrieve", "interpret", "finish"])
+        g.add_conditional_edges("clarify", route, ["retrieve", "interpret", "execute"])
         g.add_conditional_edges("execute", route, ["analyse", "finish"])
         g.add_edge("analyse", "chart")
         g.add_edge("chart", "remember")

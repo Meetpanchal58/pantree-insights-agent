@@ -19,6 +19,8 @@ writes language; code builds every query.
 
 ```
 check_input     code: personal data, injection, length                         -> decline
+retrieve        optional: local BM25 + vectors, fused and expanded to complete definition bundles
+                full catalog by default; shadow/hybrid are opt-in (see hybrid-retrieval.md)
 interpret       interpret.py:
                   ambiguity register (glossary.yaml `ambiguous`)               -> ask
                   interpreter: question -> QuerySpec | template | clarify | unanswerable | decline

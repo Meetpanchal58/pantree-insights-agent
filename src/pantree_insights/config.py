@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +24,13 @@ class Settings(BaseSettings):
     semantic_dir: Path = ROOT / "semantic"
     prompts_file: Path = ROOT / "prompts" / "agents.yaml"
     memory_dir: Path = ROOT / "memory"
+
+    # Retrieval is opt-in until retrieval AND end-to-end answer evaluations pass.
+    retrieval_mode: Literal["full", "shadow", "hybrid"] = "full"
+    retrieval_index: Path = ROOT / ".cache" / "knowledge.npz"
+    retrieval_model_dir: Path = ROOT / ".cache" / "retrieval-model"
+    retrieval_top_k: int = Field(12, ge=1, le=100)
+    retrieval_max_chars: int = Field(24000, ge=1000, le=100000)
 
     # LLM. Models are "provider:model" (LangChain init_chat_model), so OpenAI/Anthropic is a config change.
     model_main: str = "openai:gpt-6.1-terra"     # interpreter, contrast check, analyst
