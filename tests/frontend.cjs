@@ -79,6 +79,25 @@ const path = require('node:path');
     await page.locator('.new-chat').click();
     await page.evaluate(()=>streams.at(-1).emit({type:'step',step:'plan',status:'started'}));
     assert.deepEqual(await page.evaluate(()=>[streams.at(-1).closed,S.busy,S.run]),[true,false,null]);
+    const progressCursors=[];
+    await page.route('**/api/runs/sample/progress?*', async route=>{
+      const since=new URL(route.request().url()).searchParams.get('since');
+      progressCursors.push(since);
+      if (since==='1') {
+        return route.fulfill({json:{active:true,events:[{type:'step',step:'prepare',status:'done'}]}});
+      }
+      await route.fulfill({json:{active:false,events:[{type:'final',status:'done',
+        question:'Revenue by category',analysis:{headline:'Saved answer'},data_as_of:'2026-11-16'}]}});
+    });
+    await page.evaluate(()=>{
+      streamRun('sample',0,null,'Revenue by category');
+      streams.at(-1).emit({type:'step',step:'prepare',status:'started'});
+      streams.at(-1).onerror();
+    });
+    await page.locator('#messages .answer h3').filter({hasText:'Saved answer'}).waitFor();
+    assert.deepEqual(progressCursors,['1','2']);
+    assert.equal(await page.evaluate(()=>S.busy),false);
+    await page.unroute('**/api/runs/sample/progress?*');
     assert.equal(await page.locator('.send').isDisabled(),false);
     const count=requests.filter(x=>x==='/api/demos').length;
     await page.locator('.new-chat').click();
