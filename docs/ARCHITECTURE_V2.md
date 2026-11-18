@@ -185,6 +185,16 @@ Semantic-layer fixes found on the way: last-click revenue is a compilable metric
 campaign (an empty "campaign" worth Rs 3.4 crore was ranked first before); new vs repeat customers is a labelled
 split. These numbers measure the compiler and the catalog; how well the model fills specs is measured in phase 2.
 
+**Phase 2 built (Nov 18, free checks only):** `src/pantree_insights/interpret.py` and the `v2` variant of the
+agent (`--variant v2`): one structured interpreter call over the whole catalog (about 15k tokens, the same for
+every question, so the provider caches it); values normalised to their stored spelling; one repair round with the
+validator's exact problems; a second independent reading that must agree (a third breaks a tie; no majority = the
+readings are offered to the user, even when defaults are allowed); the read-back rendered from the spec; compiled
+execution labelled `trust: verified`; multi-step questions go to the v1 pipeline labelled `trust: exploratory`;
+a summary sentence whose number cannot be checked is removed instead of failing the answer. Ten scripted end-to-end
+tests cover every route (`tests/test_v2_flow.py`). The evaluation reports verified correctness, coverage,
+exploratory correctness and spec equality with the gold spec.
+
 ## 10. Delivery plan
 
 1. **Spec and compiler (accuracy core)**: QuerySpec schema and validator; compiler extended to several metrics,

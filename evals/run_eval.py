@@ -113,10 +113,29 @@ def claims_hold_on_gold(claims: list[dict], gold: pd.DataFrame, mapping: dict[st
     return not problems, "; ".join(problems[:3])
 
 
+def spec_match(item: dict, spec: dict | None) -> bool | None:
+    """v2: does the model's spec compute the same thing as the gold spec (evals/gold_specs.yaml)?"""
+    if spec is None or item.get("set") != "answer":
+        return None
+    gold = _gold_specs().get(f"{item['suite']}/{item['id']}")
+    if not gold or gold.get("route") == "template":
+        return None
+    from pantree_insights.interpret import canonical
+    from pantree_insights.spec import QuerySpec
+    return canonical(QuerySpec.model_validate(spec)) == canonical(QuerySpec.model_validate(gold))
+
+
+def _gold_specs() -> dict:
+    path = ROOT / "evals" / "gold_specs.yaml"
+    return yaml.safe_load(path.read_text())["specs"] if path.exists() else {}
+
+
 def decline_layer(events: list[dict]) -> str | None:
     for e in events:
         if e.get("step") == "understand" and (e.get("detail") or {}).get("decision") == "decline":
             return "understanding"
+        if e.get("step") == "interpret" and (e.get("detail") or {}).get("decision") == "decline":
+            return "interpreter"
         if e.get("step") == "check_input" and e.get("status") == "blocked":
             return "input_guard"
         if e.get("step") == "plan" and (e.get("detail") or {}).get("decision") == "decline":
@@ -240,12 +259,15 @@ def _run(items: list[dict], variant: str, repeats: int, offset: int, memory_dir:
                    "cost": (final.get("cost") or {}).get("usd", 0.0), "attempts": final.get("attempts") or 0,
                    "sql": final.get("sql"), "warnings": final.get("warnings", []),
                    "diagnostics": [e for e in events if e.get("type") == "step"
-                                   and e.get("step") in {"retrieve", "understand", "plan", "write_sql", "check_sql",
+                                   and e.get("step") in {"retrieve", "interpret", "execute", "understand", "plan",
+                                                         "write_sql", "check_sql",
                                                          "run_query", "validate"}
                                    and e.get("status") != "started"],
                    "grounded": final.get("grounded"), "claims": (final.get("analysis") or {}).get("claims"),
                    "context_tables": (writes[0].get("detail") or {}).get("context_tables") if writes else None,
-                   "required_tables": item.get("required_tables")}
+                   "required_tables": item.get("required_tables"),
+                   "trust": final.get("trust"), "spec": final.get("spec"),
+                   "spec_match": spec_match(item, final.get("spec"))}
             if final.get("status") == "api_error":
                 row.update(result_correct=None, answer_correct=None, decline_layer=None, passed=None,
                            reason="provider error after retry (not scored)", failure_type="api_error")
@@ -305,6 +327,19 @@ def summary(rows: list[dict]) -> str:
             ("Retry / validator recovery (correct after >1 attempt)",
              _rate([r for r in answer if r["attempts"] > 1], "result_correct")),
         ]
+        if any(r.get("trust") for r in answer):             # v2: verified correctness, coverage, spec accuracy
+            verified = [r for r in answer if r.get("trust") == "verified"]
+            lines += [
+                ("v2 verified answers whose result equals the gold (target 100%)",
+                 _rate(verified, "result_correct") if verified else "-"),
+                ("v2 coverage: answered as verified",
+                 _rate([{**r, "v": r.get("trust") == "verified"} for r in answer], "v")),
+                ("v2 exploratory answers correct", _rate([r for r in answer if r.get("trust") == "exploratory"],
+                                                         "result_correct")),
+                ("v2 model spec equal to the gold spec",
+                 _rate([{**r, "m": bool(r.get("spec_match"))} for r in answer if r.get("spec_match") is not None],
+                       "m")),
+            ]
         out += [f"## {suite.capitalize()}", "", "| Measure | Result |", "|---|---|"]
         out += [f"| {name} | {value} |" for name, value in lines]
         declines = [r for r in part if r["set"] in ("decline", "adversarial") and r["passed"]]

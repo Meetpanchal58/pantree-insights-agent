@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 60.0                  # a slow provider response is cut off ...
     llm_max_retries: int = 1
     max_parallel_llm_calls: int = 2  # bound concurrent provider requests per instance
+    v2_agreement: bool = True        # v2: a second independent reading must agree before computing
     # Sampling temperature. None = provider default: OpenAI reasoning models (gpt-6.x) do not accept a
     # temperature, so it is only sent when set. Reports record the value used.
     temperature: float | None = None

@@ -35,7 +35,7 @@ from .charts import build_chart
 from .checks import label_grain_problems, result_problems
 from .config import get_settings
 from .db import QueryTimeout, connect, manifest, run_query, snapshot_signature
-from .grounding import verify
+from .grounding import free_numbers, verify
 from .guardrails import check_question, check_sql
 from .joins import JoinGraph
 from .llm import LLM, BudgetExceeded, ChatLLM
@@ -63,6 +63,7 @@ class Features:
     narrow: bool = True           # SQL writer's first attempt sees only the plan's tables
     memory: bool = True           # memory in prompts and saving insights
     understand: bool = True       # question understanding + clarifying loop + code-resolved columns and joins
+    verified: bool = False        # v2: question -> QuerySpec -> compiled SQL (docs/ARCHITECTURE_V2.md)
 
 
 VARIANTS = {
@@ -79,10 +80,16 @@ VARIANTS = {
     "no_understanding": Features(understand=False),      # the system before the understanding step
     "full": Features(),
     "full_no_memory": Features(memory=False),
+    "v2": Features(verified=True),                          # verified answers by construction
 }
 
 
 class State(TypedDict, total=False):
+    pipeline: str                  # v1 | v2
+    spec: dict | None              # v2: the confirmed QuerySpec
+    readings: list[dict]           # v2: different readings offered to the user
+    restated: str
+    trust: str | None              # v2: verified | exploratory
     run_id: str
     chat_id: str | None
     question: str
@@ -124,6 +131,25 @@ class State(TypedDict, total=False):
 
 def _frame(result: dict) -> pd.DataFrame:
     return pd.DataFrame(result["data"], columns=result["columns"])
+
+
+def drop_unverified(analysis: agents.Analysis, problems: list[str]) -> agents.Analysis:
+    """Remove every sentence that uses a failing claim or a free-typed number; keep the rest."""
+    bad = {p.split(" ", 1)[0] for p in problems if re.match(r"c\d+ ", p)}
+    claims = [c for c in analysis.claims if c.id not in bad]
+
+    def clean(text: str) -> bool:
+        used = set(re.findall(r"\{(c\d+)\}", text or ""))
+        return not (used & bad) and not free_numbers(text or "") and used <= {c.id for c in claims}
+
+    headline = analysis.headline if clean(analysis.headline) else \
+        "The verified result is in the table below; no number in the summary could be checked."
+    return analysis.model_copy(update={
+        "headline": headline, "claims": claims,
+        "findings": [t for t in analysis.findings if clean(t)],
+        "recommendations": [t for t in analysis.recommendations if clean(t)],
+        "caveats": [t for t in analysis.caveats if clean(t)],
+        "memory": [m for m in analysis.memory if clean(m.statement)]})
 
 
 def _defines(numerator: str, column: str, value: str) -> bool:
@@ -192,6 +218,16 @@ class Agent:
             self.value_columns = {v: list(cols) for v, cols in self.retriever.value_columns.items()}
             for value, cols in catalog_values().items():
                 self.value_columns[value] = sorted(set(self.value_columns.get(value, [])) | set(cols))
+        if self.features.verified:
+            from .catalog import label_columns, load_catalog
+            from .spec import Catalog
+
+            profile = profile_for(self.con, {**info, "snapshot_signature": self.snapshot})
+            self.spec_catalog = Catalog(self.retriever.schema, self.metrics, self.concepts,
+                                        JoinGraph(self.retriever.schema, profile), load_catalog(), label_columns(),
+                                        self.con)
+            self.spec_aliases = {alias.lower(): value for value, names in
+                                 self.retriever.glossary.value_aliases.items() for alias in names}
         self._llms: dict[str, LLM] = {}
         self._memories: dict[str, Any] = {}          # run_id -> memory scope for that question
         self._checkpoint_context = None
@@ -232,7 +268,90 @@ class Agent:
         if not verdict.ok:
             return {"status": "declined", "message": verdict.reason, "route": "finish", "_status": "blocked",
                     "_detail": {"reason": verdict.reason}}
-        return {"status": "running", "route": "retrieve", "attempts": 0, "warnings": [], "feedback": []}
+        first = "interpret" if self.features.verified else "retrieve"
+        return {"status": "running", "route": first, "attempts": 0, "warnings": [], "feedback": [],
+                "pipeline": "v2" if self.features.verified else "v1"}
+
+    @step("interpret")
+    def interpret(self, state: State) -> dict:
+        """v2: question -> QuerySpec (checked, agreed by independent readings) -> confirmation -> execute."""
+        from .interpret import CANNOT_BUILD, READINGS, Decision, decide, readback
+        from .spec import QuerySpec
+
+        answers, choices = dict(state.get("answers") or {}), dict(state.get("choices") or {})
+        rounds = state.get("clarify_rounds", 0)
+        pick = choices.pop("reading", None)
+        if pick is not None and state.get("readings"):          # the user chose one of the readings
+            spec = QuerySpec.model_validate(state["readings"][int(pick)])
+            decision = Decision("spec", spec=spec, restated=state.get("restated", state["question"]))
+        else:
+            decision = decide(self.llm(state), self.spec_catalog, self.retriever.glossary.terms, self.spec_aliases,
+                              self.data, state["question"], state.get("history", ""), answers,
+                              agreement=get_settings().v2_agreement)
+        detail = {"decision": decision.kind, "readings": decision.readings, "restated": decision.restated}
+        if decision.kind == "decline":
+            return {"status": "declined", "message": decision.reason, "route": "finish", "_status": "declined",
+                    "_detail": {**detail, "decision": "decline", "reason": decision.reason}}
+        if decision.kind == "analysis":                         # multi-step: the exploratory pipeline, labelled
+            return {"trust": "exploratory", "route": "retrieve", "_detail": {**detail, "reason": decision.reason}}
+        if decision.kind == "clarify":
+            if rounds >= MAX_CLARIFY_ROUNDS:
+                return {"status": "declined", "route": "finish", "open_points": [],
+                        "message": "The question is still unclear. Please restate the metric, period and filters; "
+                                   "nothing was computed from guessed values."}
+            readings = [r for r in (decision.detail.get("first"), decision.detail.get("second"),
+                                    decision.detail.get("third")) if r and r.get("spec")]
+            points = []
+            for q in decision.questions:
+                if q.question.startswith(READINGS):
+                    meaning = {o: str(i) for i, o in enumerate(q.options) if o != "None of these"}
+                    points.append(OpenPoint("reading", q.question, q.options, q.default, q.why, meaning,
+                                            required=True))
+                else:                                       # an unbuildable spec is never answered by a default
+                    points.append(OpenPoint(f"llm:{q.question}", q.question, q.options, q.default, q.why,
+                                            required=q.question.startswith(CANNOT_BUILD)))
+            pending = [p for p in points if p.question.strip().lower() not in {a.strip().lower() for a in answers}]
+            if state.get("use_defaults") and not any(p.required for p in pending):
+                for p in pending:
+                    answers[p.question] = p.default
+                return {"answers": answers, "clarify_rounds": rounds + 1, "route": "interpret",
+                        "_detail": {**detail, "defaults": [p.question for p in pending]}}
+            return {"open_points": [p.__dict__ for p in pending], "route": "clarify", "_status": "needs_input",
+                    "readings": [r["spec"] for r in readings], "restated": decision.restated,
+                    "_detail": {**detail, "round": rounds + 1, "questions": [p.question for p in pending]}}
+        spec = decision.spec
+        summary = readback(spec, self.spec_catalog, decision.assumptions)
+        out = {"spec": spec.model_dump(mode="json"), "readback": summary, "restated": decision.restated,
+               "trust": "verified", "open_points": [], "answers": answers, "choices": choices,
+               "_detail": {**detail, "spec": spec.model_dump(mode="json"), "readback": summary}}
+        if not state.get("use_defaults") and not state.get("confirmed"):
+            point = OpenPoint("confirm", CONFIRM_QUESTION, [CONFIRM_YES, CONFIRM_NO], CONFIRM_YES,
+                              "nothing is computed until you confirm", {CONFIRM_YES: "yes"})
+            return {**out, "open_points": [point.__dict__], "route": "clarify", "_status": "needs_input"}
+        return {**out, "route": "execute"}
+
+    @step("execute")
+    def execute(self, state: State) -> dict:
+        """v2: compile the confirmed spec (no model writes SQL) and run it."""
+        from .spec import QuerySpec, SpecError, compile_spec
+
+        spec = QuerySpec.model_validate(state["spec"])
+        try:
+            sql = compile_spec(spec, self.spec_catalog)
+            result = run_query(self.con, sql)
+        except (SpecError, Exception) as error:              # noqa: BLE001 - reported, never guessed around
+            return {"status": "failed", "route": "finish", "message": f"The verified query could not run: {error}"}
+        metrics = [m.metric for m in spec.measures if m.metric]
+        plan = agents.AnalysisPlan(decision="proceed", restated_question=state.get("restated") or state["question"],
+                                   metrics=metrics, assumptions=[])
+        return {"sql": sql, "attempts": 1, "plan": plan.model_dump(), "metric_names": metrics,
+                "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"])
+                if self.features.memory else "(memory disabled)",
+                "result": _result(result.frame, result.truncated),
+                "verification": {"status": "verified", "metrics": {m: "verified" for m in metrics},
+                                 "how": "compiled from the semantic layer"},
+                "route": "analyse", "_detail": {"sql": sql, "rows": len(result.frame),
+                                                "query_seconds": round(result.seconds, 2)}}
 
     @step("retrieve")
     def retrieve(self, state: State) -> dict:
@@ -433,21 +552,22 @@ class Agent:
             answer = (given.get(CONFIRM_QUESTION) or CONFIRM_YES).strip()
             if answer == CONFIRM_YES:                                       # confirmed: plan with what was resolved
                 return {"confirmed": True, "clarify_rounds": rounds, "open_points": [], "status": "running",
-                        "route": "plan"}
+                        "route": "execute" if state.get("pipeline") == "v2" and state.get("spec") else "plan"}
             correction = "The user wants something changed but did not say what: ask what to change" \
                 if answer == CONFIRM_NO else answer
             answers = {**(state.get("answers") or {}), CORRECTION: correction}
             return {"answers": answers, "confirmed": False, "clarify_rounds": rounds, "open_points": [],
-                    "status": "running", "route": "understand"}
+                    "status": "running", "route": "interpret" if state.get("pipeline") == "v2" else "understand"}
         answers = {**(state.get("answers") or {}), **given}
         choices = dict(state.get("choices") or {})
         for p in points:
             answer = given.get(p.question, p.default)
             if p.meaning and answer in p.meaning:                           # a choice code can act on
                 choices[p.key] = p.meaning[answer]
+        back = "interpret" if state.get("pipeline") == "v2" and state.get("trust") != "exploratory" else \
+            "understand" if self.features.understand else "plan"
         return {"answers": answers, "choices": choices, "clarify_rounds": rounds, "open_points": [],
-                "confirmed": False, "status": "running",
-                "route": "understand" if self.features.understand else "plan"}
+                "confirmed": False, "status": "running", "route": back}
 
     def narrowed_context(self, state: State, plan: agents.AnalysisPlan) -> tuple[str, list[str]]:
         """Context limited to the plan's source tables (less distraction for the SQL writer).
@@ -621,6 +741,10 @@ class Agent:
             rewrote = True
             check = verify(frame, analysis.claims, analysis.texts())
         warnings = list(state.get("warnings", []))
+        if not check.ok and state.get("pipeline") == "v2":
+            # a number that cannot be checked is removed from the text; the verified table still answers
+            analysis = drop_unverified(analysis, check.problems)
+            check = verify(frame, analysis.claims, analysis.texts())
         if not check.ok:
             warnings.append("Unverified claims: " + "; ".join(check.problems[:6]))
         shown = analysis.rendered()
@@ -672,16 +796,18 @@ class Agent:
     # ------------------------------------------------------------------ graph
     def _build(self) -> StateGraph:
         g = StateGraph(State)
-        for name in ["check_input", "retrieve", "understand", "plan", "clarify", "write_sql", "check_sql", "run_query",
-                     "validate", "analyse", "chart", "remember", "finish"]:
+        for name in ["check_input", "interpret", "execute", "retrieve", "understand", "plan", "clarify", "write_sql",
+                     "check_sql", "run_query", "validate", "analyse", "chart", "remember", "finish"]:
             g.add_node(name, getattr(self, name))
         g.add_edge(START, "check_input")
         route = lambda s: s["route"]                                       # noqa: E731
-        g.add_conditional_edges("check_input", route, ["retrieve", "finish"])
+        g.add_conditional_edges("check_input", route, ["interpret", "retrieve", "finish"])
+        g.add_conditional_edges("interpret", route, ["clarify", "execute", "interpret", "retrieve", "finish"])
+        g.add_conditional_edges("execute", route, ["analyse", "finish"])
         g.add_edge("retrieve", "understand")
         g.add_conditional_edges("understand", route, ["clarify", "plan", "understand", "finish"])
         g.add_conditional_edges("plan", route, ["clarify", "write_sql", "finish"])
-        g.add_conditional_edges("clarify", route, ["understand", "plan"])
+        g.add_conditional_edges("clarify", route, ["understand", "plan", "interpret", "execute"])
         g.add_edge("write_sql", "check_sql")
         for name in ["check_sql", "run_query"]:
             g.add_conditional_edges(name, route, ["write_sql", "run_query", "validate", "analyse", "finish"])
@@ -739,6 +865,7 @@ class Agent:
                 "grounded": state.get("grounded"), "verification": state.get("verification"),
                 "attempts": state.get("attempts"), "data_as_of": self.data["last_day"],
                 "data_size": self.data["size"], "cost": llm.tracker.summary() if llm else None,
+                "trust": state.get("trust"), "spec": state.get("spec"),
                 "calls": [c.__dict__ for c in llm.tracker.calls] if llm else []}
 
 
