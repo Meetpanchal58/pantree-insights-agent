@@ -57,6 +57,10 @@ uv run pantree-web                            # the app at http://127.0.0.1:8000
 uv run pantree-catalog                        # regenerate semantic/catalog.yaml after a schema change
 ```
 
+```bash
+DATA_SIZE=small uv run python scripts/build_offline_demos.py   # rebuild the four offline demos (no model calls)
+```
+
 Settings come from environment variables or `.env` (see `.env.example`).
 
 ## Checks

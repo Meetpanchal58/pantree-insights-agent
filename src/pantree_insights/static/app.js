@@ -2,7 +2,7 @@
 /* Pantree Insights front end: no framework, no build step. */
 
 const STEP_LABELS = {
-  queue: "Waiting for a free slot", check_input: "Checking the question", interpret: "Understanding the question",
+  queue: "Waiting for a free slot", prepare: "Preparing the data (first question after a restart)", check_input: "Checking the question", interpret: "Understanding the question",
   execute: "Running the verified query", analyse: "Explaining the result", chart: "Building the chart",
   remember: "Saving to memory",
   retrieve: "Finding relevant data", understand: "Understanding the question", plan: "Planning the analysis",
@@ -98,7 +98,7 @@ function toast(msg, ms = 2600) {
   clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.hidden = true), ms);
 }
 function fmtNum(v, col = "") {
-  if (v === null || v === undefined || v === "") return "";
+  if (v === null || v === undefined || v === "") return '<span class="muted" title="No value">—</span>';
   if (typeof v !== "number") return esc(v);
   if (/roas/.test(col)) return v.toLocaleString("en-IN", { maximumFractionDigits: 1 }) + "×";
   if (/rate|share|pct|ctr|conversion|margin|lift|growth/.test(col) && Math.abs(v) <= 1.5) return (v * 100).toFixed(1) + "%";

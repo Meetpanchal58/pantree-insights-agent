@@ -69,6 +69,8 @@ terms:
     marks a line sold at a sale-event price.
   last-click revenue: SUM(marketing_attribution.credit_last_click * order_revenue) - booked order revenue
     credited to a campaign or channel (metric last_click_revenue).
+  attributed revenue: Revenue credited to campaigns or channels by the shop's own attribution (metric
+    last_click_revenue); "credited revenue" means the same.
   paid channel: A paid marketing channel = campaigns.channel_group in ('Paid Search', 'Paid Social', 'Display');
     Affiliate (paid per sale) and CRM (own email, SMS, push) are not paid media.
   on sale: A product that is on sale = listed in the catalogue today (product_master.is_active = true). Products

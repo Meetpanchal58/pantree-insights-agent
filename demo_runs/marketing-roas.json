@@ -1,10 +1,10 @@
 {
   "slug": "marketing-roas",
   "topic": "Marketing spend and ROAS",
-  "question": "Which marketing channels deliver the strongest last-click ROAS from 1 January 2026 to 2026-11-17, and how do their spend and attributed revenue compare?",
+  "question": "Which marketing channels deliver the strongest last-click ROAS from 1 January 2026 to 2026-11-14, and how do their spend and attributed revenue compare?",
   "order": 4,
   "data_size": "small",
-  "data_as_of": "2026-11-17",
+  "data_as_of": "2026-11-14",
   "seconds": 0,
   "offline": true,
   "provenance": {
@@ -12,14 +12,14 @@
       "size": "small",
       "seed": 42,
       "first_day": "2025-01-01",
-      "last_day": "2026-11-17",
+      "last_day": "2026-11-14",
       "package_version": "1.0.0",
       "n_products": 1500,
       "n_sellers": 80,
       "traffic_scale": 0.17,
       "daily_new_visitors": 30.0
     },
-    "sql_sha256": "f28a9edcc1a2f704c6a903621156c70ad1a2609894a1dfbb9b19fe1549e005dd"
+    "sql_sha256": "e6c7b659228214f4e2bde8588c8cea68ec43053a9092acd5e18b95f3cfe4bc81"
   },
   "events": [
     {
@@ -32,54 +32,38 @@
     },
     {
       "type": "step",
-      "step": "retrieve",
+      "step": "interpret",
       "status": "done",
       "detail": {
+        "understood": "Which marketing channels deliver the strongest last-click ROAS from 1 January 2026 to 2026-11-14, and how do their spend and attributed revenue compare?",
         "tables": [
           "campaigns",
           "marketing_attribution",
           "marketing_spend"
         ],
-        "reason": "Approved tables used by the saved SQL."
+        "reason": "A predefined question and data period."
       }
     },
     {
       "type": "step",
-      "step": "understand",
+      "step": "execute",
       "status": "done",
       "detail": {
-        "understood": "Which marketing channels deliver the strongest last-click ROAS from 1 January 2026 to 2026-11-17, and how do their spend and attributed revenue compare?",
-        "reason": "This example uses a predefined question and data period."
-      }
-    },
-    {
-      "type": "step",
-      "step": "write_sql",
-      "status": "done",
-      "detail": {
-        "sql": "WITH spend AS (\n  SELECT\n    c.channel,\n    SUM(m.spend) AS marketing_spend\n  FROM marketing_spend AS m\n  JOIN campaigns AS c\n    ON c.campaign_id = m.campaign_id\n  WHERE\n    m.date_hour >= CAST('2026-01-01' AS TIMESTAMP)\n    AND m.date_hour < CAST('2026-11-17' AS DATE) + INTERVAL '1' DAY\n  GROUP BY\n    1\n), revenue AS (\n  SELECT\n    c.channel,\n    SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue\n  FROM marketing_attribution AS a\n  JOIN campaigns AS c\n    ON c.campaign_id = a.campaign_id\n  WHERE\n    a.order_at >= CAST('2026-01-01' AS TIMESTAMP)\n    AND a.order_at < CAST('2026-11-17' AS DATE) + INTERVAL '1' DAY\n  GROUP BY\n    1\n)\nSELECT\n  s.channel,\n  s.marketing_spend,\n  COALESCE(r.attributed_revenue, 0) AS attributed_revenue,\n  COALESCE(r.attributed_revenue, 0) / NULLIF(s.marketing_spend, 0) AS last_click_roas\nFROM spend AS s\nLEFT JOIN revenue AS r\n  USING (channel)\nORDER BY\n  last_click_roas DESC,\n  channel",
-        "reason": "Saved, validated, deterministic query."
-      }
-    },
-    {
-      "type": "step",
-      "step": "run_query",
-      "status": "done",
-      "detail": {
-        "rows": 12,
+        "sql": "WITH spend AS (\n  SELECT\n    c.channel,\n    SUM(m.spend) AS marketing_spend\n  FROM marketing_spend AS m\n  JOIN campaigns AS c\n    ON c.campaign_id = m.campaign_id\n  WHERE\n    m.date_hour >= CAST('2026-01-01' AS TIMESTAMP)\n    AND m.date_hour < CAST('2026-11-14' AS DATE) + INTERVAL '1' DAY\n  GROUP BY\n    1\n), revenue AS (\n  SELECT\n    c.channel,\n    SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue\n  FROM marketing_attribution AS a\n  JOIN campaigns AS c\n    ON c.campaign_id = a.campaign_id\n  WHERE\n    a.order_at >= CAST('2026-01-01' AS TIMESTAMP)\n    AND a.order_at < CAST('2026-11-14' AS DATE) + INTERVAL '1' DAY\n  GROUP BY\n    1\n)\nSELECT\n  s.channel,\n  s.marketing_spend,\n  COALESCE(r.attributed_revenue, 0) AS attributed_revenue,\n  COALESCE(r.attributed_revenue, 0) / NULLIF(s.marketing_spend, 0) AS last_click_roas\nFROM spend AS s\nLEFT JOIN revenue AS r\n  USING (channel)\nWHERE\n  s.marketing_spend > 0\nORDER BY\n  last_click_roas DESC,\n  channel",
+        "rows": 11,
         "columns": [
           "channel",
           "marketing_spend",
           "attributed_revenue",
           "last_click_roas"
         ],
-        "query_seconds": 0.014,
+        "query_seconds": 0.041,
         "sample_rows": [
           {
             "channel": "Email",
-            "marketing_spend": 23017.8,
-            "attributed_revenue": 2812239.3,
-            "last_click_roas": 122.176719756
+            "marketing_spend": 22615.55,
+            "attributed_revenue": 2790550.2999999993,
+            "last_click_roas": 123.3907775844
           },
           {
             "channel": "SMS",
@@ -89,11 +73,12 @@
           },
           {
             "channel": "Affiliate Network",
-            "marketing_spend": 26793.11,
-            "attributed_revenue": 1119430.9,
-            "last_click_roas": 41.7805510447
+            "marketing_spend": 26698.66,
+            "attributed_revenue": 1117023.9,
+            "last_click_roas": 41.8382008685
           }
-        ]
+        ],
+        "reason": "Saved, reviewed, deterministic query."
       }
     },
     {
@@ -102,9 +87,9 @@
       "status": "done",
       "detail": {
         "findings": [
-          "Marketing spend totaled Rs 788,009, with Rs 12,174,326 in last-click attributed booked revenue (15.4× blended ROAS).",
-          "Email received Rs 23,018 and was credited Rs 2,812,239; high efficiency should be considered alongside its spend scale.",
-          "Google Search used 25.4% of total spend and returned 12.3× attributed revenue per rupee."
+          "Marketing spend totaled Rs 782,995, with Rs 11,017,537 in last-click attributed booked revenue (14.1× blended ROAS).",
+          "Email received Rs 22,616 and was credited Rs 2,790,550; high efficiency should be considered alongside its spend scale.",
+          "Google Search used 25.3% of total spend and returned 12.2× attributed revenue per rupee."
         ],
         "reason": "Saved editorial insights."
       }
@@ -120,9 +105,9 @@
     {
       "type": "final",
       "status": "done",
-      "question": "Which marketing channels deliver the strongest last-click ROAS from 1 January 2026 to 2026-11-17, and how do their spend and attributed revenue compare?",
+      "question": "Which marketing channels deliver the strongest last-click ROAS from 1 January 2026 to 2026-11-14, and how do their spend and attributed revenue compare?",
       "replay": true,
-      "sql": "WITH spend AS (\n  SELECT\n    c.channel,\n    SUM(m.spend) AS marketing_spend\n  FROM marketing_spend AS m\n  JOIN campaigns AS c\n    ON c.campaign_id = m.campaign_id\n  WHERE\n    m.date_hour >= CAST('2026-01-01' AS TIMESTAMP)\n    AND m.date_hour < CAST('2026-11-17' AS DATE) + INTERVAL '1' DAY\n  GROUP BY\n    1\n), revenue AS (\n  SELECT\n    c.channel,\n    SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue\n  FROM marketing_attribution AS a\n  JOIN campaigns AS c\n    ON c.campaign_id = a.campaign_id\n  WHERE\n    a.order_at >= CAST('2026-01-01' AS TIMESTAMP)\n    AND a.order_at < CAST('2026-11-17' AS DATE) + INTERVAL '1' DAY\n  GROUP BY\n    1\n)\nSELECT\n  s.channel,\n  s.marketing_spend,\n  COALESCE(r.attributed_revenue, 0) AS attributed_revenue,\n  COALESCE(r.attributed_revenue, 0) / NULLIF(s.marketing_spend, 0) AS last_click_roas\nFROM spend AS s\nLEFT JOIN revenue AS r\n  USING (channel)\nORDER BY\n  last_click_roas DESC,\n  channel",
+      "sql": "WITH spend AS (\n  SELECT\n    c.channel,\n    SUM(m.spend) AS marketing_spend\n  FROM marketing_spend AS m\n  JOIN campaigns AS c\n    ON c.campaign_id = m.campaign_id\n  WHERE\n    m.date_hour >= CAST('2026-01-01' AS TIMESTAMP)\n    AND m.date_hour < CAST('2026-11-14' AS DATE) + INTERVAL '1' DAY\n  GROUP BY\n    1\n), revenue AS (\n  SELECT\n    c.channel,\n    SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue\n  FROM marketing_attribution AS a\n  JOIN campaigns AS c\n    ON c.campaign_id = a.campaign_id\n  WHERE\n    a.order_at >= CAST('2026-01-01' AS TIMESTAMP)\n    AND a.order_at < CAST('2026-11-14' AS DATE) + INTERVAL '1' DAY\n  GROUP BY\n    1\n)\nSELECT\n  s.channel,\n  s.marketing_spend,\n  COALESCE(r.attributed_revenue, 0) AS attributed_revenue,\n  COALESCE(r.attributed_revenue, 0) / NULLIF(s.marketing_spend, 0) AS last_click_roas\nFROM spend AS s\nLEFT JOIN revenue AS r\n  USING (channel)\nWHERE\n  s.marketing_spend > 0\nORDER BY\n  last_click_roas DESC,\n  channel",
       "result": {
         "columns": [
           "channel",
@@ -133,9 +118,9 @@
         "data": [
           [
             "Email",
-            23017.8,
-            2812239.3,
-            122.176719756
+            22615.55,
+            2790550.2999999993,
+            123.3907775844
           ],
           [
             "SMS",
@@ -145,72 +130,66 @@
           ],
           [
             "Affiliate Network",
-            26793.11,
-            1119430.9,
-            41.7805510447
+            26698.66,
+            1117023.9,
+            41.8382008685
           ],
           [
             "WhatsApp",
-            15885.8,
-            555587.4000000001,
-            34.9738382707
+            15558.9,
+            555587.4,
+            35.7086554962
           ],
           [
             "Google Search",
-            199879.1900000006,
-            2449651.4999999995,
-            12.2556605317
+            198450.870000001,
+            2424623.4999999995,
+            12.2177519302
           ],
           [
             "Google Shopping",
-            104596.3800000001,
-            890353.4099999999,
-            8.5122774803
+            103890.1200000001,
+            884486.4100000001,
+            8.5136720412
           ],
           [
             "YouTube",
-            69677.1399999999,
-            562627.99,
-            8.0747859341
+            69310.5099999999,
+            561251.89,
+            8.0976447872
           ],
           [
             "Instagram",
-            93654.1100000002,
-            743344.0,
-            7.9371209656
+            93381.7500000001,
+            734924.7999999999,
+            7.8701116653
           ],
           [
             "Meta",
-            172504.1000000004,
-            1330712.7099999997,
-            7.7140932302
+            171596.3300000004,
+            1310414.7100000002,
+            7.6366126828
           ],
           [
             "Bing Search",
-            13296.3,
+            13174.2700000001,
             78249.3,
-            5.8850432075
+            5.9395549051
           ],
           [
             "DSP Display",
-            64577.6400000001,
+            64189.7500000001,
             277341.7,
-            4.2947016955
-          ],
-          [
-            "Push",
-            0.0,
-            1071704.72,
-            null
+            4.3206539985
           ]
         ]
       },
       "analysis": {
-        "headline": "Email has the highest last-click ROAS at 122.2×; Google Search receives the most spend.",
+        "headline": "Email has the highest last-click ROAS at 123.4×; Google Search receives the most spend.",
         "findings": [
-          "Marketing spend totaled Rs 788,009, with Rs 12,174,326 in last-click attributed booked revenue (15.4× blended ROAS).",
-          "Email received Rs 23,018 and was credited Rs 2,812,239; high efficiency should be considered alongside its spend scale.",
-          "Google Search used 25.4% of total spend and returned 12.3× attributed revenue per rupee."
+          "Marketing spend totaled Rs 782,995, with Rs 11,017,537 in last-click attributed booked revenue (14.1× blended ROAS).",
+          "Email received Rs 22,616 and was credited Rs 2,790,550; high efficiency should be considered alongside its spend scale.",
+          "Google Search used 25.3% of total spend and returned 12.2× attributed revenue per rupee."
         ],
         "recommendations": [
           "Test small, measured budget changes across channels; monitor marginal ROAS and incremental conversions as spend increases.",
@@ -218,7 +197,7 @@
         ],
         "caveats": [
           "Last-click attribution assigns credit; it does not prove incremental impact. Booked revenue is not reduced by later cancellations or refunds.",
-          "Spend and attributed orders use the same date window. Direct/organic orders without campaign touches receive no channel credit; simulated ROAS is not profit."
+          "Spend and attributed orders use the same date window. Direct/organic orders without campaign touches receive no channel credit; simulated ROAS is not profit. Channels with no recorded spend (such as push) have no ROAS and are not listed."
         ],
         "chart_title": "Last-click attributed revenue per rupee of marketing spend"
       },
@@ -237,25 +216,23 @@
           "Instagram",
           "Meta",
           "Bing Search",
-          "DSP Display",
-          "Push"
+          "DSP Display"
         ],
         "values": [
-          122.176719756,
+          123.3907775844,
           68.5783743713,
-          41.7805510447,
-          34.9738382707,
-          12.2556605317,
-          8.5122774803,
-          8.0747859341,
-          7.9371209656,
-          7.7140932302,
-          5.8850432075,
-          4.2947016955,
-          null
+          41.8382008685,
+          35.7086554962,
+          12.2177519302,
+          8.5136720412,
+          8.0976447872,
+          7.8701116653,
+          7.6366126828,
+          5.9395549051,
+          4.3206539985
         ]
       },
-      "data_as_of": "2026-11-17",
+      "data_as_of": "2026-11-14",
       "data_size": "small",
       "attempts": 1,
       "warnings": [],

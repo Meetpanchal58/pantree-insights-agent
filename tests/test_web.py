@@ -241,3 +241,45 @@ def test_readback_is_sent_to_the_browser_and_confirming_finishes(app_env):
     assert events[-1]["kind"] == "confirm" and "**Measure:**" in events[-1]["readback"]
     client.post(f"/api/runs/{run_id}/answer", json={"answers": {CONFIRM_QUESTION: CONFIRM_YES}})
     assert run_to_end(client, run_id, since=len(events))[-1]["status"] == "done"
+
+
+def test_a_slow_cold_start_never_blocks_the_ask_request(app_env, con):
+    """The first question after a restart builds the agent (data profile, catalog): seconds to minutes on a cold
+    instance. The request must return at once and the build shows as a step, not as a browser timeout."""
+    import time
+
+    from pantree_insights import web
+    from pantree_insights.graph import Agent
+    from pantree_insights.llm import FakeLLM
+
+    def slow_agent():
+        time.sleep(3)
+        return Agent(llm_factory=lambda: FakeLLM(responder), con=con)
+
+    web.runner = web.Runner(slow_agent)
+    client, codes, _ = app_env
+    sign_in(client, codes)
+    chat = client.post("/api/chats", json={}).json()
+    started = time.time()
+    response = client.post(f"/api/chats/{chat['id']}/ask", json={"question": "Revenue by category?"})
+    assert response.status_code == 200 and time.time() - started < 1.5
+    events = run_to_end(client, response.json()["run_id"])
+    steps = [e.get("step") for e in events if e.get("type") == "step"]
+    assert steps[0] == "prepare" and events[-1]["status"] == "done"
+
+
+def test_a_failure_while_preparing_still_answers_the_question(app_env):
+    from pantree_insights import web
+
+    def broken():
+        raise RuntimeError("data mount unavailable")
+
+    web.runner = web.Runner(broken)
+    client, codes, _ = app_env
+    sign_in(client, codes)
+    chat = client.post("/api/chats", json={}).json()
+    run_id = client.post(f"/api/chats/{chat['id']}/ask", json={"question": "Revenue?"}).json()["run_id"]
+    events = run_to_end(client, run_id)
+    assert events[-1]["type"] == "final" and events[-1]["status"] == "failed"
+    detail = client.get(f"/api/chats/{chat['id']}").json()
+    assert [m["role"] for m in detail["messages"]] == ["user", "assistant"]          # never left unanswered

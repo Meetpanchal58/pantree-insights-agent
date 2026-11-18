@@ -23,7 +23,7 @@ from datetime import date
 from typing import Literal
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .agents import ClarifyingQuestion, system_prompt
 from .catalog import describe
@@ -39,8 +39,24 @@ READINGS = "I can read this question in more than one way"
 
 
 class TemplateCall(BaseModel):
-    name: str = Field(description="Template name from the list")
-    params: dict = Field(default_factory=dict)
+    """A template and its parameters. Every parameter is a declared field (providers' strict structured output
+    rejects free-form objects); unset ones take the template's default."""
+    name: Literal["event_lift", "channel_roas", "platform_vs_recorded_orders", "repeat_within_days"]
+    days_before: int | None = Field(None, description="event_lift: baseline days before each event")
+    by: Literal["channel", "channel_group"] | None = Field(None, description="channel_roas, "
+                                                          "platform_vs_recorded_orders: the split")
+    days: int | None = Field(None, description="repeat_within_days: window after the first order")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten(cls, data):
+        if isinstance(data, dict) and isinstance(data.get("params"), dict):     # {"name", "params": {...}}
+            data = {k: v for k, v in data.items() if k != "params"} | data["params"]
+        return data
+
+    @property
+    def params(self) -> dict:
+        return {k: v for k, v in self.model_dump().items() if k != "name" and v is not None}
 
 
 class Interpretation(BaseModel):
@@ -367,11 +383,19 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
     if not different:
         return decision
     readings = [spec, *different]
-    options = [readback(r, cat).replace("\n", " · ") for r in readings]
+    options = reading_options(readings, cat)
     choice = ClarifyingQuestion(question=f"{READINGS}. Which one do you mean?", options=options, default=options[0],
                                 why="these readings give different numbers")
     return Decision("clarify", questions=[choice], required=True, restated=reading.restated_question,
                     readings=readings, detail={**detail, "different": len(different)})
+
+
+def reading_options(readings: list[QuerySpec], cat: Catalog) -> list[str]:
+    """One short option per reading: only the read-back lines that differ between the readings."""
+    lines = [readback(r, cat).replace("**", "").split("\n") for r in readings]
+    shared = set.intersection(*(set(x) for x in lines))
+    options = [" · ".join(line for line in x if line not in shared) or " · ".join(x) for x in lines]
+    return options if len(set(options)) == len(options) else [" · ".join(x) for x in lines]
 
 
 def ask_alternatives(llm, cat: Catalog, terms: dict[str, str], data: dict, question: str, history: str,
