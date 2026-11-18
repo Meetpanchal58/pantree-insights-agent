@@ -86,10 +86,27 @@ It is never deployed. In production the user plays this role.
 | Coverage: answered as verified without help | reported; grows with templates |
 | Questions asked per answer | reported; target under 1 on clear questions |
 
-## 7. Build order
+## 7. Research check (Nov 2026): what the field does, and what changes here
 
-1. Ambiguity register, knowledge-base lint, coverage check, routing rules, agreement that tolerates supporting
-   columns, shorter narration, verified-only mode; the two test fixes and the scorer label fix.
+| Finding | Source | Where we stand | Change |
+|---|---|---|---|
+| "Structural abstention": a generative component may shape *which question* is answered, never *which value* is returned; a deterministic grounder either maps the confirmed question to a query or refuses; the user confirms a plain-language restatement first. Fits when answers are consumed as fact, questions recur in limited shapes and a wrong answer costs more than a refusal | [Never the Number, 2026](https://arxiv.org/html/2608.13926) | v2 is this design (interpreter = shell; validator + compiler = kernel; read-back) | keep; instrument answer / ask / can't-answer rates from day one |
+| Business semantics, not the model, decide accuracy: three frontier models were statistically identical; a semantic-layer document added 17-23 points | [Semantic layers benchmark, 2026](https://arxiv.org/abs/2604.25149); [dbt 2026](https://docs.getdbt.com/blog/semantic-layer-vs-text-to-sql-2026) | full semantic layer + catalog | keep; do not expect a bigger model or fine-tuning to replace it |
+| Ambiguity is best found by **disagreement between deliberately different interpretations** (definition, join route, filter, grouping, ranking), asking only about terms whose alternatives change the SQL; checking that alternatives give different results | [DisGuAD, 2026](https://arxiv.org/html/2611.21645) (critical-ambiguity coverage 46-49% -> 83-85%); [AIR, 2026](https://arxiv.org/html/2610.24248) | agreement = re-reading the same way twice; correlated readings share the same bias (h10 "wrong size" passed because both readings agreed) | **replace re-reading with contrastive interpretations**: generate alternatives along those axes, compile and run each (cheap: no SQL model), ask only when results differ |
+| Ambiguity taxonomy and multiple-choice clarification before generation | [AmbiSQL, 2025-26](https://www.arxiv.org/pdf/2508.15276); [AMBROSIA](https://arxiv.org/pdf/2406.19073) | ad-hoc questions | ambiguity register organised by that taxonomy (definition, scope, attachment, vagueness); multiple-choice questions only |
+| Reliability = correct answers + correct abstention, wrong answers penalised; premise critique (questions resting on a false premise) | [TrustSQL](https://arxiv.org/pdf/2403.15879); [PremiseSQL, 2026](https://arxiv.org/pdf/2610.22158) | refusals exist; false premises (a period with no data, a value that does not exist) can still yield a silent zero | **premise checks** before compiling: period inside the data, values exist, a "why" question gets a statement that data shows association, not cause |
+| Verified question-query repository; corrections promoted only with human approval | [Snowflake VQR](https://docs.snowflake.com/user-guide/snowflake-cortex/cortex-analyst/verified-query-repository); [InfiniSynapse](https://infinisynapse.com/en/tool/natural-language-query) | gold specs exist for tests only | **verified spec repository**: confirmed question -> spec pairs, reviewed, used as examples for the interpreter and as an exact-answer cache |
+| Generated SQL checked by provers and counterexample databases, not only by test data | [SpotIt+, 2026](https://tldr.takara.ai/p/2603.04334); [QUITE](https://arxiv.org/pdf/2506.07675) | compiler checked on the real data and against an independent recompute | add differential tests of compiler and templates on generated edge-case data (nulls, empty groups, shared names) |
+
+Not adopted: fine-tuned SQL models and multi-path SQL voting (ReFoRCE, XiYan, CHASE): they raise benchmark scores
+for free-form SQL, which this design no longer produces for answers.
+
+## 8. Build order
+
+1. Contrastive interpretation with an execution-difference gate (replaces re-reading); ambiguity register by
+   taxonomy; premise checks (period, values, causal wording); knowledge-base lint; routing rules; shorter
+   narration; verified-only mode; the two test fixes and the scorer label fix.
+1b. Verified spec repository (reviewed confirmed specs as interpreter examples and exact cache).
 2. Simulated stakeholder in the evaluation runner.
 3. Verified templates: event lift vs baseline, repeat-purchase windows, measures from two tables.
 4. Serving: worker pool, queue position, result cache keyed by spec and snapshot, streaming.
