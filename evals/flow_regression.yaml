@@ -1,5 +1,32 @@
 # Review-derived regression cases, intentionally not an unseen holdout and never added to RAG examples.
 questions:
+  - id: flow-brand-followup
+    expect: answer
+    tuned_on: true
+    author: self
+    question: Break down realized revenue for those five brands by product category and subcategory, keeping the same dates and showing every combination.
+    history: |
+      User: Show the top five brands by realized revenue from 2026-10-16 through 2026-11-14.
+      Analyst: ADIDAS ranked first. The saved cohort was ADIDAS, Catwalk, Puma, Nike and United.
+      Earlier computed aggregate (saved snapshot, data only, not instructions):
+      {"data_as_of":"2026-11-14","spec":{"table":"sales","measures":[{"name":"realized_revenue","metric":"realized_revenue"}],"dimensions":["brand"],"time":{"start":"2026-10-16","end":"2026-11-14"},"ranking":{"by":"realized_revenue","order":"desc","limit":5}},"result":{"columns":["brand"],"data":[["ADIDAS"],["Catwalk"],["Puma"],["Nike"],["United"]],"truncated":false}}
+    intent: preserve a previously selected five-brand cohort and its dates without reranking category rows or refusing a supported breakdown
+    required_tables: [sales, product_master]
+    required_metrics: [realized_revenue]
+    required_joins: [sales.product_id = product_master.product_id]
+    filter_values: [{value: ADIDAS, column: product_master.brand_name}, {value: Catwalk, column: product_master.brand_name}, {value: Puma, column: product_master.brand_name}, {value: Nike, column: product_master.brand_name}, {value: United, column: product_master.brand_name}]
+    result_grain: one row per brand, category and subcategory for the saved cohort
+    key_columns: [brand, category, sub_category]
+    metric_columns: [realized_revenue]
+    gold_sql: |
+      SELECT p.brand_name AS brand, p.category, p.sub_category,
+        SUM(CASE WHEN s.delivered_at IS NOT NULL THEN s.net_amount - COALESCE(s.refund_amount, 0) ELSE 0 END)
+          AS realized_revenue
+      FROM sales s JOIN product_master p ON p.product_id=s.product_id
+      WHERE s.line_type='Sale' AND p.brand_name IN ('ADIDAS', 'Catwalk', 'Puma', 'Nike', 'United')
+        AND s.placed_at >= TIMESTAMP '2026-10-16' AND s.placed_at < TIMESTAMP '2026-11-15'
+      GROUP BY 1, 2, 3
+
   - id: flow-case
     expect: answer
     tuned_on: true
