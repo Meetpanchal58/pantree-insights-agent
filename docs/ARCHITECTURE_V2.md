@@ -168,7 +168,24 @@ The result table is streamed to the browser as soon as the query finishes; the n
 Not adopted now: an external semantic-layer server (Cube, dbt Cloud). One DuckDB file and a working compiler do not
 justify another service; the spec format is kept compatible so this can change later.
 
-## 9. Delivery plan
+## 9. Status
+
+**Phase 1 done (Nov 18, no paid calls):** `src/pantree_insights/spec.py` (QuerySpec, catalog validation,
+deterministic compiler), `evals/gold_specs.yaml` (a gold spec for every one of the 98 SQL questions),
+`evals/spec_eval.py` (free check, also in CI) and `tests/test_spec.py`.
+
+| Free measurement | Result |
+|---|---|
+| Questions the compiler can answer (coverage) | 94 of 98 (96%); the other 4 are the multi-step analyses planned as templates (h03, h04, h07, h08) |
+| Compiled answers equal to the gold answer | 94 of 94, on the full and the small shop |
+| Every named metric x every dimension of its table vs the independent recompute | all pairs agree, or are refused because the join would repeat rows |
+| Compiled SQL passing the existing safety checks | 94 of 94 |
+
+Semantic-layer fixes found on the way: last-click revenue is a compilable metric that only counts rows with a
+campaign (an empty "campaign" worth Rs 3.4 crore was ranked first before); new vs repeat customers is a labelled
+split. These numbers measure the compiler and the catalog; how well the model fills specs is measured in phase 2.
+
+## 10. Delivery plan
 
 1. **Spec and compiler (accuracy core)**: QuerySpec schema and validator; compiler extended to several metrics,
    `in` filters, time grain, ranking, share of total, period comparison, derived dimensions, window joins; tests

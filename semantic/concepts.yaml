@@ -127,7 +127,8 @@ concepts:
     support: customers.is_prime
     reviews: customers.is_prime
   new_or_repeat:
-    orders: sales.is_first_order
+    orders: {column: sales.is_first_order, expression: "CASE WHEN sales.is_first_order THEN 'New' ELSE 'Repeat' END",
+      note: the order was the customer's first ever order (New) or a later one (Repeat)}
   # ---- how they came and what they used
   device:
     orders: sales.device

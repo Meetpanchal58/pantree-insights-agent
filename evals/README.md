@@ -39,6 +39,15 @@ DATA_SIZE=full uv run python evals/retrieval_eval.py
 DATA_SIZE=full uv run python evals/library_coverage.py --run
 ```
 
+## v2 compiler check (free)
+
+```bash
+DATA_SIZE=full uv run python evals/spec_eval.py
+```
+
+Compiles the gold QuerySpec of every SQL question (`gold_specs.yaml`) and scores the result against the gold SQL
+with the same scorer as the paid run. It must report every compiled answer as matching; CI runs it on the small shop.
+
 ## Production evaluation (paid, about US$3.5-4)
 
 One pass over all 148 questions, then a second pass over the 31 holdout answers for consistency (pass^2).
