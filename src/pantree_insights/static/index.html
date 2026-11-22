@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/offline-demos.js" defer></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/workspace.js" defer></script>
 </head>
 <body>
 <div id="app" class="app">
@@ -33,6 +34,7 @@
     <div class="sidebar-foot">
       <button class="nav-item" data-action="show-pulse"><span class="ico">📈</span> Pulse <span class="badge" id="pulse-count" hidden></span></button>
       <button class="nav-item" data-action="show-memory"><span class="ico">🧠</span> Memory</button>
+      <button class="nav-item" data-action="ai-settings">⚙ Profile &amp; AI settings</button>
       <div class="user" id="user-box"></div>
     </div>
   </aside>
@@ -42,6 +44,9 @@
     <header class="topbar">
       <button class="icon-btn only-mobile" data-action="open-sidebar" aria-label="Open menu">☰</button>
       <div class="chat-title" id="chat-title">New chat</div>
+      <div class="model-control" id="model-control" hidden><label for="chat-model" id="model-provider">Model</label>
+        <select id="chat-model" aria-label="Model for subsequent requests"></select></div>
+      <button class="btn small dataset-mobile" data-action="dataset">Dataset Preview</button>
       <select id="move-project" class="select small" title="Project" hidden></select>
       <button class="icon-btn" data-action="toggle-panel" title="Agent activity" aria-label="Toggle agent panel">◧</button>
     </header>
@@ -61,6 +66,7 @@
 
   <!-- ============================== right: agent activity and result -->
   <aside class="panel" id="panel">
+    <div class="dataset-toolbar"><button class="btn small" data-action="dataset">▦ Dataset Preview</button></div>
     <header class="panel-head">
       <div><div class="panel-title">Analysis question</div><div class="panel-sub" id="panel-sub">Choose a demo or ask a business question</div></div>
       <button class="icon-btn" data-action="toggle-panel" aria-label="Close panel">✕</button>
@@ -81,6 +87,17 @@
     </div>
   </aside>
 </div>
+
+<section id="dataset-explorer" class="dataset-explorer" aria-label="Dataset explorer" hidden>
+  <header class="dataset-head"><button class="btn" data-action="back-chat">← Back to Chat</button>
+    <div><strong>Pantree workbook</strong><div class="muted" id="dataset-snapshot"></div></div>
+    <button class="icon-btn" data-action="theme" aria-label="Light / dark theme">◐</button></header>
+  <div class="dataset-search"><label for="sheet-search">Find a table</label>
+    <input id="sheet-search" type="search" placeholder="Search table names or business descriptions…"></div>
+  <nav id="dataset-tabs" class="dataset-tabs" aria-label="Workbook sheets"></nav>
+  <div id="dataset-content" class="dataset-content" tabindex="-1"></div>
+  <footer id="dataset-status" class="dataset-status" aria-live="polite">Read-only · No AI usage</footer>
+</section>
 
 <!-- ============================== sign-in -->
 <div class="overlay" id="signin" hidden>

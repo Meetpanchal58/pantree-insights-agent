@@ -1,8 +1,8 @@
 """LLM access: one small interface for every agent, with cost tracking and a daily budget.
 
 Agents call `llm.ask(agent, Schema, system, user)` and get a validated pydantic object back. The real
-implementation uses LangChain's init_chat_model, so switching provider (OpenAI now, Anthropic later)
-is a settings change. Tests use FakeLLM, which never touches the network.
+web implementation uses a pinned account/provider adapter with atomic spend reservations. Operator CLI
+calls retain LangChain model configuration. Tests use FakeLLM or deterministic provider responses.
 """
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ class Call:
     seconds: float
     queue_seconds: float = 0.0
     inference_seconds: float = 0.0
+    cost_known: bool = True
 
 
 @dataclass
@@ -55,7 +56,8 @@ class CostTracker:
                 "output": sum(c.output_tokens for c in self.calls)}
 
     def summary(self) -> dict[str, Any]:
-        return {"usd": self.usd, "calls": len(self.calls), **self.tokens}
+        return {"usd": self.usd, "calls": len(self.calls), **self.tokens,
+                "unknown_cost_calls": sum(not c.cost_known for c in self.calls)}
 
 
 def price(model: str, input_tokens: int, cached: int, output: int) -> float:
@@ -131,13 +133,22 @@ def _provider_slots(limit: int) -> threading.BoundedSemaphore:
 
 
 class ChatLLM:
-    """Real models through LangChain (structured output, reasoning effort, usage tracking)."""
+    """Typed model calls with per-run accounting; managed accounts are pinned by the web runner."""
 
-    def __init__(self, tracker: CostTracker | None = None, main: str | None = None, light: str | None = None):
+    def __init__(self, tracker: CostTracker | None = None, main: str | None = None, light: str | None = None,
+                 *, selection: dict | None = None, store=None, run_id: str | None = None):
         settings = get_settings()
         self.tracker = tracker or CostTracker()
         self.main = main or settings.model_main
         self.light = light or settings.model_light
+        self.selection, self.store, self.run_id = selection, store, run_id
+        if selection and store and run_id:
+            for row in store.api_call_history(run_id, selection['user_id']):
+                cost = row['usd'] if row['usd'] is not None else row['reserved_usd'] or 0
+                self.tracker.calls.append(Call(
+                    row['agent'], f"{row['provider']}:{row['model']}", row['input_tokens'] or 0,
+                    row['cached_tokens'] or 0, row['output_tokens'] or 0, cost,
+                    0, cost_known=row['usd'] is not None))
 
     def _model(self, name: str, effort: str):
         settings = get_settings()
@@ -146,6 +157,8 @@ class ChatLLM:
 
     def ask(self, agent: str, schema: type[T], system: str, user: str, *, effort: str | None = None,
             light: bool = False) -> T:
+        if self.selection is not None:
+            return self._managed_ask(agent, schema, system, user)
         settings = get_settings()
         if spent_today() >= settings.daily_budget_usd:
             raise BudgetExceeded(f"Today's LLM budget (${settings.daily_budget_usd:.2f}) is used up.")
@@ -175,6 +188,61 @@ class ChatLLM:
         if result.get("parsing_error") or result.get("parsed") is None:
             raise ValueError(f"{agent}: model output did not match {schema.__name__}: {result.get('parsing_error')}")
         return result["parsed"]
+
+
+    def _managed_ask(self, agent: str, schema: type[T], system: str, user: str) -> T:
+        from . import providers
+        pin, settings = self.selection, get_settings()
+        key = self.store.ai_key(pin)  # exact version and owner, checked again before each call
+        available = providers.discover(pin['provider'], key, pin['user_id'])
+        if pin['model'] not in {m['id'] for m in available}:
+            raise providers.ProviderError(
+                'The pinned model is no longer available. Select a model for a new request.', 409)
+        rates = providers.rates(pin['provider'], pin['model'])
+        if rates is None and pin['billing'] == 'shared':
+            raise providers.ProviderError('Shared usage needs configured pricing for this model. Select a priced model '
+                                          'or use a personal key; model selection requires no approval.', 409)
+        # UTF-8 bytes bound text tokens conservatively; include the complete tool schema and framing overhead.
+        shape = schema.model_json_schema()
+        if pin['provider'] == 'openai':
+            from openai.lib._pydantic import to_strict_json_schema
+            shape = to_strict_json_schema(schema)
+        bound = len((system + user + json.dumps(shape)).encode()) + 2048
+        reservation = (bound * max(rates[:2]) + settings.max_output_tokens * rates[2]) / 1e6 if rates else 0.0
+        gate = _provider_slots(settings.max_parallel_llm_calls)
+        started = time.perf_counter()
+        if not gate.acquire(timeout=settings.llm_timeout_s):
+            raise TimeoutError('Model request queue is busy; retry later')
+        cid = None
+        try:
+            cid = self.store.reserve_api_call(pin, self.run_id, agent, reservation)
+            inference = time.perf_counter()
+            value, usage = providers.invoke(pin['provider'], key, pin['model'], schema, system, user)
+            valid = (usage.get('reported') and all(type(usage.get(k)) is int and usage[k] >= 0
+                     for k in ('input', 'cached', 'output')) and usage['cached'] <= usage['input'])
+            usd = (((usage['input'] - usage['cached']) * rates[0] + usage['cached'] * rates[1]
+                    + usage['output'] * rates[2]) / 1e6) if rates and valid else None
+            self.store.settle_api_call(cid, usd, usage if valid else {}, 'succeeded' if valid else 'uncertain')
+            self.tracker.calls.append(Call(agent, f"{pin['provider']}:{pin['model']}",
+                usage['input'] if valid else 0, usage['cached'] if valid else 0, usage['output'] if valid else 0,
+                usd if usd is not None else reservation, time.perf_counter()-started,
+                inference-started, time.perf_counter()-inference, cost_known=usd is not None))
+        except providers.ProviderError as error:
+            if cid:
+                self.store.settle_api_call(cid, None if error.uncertain else 0.0, {},
+                                           'uncertain' if error.uncertain else 'rejected')
+            raise
+        except Exception:
+            if cid:
+                self.store.settle_api_call(cid, None, {}, 'uncertain')
+            raise
+        finally:
+            gate.release()
+        try:
+            return schema.model_validate_json(value) if isinstance(value, str) else schema.model_validate(value)
+        except (ValueError, TypeError):
+            raise providers.ProviderError('The model returned an invalid analytical structure. No result was trusted.',
+                                          422) from None
 
 
 class FakeLLM:

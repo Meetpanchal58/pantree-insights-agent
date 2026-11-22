@@ -117,6 +117,7 @@ function openPanel() { $("#app").classList.remove("panel-closed"); }
 
 // Navigation owns its requests and streams; late responses must not change a newer view.
 function leaveView() {
+  if (typeof displayActiveModel === "function") displayActiveModel(null);
   S.view += 1;
   S.chatRequest?.abort(); S.chatRequest = null;
   S.stream?.close(); S.stream = null;
@@ -182,6 +183,7 @@ function renderUser() {
   const box = $("#user-box");
   const u = S.me && S.me.user;
   if (!u) {
+    if (typeof clearAI === "function") clearAI();
     box.innerHTML = `<button class="btn small" data-action="signin">Sign in</button><span class="user-meta">Demo mode</span>`;
     $("#limit-info").textContent = "Sign in to ask your own questions";
     return;
@@ -192,6 +194,7 @@ function renderUser() {
     <div class="user-meta">${u.is_admin ? "Admin" : esc(u.email)}</div></div>
     <button class="icon-btn" data-action="theme" title="Light / dark">◐</button>
     <button class="icon-btn" data-action="logout" title="Sign out">⎋</button>`;
+  if (typeof refreshAI === "function") refreshAI();
   const l = S.me.limit;
   $("#limit-info").textContent = l.unlimited ? "Admin: unlimited questions" : `${l.used}/${l.per_day} live questions today`;
 }
@@ -331,7 +334,7 @@ function answerCard(run, replay = false) {
     <div class="row"><button class="btn small" data-action="show-run">View analysis, chart & SQL</button>
     ${replay ? `<span class="tag replay">${run.offline ? "Offline demo · saved results" : "Replay · recorded run"} · data as of ${esc(run.data_as_of)}</span>` : `<span class="tag">Data as of ${esc(run.data_as_of)}</span>`}
     ${run.trust === "verified" ? `<span class="tag ok" title="Computed by code from the governed metric definitions for the reading you confirmed; no model wrote this SQL">✓ Verified</span>` : run.verification && run.verification.status === "verified" ? `<span class="tag ok" title="Each metric was recomputed from its definition for the confirmed scope and matched">✓ Numbers verified against the data</span>` : run.verification && run.verification.status === "mismatch" ? `<span class="tag warn" title="The recomputed metric disagrees with this result; see the warnings">⚠ Numbers do not match the definition</span>` : run.verification ? `<span class="tag" title="This answer's metric could not be recomputed independently">Not independently verified</span>` : ""}
-    ${run.cost && run.cost.usd ? `<span class="tag">${run.cost.usd.toFixed(3)}</span>` : ""}
+    ${run.cost?.unknown_cost_calls ? `<span class="tag">Cost partly unknown</span>` : run.cost?.usd ? `<span class="tag">$${run.cost.usd.toFixed(3)}</span>` : ""}
     ${!replay && !run.offline && run.run_id && S.me?.user ? `<span class="feedback-actions"><span class="muted">Was this correct?</span> <button class="btn small" data-action="feedback" data-run="${esc(run.run_id)}" data-rating="positive">👍 Yes</button> <button class="btn small" data-action="feedback" data-run="${esc(run.run_id)}" data-rating="negative">👎 No</button></span>` : ""}</div></div>`;
   el.querySelector('[data-action="show-run"]').addEventListener("click", () => { showRunInPanel(run); openPanel(); });
   return el;
@@ -382,6 +385,7 @@ function openPanelIfWide() { if (window.innerWidth > 1180) openPanel(); }
 
 function onEvent(e, status) {
   if (!S.run) return;
+  if (e.ai && e.type !== "final" && typeof displayActiveModel === "function") displayActiveModel(e.ai);
   if (e.type === "answered") {
     for (const item of S.run.steps) if (item.status === "needs_input") item.status = "done";
     if (!S.run.restoring) renderSteps();
@@ -401,6 +405,7 @@ function onEvent(e, status) {
   } else if (e.type === "clarify") {
     if (status) status.remove();
     S.pending = e;
+    if (typeof displayActiveModel === "function") displayActiveModel(e.ai);
     if (window.innerWidth <= 1180) $("#app").classList.add("panel-closed");
     const old = [...document.querySelectorAll("[data-proposal]")].some(n => n.dataset.proposal === proposalKey(e));
     if (!old) $("#messages").appendChild(conversationMessage(e));
@@ -409,6 +414,7 @@ function onEvent(e, status) {
     scrollDown();
     S.busy = false; $(".send").disabled = false;
   } else if (e.type === "final") {
+    if (typeof displayActiveModel === "function") displayActiveModel(null);
     S.pending = null; $("#question").placeholder = "Ask a new question or continue the investigation…";
     if (S.chatId) S.chatCache.delete(S.chatId);
     if (status) status.remove();
@@ -417,7 +423,7 @@ function onEvent(e, status) {
     $("#messages").appendChild(answerCard(e, S.run && S.run.replay)); scrollDown();
     showResult(e);
     S.busy = false; $(".send").disabled = false;
-    if (!S.run.replay && S.me.user) api("/api/me").then((m) => { S.me = m; renderUser(); }).catch(() => {});
+    if (!S.run.replay && S.me.user) api("/api/me").then((m) => { S.me = m; renderUser(); if (typeof refreshAI === "function") refreshAI(true); }).catch(() => {});
   }
 }
 
@@ -612,7 +618,7 @@ function showResult(run, selected = 0) {
     <div class="table-wrap"><table><thead><tr>${res.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
       <tbody>${res.data.slice(0, 200).map((r) => `<tr>${r.map((v, i) => `<td class="${typeof v === "number" ? "num" : ""}">${fmtNum(v, res.columns[i])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
     <div class="meta">Data as of ${esc(run.data_as_of)} (${esc(run.data_size)} shop) · ${run.trust === "verified" ? "verified query" : `${run.attempts || 1} SQL attempt(s)`}
-      ${run.cost ? ` · ${run.cost.calls} LLM calls · ${run.cost.input + run.cost.output} tokens · $${(run.cost.usd || 0).toFixed(4)}` : ""}</div>
+      ${run.cost ? ` · ${run.cost.calls} LLM calls · ${run.cost.input + run.cost.output} tokens · $${(run.cost.usd || 0).toFixed(4)}${run.cost.unknown_cost_calls ? " estimated / held · some cost unknown" : " estimated"}` : ""}</div>
   </div>`;
   box.querySelectorAll("[data-analysis]").forEach((b) => b.addEventListener("click", () => showResult(whole, Number(b.dataset.analysis))));
   box.querySelectorAll("[data-action='export']").forEach((b) => b.addEventListener("click", () => exportRun(b.dataset.kind, run)));
@@ -862,6 +868,9 @@ document.addEventListener("click", async (ev) => {
   if (["chat-menu", "edit-project"].includes(a)) ev.stopPropagation();
   switch (a) {
     case "edit-question": $("#question").value = t.dataset.q; autosize(); $("#question").focus(); break;
+    case "dataset": openDataset(); break;
+    case "back-chat": backToChat(); break;
+    case "ai-settings": aiDialog(); break;
     case "retry-start": init(); break;
     case "reopen-chat": if (S.chatId) openChat(S.chatId, true); else renderWelcome(); break;
     case "feedback": {

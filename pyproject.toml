@@ -24,6 +24,7 @@ dependencies = [
     "sqlalchemy>=2.1.8",
     "psycopg[binary]>=3.3.9",
     "authlib>=1.9.5",
+    "cryptography>=46.0",
     "itsdangerous>=2.2.0",
     "httpx>=0.28.1",
 ]
