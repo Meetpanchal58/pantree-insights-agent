@@ -82,15 +82,6 @@ code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace
 .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .error-box { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
-.clarify { background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius); padding: 16px 18px; }
-.clarify h4 { margin: 0 0 10px; }
-.clarify .q { margin: 12px 0 6px; font-weight: 500; }
-.clarify .why { font-size: 12px; color: var(--muted); margin-top: -2px; }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-.chip { border: 1px solid var(--border); background: var(--surface); padding: 6px 12px; border-radius: 99px; font-size: 13px; }
-.chip:hover { border-color: var(--accent); }
-.chip.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
-.chip .rec { font-size: 11px; opacity: .8; margin-left: 4px; }
 .welcome { max-width: 720px; margin: 6vh auto 0; text-align: center; }
 .welcome h2 { font-size: 26px; margin: 0 0 6px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin-top: 22px; text-align: left; }
@@ -209,8 +200,3 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .messages, .composer-wrap { padding-left: 16px; padding-right: 16px; }
   .bubble { max-width: 92%; }
 }
-
-.clarify .other { width: 100%; margin: 8px 0 4px; padding: 7px 10px; border: 1px solid var(--border);
-  border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
-.clarify .readback { margin: 6px 0 12px; padding: 10px 12px; border-left: 3px solid var(--accent, #6b5cff);
-  background: var(--surface-2); border-radius: 6px; font-size: 13px; line-height: 1.6; }

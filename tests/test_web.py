@@ -88,7 +88,6 @@ def sign_in(client, codes, email="ana@example.com"):
 
 def run_to_end(client, run_id, since=0, confirm=True):
     """Stream a run; read-backs are confirmed automatically (other clarifying questions are returned)."""
-    from pantree_insights.graph import CONFIRM_QUESTION, CONFIRM_YES
 
     events = []
     while True:
@@ -99,7 +98,8 @@ def run_to_end(client, run_id, since=0, confirm=True):
         last = events[-1] if events else {}
         if not (confirm and last.get("type") == "clarify" and last.get("kind") == "confirm"):
             return events
-        answer = client.post(f"/api/runs/{run_id}/answer", json={"answers": {CONFIRM_QUESTION: CONFIRM_YES}})
+        answer = client.post(f"/api/runs/{run_id}/answer",
+                             json={"message": "Go ahead", "plan_version": events[-1]["plan_version"]})
         assert answer.status_code == 200
 
 
@@ -124,7 +124,9 @@ def test_progress_recovers_events_without_restarting_a_run(app_env):
     assert response.status_code == 200 and response.headers["Cache-Control"] == "no-store"
     assert response.json()["events"]
     assert web.runner.runs[run_id].segment_done.wait(15)
-    events = client.get(path).json()["events"]
+    pending = client.get(path).json()["events"][-1]
+    assert pending["kind"] == "confirm"
+    events = run_to_end(client, run_id)
     assert events[0]["step"] == "prepare" and events[-1]["status"] == "done"
     assert client.get(path, params={"since": len(events) - 1}).json() == {"events": events[-1:], "active": False}
     web.runner.runs.pop(run_id)
@@ -161,9 +163,9 @@ def test_ask_in_project_streams_and_remembers(app_env):
     assert final["type"] == "final" and final["status"] == "done"
     assert any(e.get("step") == "execute" for e in events) and final["trust"] == "verified"
     detail = client.get(f"/api/chats/{chat['id']}").json()
-    assert [m["role"] for m in detail["messages"]] == ["user", "assistant"]
+    assert [m["role"] for m in detail["messages"]] == ["user", "assistant", "user", "assistant"]
     assert detail["title"] == "Revenue by category?"
-    assert detail["messages"][1]["run"]["events"]                       # saved for replay in the panel
+    assert detail["messages"][-1]["run"]["events"]                       # saved for replay in the panel
     memory = client.get("/api/memory").json()
     assert memory["insights"][0]["scope"] == "project" and memory["insights"][0]["project_name"] == "Festive"
     # second question in the project: the interpreter sees project instructions, insight and chat history
@@ -183,7 +185,8 @@ def test_clarify_then_answer(app_env):
     run_id = client.post(f"/api/chats/{chat['id']}/ask", json=question).json()["run_id"]
     events = run_to_end(client, run_id)
     assert events[-1]["type"] == "clarify"
-    assert client.post(f"/api/runs/{run_id}/answer", json={"answers": {"Which measure?": "Orders"}}).status_code == 200
+    assert client.post(f"/api/runs/{run_id}/answer", json={
+        "message": "Orders", "plan_version": events[-1]["plan_version"]}).status_code == 200
     rest = run_to_end(client, run_id, since=len(events))
     assert rest[0]["type"] == "answered" and rest[-1]["status"] == "done"
 
@@ -257,7 +260,6 @@ def test_demo_replay(app_env):
 
 
 def test_readback_is_sent_to_the_browser_and_confirming_finishes(app_env):
-    from pantree_insights.graph import CONFIRM_QUESTION, CONFIRM_YES
 
     client, codes, _ = app_env
     sign_in(client, codes)
@@ -266,7 +268,7 @@ def test_readback_is_sent_to_the_browser_and_confirming_finishes(app_env):
                          json={"question": "Break down revenue by category"}).json()["run_id"]
     events = run_to_end(client, run_id, confirm=False)
     assert events[-1]["kind"] == "confirm" and "**Measure:**" in events[-1]["readback"]
-    client.post(f"/api/runs/{run_id}/answer", json={"answers": {CONFIRM_QUESTION: CONFIRM_YES}})
+    client.post(f"/api/runs/{run_id}/answer", json={"message": "Go ahead", "plan_version": events[-1]["plan_version"]})
     assert run_to_end(client, run_id, since=len(events))[-1]["status"] == "done"
 
 
@@ -354,5 +356,37 @@ def test_ask_retries_are_idempotent_and_payload_conflicts_are_rejected(app_env):
     assert run_to_end(client, first['run_id'])[-1]['status'] == 'done'
     assert client.post(url, json=body).json() == first
     assert client.post(url, json={**body, 'question': 'Show revenue'}).status_code == 409
-    assert client.post(url, json={**body, 'use_defaults': False}).status_code == 409
-    assert len(get_store().messages(chat['id'])) == 2
+    assert client.post(url, json={**body, 'question': 'Show revenue'}).status_code == 409
+    assert len(get_store().messages(chat['id'])) == 4
+
+
+def test_normal_composer_revisions_retries_and_stale_confirmation(app_env):
+    from pantree_insights import web
+    from pantree_insights.store import get_store
+    client, codes, _ = app_env
+    sign_in(client, codes)
+    chat = client.post('/api/chats', json={}).json()
+    url = f"/api/chats/{chat['id']}/ask"
+    run_id = client.post(url, json={'question': 'Show revenue by category'}).json()['run_id']
+    first = run_to_end(client, run_id, confirm=False)
+    reply = {'question': 'No, by brand instead', 'pending_run_id': run_id,
+             'plan_version': first[-1]['plan_version'], 'idempotency_key': 'revision-once'}
+    response = client.post(url, json=reply)
+    assert response.status_code == 200
+    assert client.post(url, json=reply).json() == response.json()
+    second = run_to_end(client, run_id, since=response.json()['since'], confirm=False)
+    assert second[-1]['spec']['dimensions'] == ['brand']
+    assert not any(e['type'] == 'result' for e in web.runner.runs[run_id].events)
+    stale = {**reply, 'question': 'Yes', 'idempotency_key': 'stale-confirm'}
+    assert client.post(url, json=stale).status_code == 409
+    approve = {**reply, 'question': 'Go ahead', 'plan_version': second[-1]['plan_version'],
+               'idempotency_key': 'confirm-once'}
+    approved = client.post(url, json=approve).json()
+    final = run_to_end(client, run_id, since=approved['since'])[-1]
+    assert final['status'] == 'done' and final['spec'] == second[-1]['spec']
+    assert client.post(url, json=approve).json() == approved
+    web.runner.runs.pop(run_id)  # a retry after process state was discarded still cannot execute again
+    assert client.post(url, json=approve).json() == approved
+    messages = get_store().messages(chat['id'])
+    assert [m['content'] for m in messages if m['role'] == 'user'] == [
+        'Show revenue by category', 'No, by brand instead', 'Go ahead']

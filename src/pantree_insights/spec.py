@@ -208,7 +208,7 @@ def validate(spec: QuerySpec, cat: Catalog) -> list[str]:
     """Problems, phrased for the user; [] means the spec can be compiled as asked."""
     problems: list[str] = []
     if spec.operation:
-        base = spec.model_copy(update={"operation": None})
+        base = spec.model_copy(update={"operation": None, "shares": []})
         problems = validate(base, cat)
         if not problems:
             try:
@@ -274,6 +274,12 @@ def validate(spec: QuerySpec, cat: Catalog) -> list[str]:
     for s in spec.shares:
         if s not in names:
             problems.append(f"share of total for {s}, which is not a measure")
+        else:
+            measure = next(m for m in spec.measures if m.name == s)
+            if (measure.ratio or measure.agg in ("avg", "min", "max", "count_distinct", "share")
+                    or measure.metric in cat.metrics.metrics
+                    and cat.metrics.metrics[measure.metric].time_aggregation != "additive"):
+                problems.append(f"{s}: share of total needs an additive numerator and a disjoint population")
     if not problems:
         try:
             compile_spec(spec, cat)

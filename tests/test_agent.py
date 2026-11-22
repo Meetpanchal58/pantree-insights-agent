@@ -1,7 +1,6 @@
 """The agent end to end on the small shop with a scripted model: every route, no network, no cost."""
 import pytest
 
-from pantree_insights.graph import CONFIRM_QUESTION, CONFIRM_YES
 from pantree_insights.llm import FakeLLM
 from pantree_insights.memory import Memory
 
@@ -70,7 +69,7 @@ def run(agent, question, confirm=True, **kw):
     run_id, events = agent.start(question, **kw)
     events = list(events)
     while confirm and events[-1].get("type") == "clarify" and events[-1].get("kind") == "confirm":
-        events += list(agent.resume(run_id, {CONFIRM_QUESTION: CONFIRM_YES}))
+        events += list(agent.resume(run_id, "Go ahead", events[-1]["plan_version"]))
     return run_id, events
 
 
@@ -96,16 +95,16 @@ def test_nothing_runs_until_the_readback_is_confirmed(con, tmp_path):
     ask = events[-1]
     assert ask["type"] == "clarify" and ask["kind"] == "confirm" and "Realized revenue" in ask["readback"]
     assert ask["spec"]["dimensions"] == ["category"] and "execute" not in steps(events)
-    done = list(agent.resume(run_id, {CONFIRM_QUESTION: CONFIRM_YES}))
+    done = list(agent.resume(run_id, "Go ahead", events[-1]["plan_version"]))
     assert done[-1]["status"] == "done"
 
 
 def test_a_correction_goes_back_to_the_interpreter(con, tmp_path):
     agent, fakes = make_agent(con, tmp_path, Script(interpreter=[BY_CATEGORY, {**BY_CATEGORY, "spec": BY_BRAND}]))
     run_id, events = run(agent, "Revenue split?", confirm=False)
-    events = list(agent.resume(run_id, {CONFIRM_QUESTION: "No, by brand please"}))
+    events = list(agent.resume(run_id, "No, by brand please", events[-1]["plan_version"]))
     assert events[-1]["kind"] == "confirm" and events[-1]["spec"]["dimensions"] == ["brand"]
-    assert "by brand please" in [u for a, _, u in fakes[0].prompts if a == "interpreter"][-1]
+    assert len([a for a, _, _ in fakes[0].prompts if a == "interpreter"]) == 1
 
 
 def test_a_known_two_meaning_phrase_is_always_asked(con, tmp_path):
@@ -122,7 +121,9 @@ def test_readings_with_different_numbers_are_offered_even_with_defaults(con, tmp
     run_id, events = run(agent, "Revenue split?", use_defaults=True)
     ask = events[-1]
     assert ask["type"] == "clarify" and len(ask["questions"][0]["options"]) == 2
-    done = list(agent.resume(run_id, {ask["questions"][0]["question"]: ask["questions"][0]["options"][1]}))
+    done = list(agent.resume(run_id, ask["questions"][0]["options"][1], ask["plan_version"]))
+    assert done[-1]["kind"] == "confirm"
+    done = list(agent.resume(run_id, "Proceed", done[-1]["plan_version"]))
     assert done[-1]["status"] == "done" and "brand_name" in done[-1]["sql"]
 
 
@@ -162,7 +163,7 @@ def test_a_multi_step_question_uses_a_verified_template(con, tmp_path):
     agent, _ = make_agent(con, tmp_path, Script(interpreter=[lift]))
     _, events = run(agent, "How much did each event lift sales vs the two weeks before?", use_defaults=True)
     assert events[-1]["status"] == "done" and events[-1]["trust"] == "verified"
-    assert "INTERVAL 14 DAY" in events[-1]["sql"]
+    assert "INTERVAL '14' DAY" in events[-1]["sql"]
 
 
 def test_an_unanswerable_question_says_so_instead_of_guessing(con, tmp_path):
@@ -186,7 +187,8 @@ def test_a_period_without_data_is_stated(con, tmp_path):
     december = {**BY_CATEGORY, "spec": {**BY_CATEGORY["spec"], "time": {"start": "2024-12-01", "end": "2024-12-31"}}}
     agent, _ = make_agent(con, tmp_path, Script(interpreter=[december]))
     _, events = run(agent, "Revenue by category in December 2024?", use_defaults=True)
-    assert any("no data" in w for w in events[-1]["warnings"])
+    assert events[-1]["kind"] == "clarify" and "not fully observed" in events[-1]["message"]
+    assert not any(e["type"] == "result" for e in events)
 
 
 def test_an_unverifiable_claim_is_removed_not_failing_the_answer(con, tmp_path):

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -27,7 +27,7 @@ from .agents import ClarifyingQuestion, system_prompt
 from .catalog import describe
 from .fastpath import followup, independent_history
 from .fastpath import parse as fast_spec
-from .spec import TICKETS, Catalog, QuerySpec, validate
+from .spec import TICKETS, Catalog, Filter, Measure, Operation, QuerySpec, Ranking, TimeSpec, validate
 from .templates import Event, TemplateError
 from .templates import build as build_template
 from .templates import describe as describe_templates
@@ -38,14 +38,21 @@ CANNOT_BUILD = "I could not build this exactly"
 READINGS = "I can read this question in more than one way"
 
 
+def is_confirmation(message: str) -> bool:
+    """Full matches only: 'yes, but change the dates' is a revision, never approval."""
+    return bool(re.fullmatch(r"(?:yes(?:,? (?:please|go ahead))?|proceed|looks correct|go ahead|"
+                             r"yes, go ahead|confirm(?:ed)?|that(?:'s| is) correct|run (?:it|this plan))"
+                             r"[.!]?", message.strip(), re.I))
+
+
 class TemplateCall(BaseModel):
     """A template and its parameters. Every parameter is a declared field (providers' strict structured output
     rejects free-form objects); unset ones take the template's default."""
     name: Literal["event_lift", "channel_roas", "platform_vs_recorded_orders", "repeat_within_days",
                   "cohort_retention", "session_funnel", "customer_segments"]
     days_before: int | None = Field(None, description="event_lift: baseline days before each event")
-    by: Literal["channel", "channel_group"] | None = Field(None, description="channel_roas, "
-                                                          "platform_vs_recorded_orders: the split")
+    by: Literal["channel", "channel_group", "device", "traffic_source"] | None = Field(
+        None, description="Supported split for the chosen template")
     days: int | None = Field(None, description="repeat_within_days: window after the first order")
     start: date | None = None
     end: date | None = None
@@ -54,6 +61,7 @@ class TemplateCall(BaseModel):
     steps: list[Event] | None = None
     min_orders: int | None = None
     recency_days: int | None = None
+    filters: list[Filter] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -67,10 +75,24 @@ class TemplateCall(BaseModel):
         return {k: v for k, v in self.model_dump().items() if k != "name" and v is not None}
 
 
+class AnalysisStep(BaseModel):
+    purpose: str = Field(description="Why this query helps the business objective")
+    spec: QuerySpec | None = None
+    template: TemplateCall | None = None
+
+    @model_validator(mode="after")
+    def _one_plan(self):
+        if (self.spec is None) == (self.template is None):
+            raise ValueError("each investigation step needs exactly one spec or template")
+        return self
+
+
 class Interpretation(BaseModel):
+    relationship: Literal["new", "refinement", "drilldown", "comparison", "investigation"] = Field(
+        "new", description="Relationship to the saved business objective; use new only for an independent question")
     decline_reason: str | None = Field(None, description="Only if the request must be declined; decided first")
     decline_category: Literal["personal_data", "raw_dump", "change_data", "instructions", "off_topic"] | None = None
-    route: Literal["spec", "template", "clarify", "unanswerable"] = Field(
+    route: Literal["spec", "template", "investigation", "clarify", "unanswerable"] = Field(
         "spec", description="spec: one QuerySpec; template: one of the listed analyses; clarify: something material "
         "is open; unanswerable: the data cannot answer it as asked (say what it can answer instead)")
     restated_question: str = Field(description="The question as you will answer it, precise and self-contained")
@@ -79,11 +101,121 @@ class Interpretation(BaseModel):
     questions: list[ClarifyingQuestion] = Field(default_factory=list, description="For route clarify")
     assumptions: list[str] = Field(default_factory=list, description="Defaults you applied, in business words")
     unanswerable_reason: str | None = Field(None, description="For route unanswerable: why, and what can be answered")
+    steps: list[AnalysisStep] = Field(default_factory=list, max_length=4,
+                                     description="Bounded queries proposed together for confirmation")
 
 
 class Alternatives(BaseModel):
     readings: list[QuerySpec] = Field(default_factory=list, description="Materially different readings, at most 2")
     why: list[str] = Field(default_factory=list, description="For each reading: the word it reads differently")
+
+
+class SpecPatch(BaseModel):
+    """Only explicitly changed fields; omitted/null fields preserve the prior plan."""
+    measures: list[Measure] | None = None
+    dimensions: list[str] | None = None
+    filters: list[Filter] | None = None
+    time: TimeSpec | None = None
+    ranking: Ranking | None = None
+    operation: Operation | None = None
+    shares: list[str] | None = None
+    clear: list[Literal["time", "ranking", "operation"]] = Field(default_factory=list)
+    question: str | None = Field(None, description="Ask one focused question if the correction is ambiguous")
+
+
+def revise(llm, cat: Catalog, previous: QuerySpec, correction: str, data: dict) -> Decision:
+    """Apply a minimal edit; keep unchanged dates, populations and metric definitions byte-for-byte."""
+    text = re.sub(r"^(?:no[, ]+|instead[, ]+)", "", correction.strip(), flags=re.I)
+    text = re.sub(r"\s+(?:instead|please)[.!?]?$", "", text, flags=re.I)
+    direct = followup(text, previous, cat, data["last_day"])
+    deterministic = direct is not None
+    if direct is None:
+        patch = llm.ask("interpreter", SpecPatch,
+            "Revise only the explicitly changed fields of this governed analytical plan. Null means unchanged. "
+            "Preserve every other metric, filter, period and operation. Lists replace that field entirely, so retain "
+            "its unaffected entries. Never write SQL. If scope is ambiguous, return question and no edits.\n" +
+            catalog_text(cat, {}), json.dumps({"previous": previous.model_dump(mode="json"),
+                                             "correction": correction, "data": data}))
+        if patch.question:
+            return Decision("clarify", questions=[ClarifyingQuestion(question=patch.question, options=[],
+                            default="", why="The change affects the calculation")], required=True)
+        changes = patch.model_dump(exclude_none=True, exclude={"clear", "question"})
+        changes.update({field: None for field in patch.clear})
+        if patch.time and previous.time and "time" not in patch.clear:
+            changes["time"] = {**previous.time.model_dump(), **patch.time.model_dump(exclude_none=True)}
+        direct = QuerySpec.model_validate({**previous.model_dump(), **changes})
+    problems = validate(direct, cat) or intent_problems(correction, direct, cat, data["last_day"])
+    if problems:
+        return Decision("clarify", questions=[ClarifyingQuestion(question="; ".join(problems) + ". What should change?",
+                        options=[], default="", why="The revised plan must preserve your scope")], required=True)
+    return Decision("spec", spec=direct, restated="update the analysis as requested: " + correction,
+                    detail={"fast_path": deterministic, "revised": True})
+
+
+def revise_template(llm, cat: Catalog, previous: TemplateCall, correction: str, data: dict) -> Decision:
+    patch = llm.ask("interpreter", TemplateCall,
+        "Edit only explicitly changed parameters of the previous analytical template. Keep its name; null means "
+        "unchanged. Dates, filters and populations not mentioned must be preserved. Never write SQL.\n" +
+        catalog_text(cat, {}), json.dumps({"previous": previous.model_dump(mode="json"), "correction": correction}))
+    if patch.name != previous.name:
+        raise TemplateError("Changing the analytical method requires a new complete proposal")
+    revised = TemplateCall.model_validate({**previous.model_dump(), **patch.model_dump(exclude_none=True)})
+    build_template(revised.name, revised.params)
+    problems = template_intent_problems(correction, revised, cat, data)
+    if problems:
+        raise TemplateError("; ".join(problems))
+    return Decision("template", template=revised, restated="update the analysis as requested: " + correction)
+
+
+def coverage_problems(spec: QuerySpec | None, call: TemplateCall | None, data: dict) -> list[str]:
+    """Unknown coverage must never become a zero or an apparently comparable complete period."""
+    first, last = (date.fromisoformat(str(data[k])[:10]) for k in ("first_day", "last_day"))
+    periods = []
+    if spec and spec.time:
+        current = (spec.time.start or first, spec.time.end or last)
+        periods.append(("requested period", *current))
+        if spec.operation:
+            op = spec.operation
+            if op.kind == "period_compare" and op.previous_start and op.previous_end:
+                periods.append(("comparison period", op.previous_start, op.previous_end))
+                if current[1] - current[0] != op.previous_end - op.previous_start:
+                    return ["comparison totals require equal-duration periods; choose comparable dates"]
+            if op.kind == "rolling_sum":
+                periods.append(("rolling lookback", current[0] - timedelta(days=op.days - 1), current[1]))
+    if call:
+        if call.start and call.end:
+            periods.append(("analysis period", call.start, call.end))
+        if call.as_of:
+            periods.append(("cohort observation window", call.start or first, call.as_of))
+    return [f"{label} ({start} to {end}) is not fully observed; the dataset covers {first} to {last}"
+            for label, start, end in periods if start < first or end > last]
+
+
+def template_intent_problems(question: str, call: TemplateCall, cat: Catalog, data: dict) -> list[str]:
+    table = "clickstream" if call.name == "session_funnel" else "sales"
+    by = "marketing_channel" if call.by == "channel" else "channel_group" \
+        if call.by == "channel_group" else call.by
+    proxy = QuerySpec(table=table, measures=[Measure(name="scope", metric="sessions" if table == "clickstream"
+                                                   else "realized_revenue")],
+                      dimensions=[by] if by else [], filters=call.filters or [],
+                      time=TimeSpec(start=call.start, end=call.end, grain=call.grain))
+    supported = {
+        "event_lift": {"net_sales", "realized_revenue"},
+        "channel_roas": {"last_click_revenue", "marketing_spend", "roas", "realized_revenue"},
+        "platform_vs_recorded_orders": {"orders", "platform_orders"},
+        "repeat_within_days": {"orders"}, "cohort_retention": {"orders"},
+        "session_funnel": {"sessions", "conversion_rate"},
+        "customer_segments": {"orders", "realized_revenue"},
+    }[call.name]
+    problems = [p for p in intent_problems(question, proxy, cat, data["last_day"])
+                if not any(p.startswith(f"the question explicitly requests {metric};") for metric in supported)]
+    # Observation dates are a third endpoint for cohort templates, not a missing reporting bound.
+    dates = set(re.findall(r"\b\d{4}-\d{2}-\d{2}\b", question))
+    if dates <= {str(call.start), str(call.end), str(call.as_of)}:
+        problems = [p for p in problems if p != "the interpreted date bounds omit an explicit requested date"]
+    if call.filters:
+        problems += validate(proxy, cat)
+    return problems + coverage_problems(None, call, data)
 
 
 # ----------------------------------------------------------------------------- prompt
@@ -271,7 +403,8 @@ def readback(spec: QuerySpec, cat: Catalog, assumptions: list[str] | None = None
         lines.append(f"**Ranking:** {'top' if spec.ranking.order == 'desc' else 'bottom'} {spec.ranking.limit} "
                      f"by {spec.ranking.by.replace('_', ' ')}")
     if spec.shares:
-        lines.append("**Also shown:** share of the total for " + ", ".join(s.replace("_", " ") for s in spec.shares))
+        lines.append("**Also shown:** " + ("contribution to net change for " if spec.operation else
+                     "share of the total for ") + ", ".join(s.replace("_", " ") for s in spec.shares))
     if spec.operation:
         op = spec.operation
         description = (f"compared with {op.previous_start} to {op.previous_end}; absent populations remain unknown"
@@ -287,7 +420,7 @@ def readback(spec: QuerySpec, cat: Catalog, assumptions: list[str] | None = None
 # ----------------------------------------------------------------------------- the decision
 @dataclass
 class Decision:
-    kind: Literal["spec", "template", "clarify", "decline", "unanswerable"]
+    kind: Literal["spec", "template", "investigation", "clarify", "decline", "unanswerable"]
     spec: QuerySpec | None = None
     template: TemplateCall | None = None
     questions: list[ClarifyingQuestion] = field(default_factory=list)
@@ -297,6 +430,7 @@ class Decision:
     reason: str = ""
     readings: list[QuerySpec] = field(default_factory=list)    # options of a READINGS question, in order
     detail: dict = field(default_factory=dict)
+    steps: list[AnalysisStep] = field(default_factory=list)
 
 
 def register_questions(question: str, register: dict[str, list[str]], answers: dict[str, str]) -> list:
@@ -317,8 +451,8 @@ def premise_notes(spec: QuerySpec, data: dict) -> list[str]:
     if spec.time and (spec.time.start or spec.time.end):
         start, end = spec.time.start or first, spec.time.end or last
         if end < first or start > last:
-            notes.append(f"The data covers {first} to {last}; the requested period has no data, so every number is "
-                         "zero because nothing was recorded, not because nothing happened.")
+            notes.append(f"The data covers {first} to {last}; the requested period is unavailable. "
+                         "Missing coverage cannot be interpreted as zero activity.")
         elif start < first or end > last:
             notes.append(f"The data covers {first} to {last}; only that part of the requested period is included.")
     return notes
@@ -353,9 +487,10 @@ def intent_problems(question: str, spec: QuerySpec, cat: Catalog, last_day: str 
             r"\b(order[- ]level|share of orders|percentage of orders|order (?:return|cancellation) rate)\b",
             question, re.I):
         problems.append("the requested order grain differs from the governed line-level rate; clarify the denominator")
-    for word in ("category", "brand", "city", "channel"):
+    for word in ("category", "brand", "city", "channel", "device", "traffic source", "payment type"):
+        field = word.replace(" ", "_")
         cut = "marketing_channel" if word == "channel" and spec.table in (
-            "marketing_spend", "marketing_attribution", "sales") else word
+            "marketing_spend", "marketing_attribution", "sales") else field
         if re.search(rf"\bby {word}\b", question, re.I) and cut not in spec.dimensions:
             # Qualified columns may be the same governed cut.
             wanted = cat.concepts.column(cut, cat.subject_of.get(spec.table))
@@ -381,8 +516,10 @@ def intent_problems(question: str, spec: QuerySpec, cat: Catalog, last_day: str 
                                  or expected.ranking.order != spec.ranking.order):
             problems.append("the ranking differs from the requested top/bottom count")
     dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", question)
-    if dates and not spec.operation:
+    if dates:
         endpoints = {str(spec.time.start), str(spec.time.end)} if spec.time else set()
+        if spec.operation:
+            endpoints |= {str(spec.operation.previous_start), str(spec.operation.previous_end)}
         if not set(dates) <= endpoints:
             problems.append("the interpreted date bounds omit an explicit requested date")
     return problems
@@ -418,7 +555,7 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
                             detail={"fast_path": True})
 
     reading = ask_model(llm, cat, terms, data, question, history, answers, background=background)
-    detail: dict = {"reading": reading.model_dump(mode="json")}
+    detail: dict = {"reading": reading.model_dump(mode="json"), "relationship": reading.relationship}
     for attempt in range(MAX_REPAIRS + 1):
         if reading.decline_reason:
             return Decision("decline", reason=reading.decline_reason, detail=detail)
@@ -428,9 +565,36 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
         if reading.route == "clarify" and reading.questions:
             return Decision("clarify", questions=reading.questions, restated=reading.restated_question, detail=detail)
         problems = []
-        if reading.route == "template" and reading.template:
+        if reading.route == "investigation" and reading.steps:
+            metrics = {m.metric for step in reading.steps if step.spec for m in step.spec.measures}
+            for step in reading.steps:
+                if step.spec:
+                    step.spec = normalise(step.spec, cat, aliases)
+                    problems += validate(step.spec, cat)
+                    intent = intent_problems(effective_question, step.spec, cat, data["last_day"])
+                    # Metrics may be answered by another approved step, but populations cannot silently disappear.
+                    problems += [p for p in intent if not (
+                        p.startswith("the question explicitly requests ")
+                        and any(f"requests {m};" in p for m in metrics)
+                        or p.startswith("the question asks for a split by ") and any(
+                            p not in intent_problems(effective_question, other.spec, cat, data["last_day"])
+                            for other in reading.steps if other.spec))]
+                else:
+                    try:
+                        build_template(step.template.name, step.template.params)
+                        problems += template_intent_problems(effective_question, step.template, cat, data)
+                    except TemplateError as error:
+                        problems.append(str(error))
+                problems += coverage_problems(step.spec, step.template, data)
+            if not problems:
+                return Decision("investigation", steps=reading.steps, restated=reading.restated_question,
+                                assumptions=reading.assumptions, detail=detail)
+        elif reading.route == "template" and reading.template:
             try:
                 build_template(reading.template.name, reading.template.params)
+                scope_errors = template_intent_problems(effective_question, reading.template, cat, data)
+                if scope_errors:
+                    raise TemplateError("; ".join(scope_errors))
                 # Reviewed SQL is not evidence that its unrestricted scope matches this request.
                 dated = reading.template.name in ("cohort_retention", "session_funnel", "customer_segments")
                 if dated:
@@ -472,9 +636,15 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
     decision = Decision("spec", spec=spec, restated=reading.restated_question,
                         assumptions=[*reading.assumptions, *notes], detail=detail)
     direct = fast_spec(question, cat, data["last_day"])
-    if not contrast or (not answers and background in ("", "(nothing remembered yet)")
+    explicit_low_risk = (not spec.operation and not spec.shares and not spec.ranking and len(spec.measures) == 1
+                         and not reading.assumptions and not background and not history and not answers
+                         and not spec.filters and not spec.measures[0].where
+                         and spec.measures[0].metric is not None
+                         and spec.measures[0].metric.replace("_", " ") in question.casefold()
+                         and all(d.replace("_", " ") in question.casefold() for d in spec.dimensions))
+    if not contrast or explicit_low_risk or (not answers and background in ("", "(nothing remembered yet)")
                         and direct is not None and canonical(direct) == canonical(spec)):
-        detail["contrast_skipped"] = "disabled or independently matched reviewed intent"
+        detail["contrast_skipped"] = "disabled, explicit low-risk scope, or independently matched reviewed intent"
         return decision
 
     # Semantic differences matter even when a snapshot happens to produce equal values.

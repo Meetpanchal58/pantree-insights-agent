@@ -13,7 +13,7 @@ const STATUS_ICON = { done: "✓", retry: "↻", failed: "✕", blocked: "✕", 
 const OFFLINE_DEMOS = window.PANTREE_DEMOS || [];
 
 const S = { me: null, projects: [], chats: [], chatId: null, expanded: new Set(), demoMode: false,
-            run: null, busy: false, pendingProject: null, view: 0, stream: null, chatRequest: null, demos: OFFLINE_DEMOS,
+            run: null, pending: null, busy: false, pendingProject: null, view: 0, stream: null, chatRequest: null, demos: OFFLINE_DEMOS,
             chatCache: new Map(), sidebarRequest: 0 };
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -123,7 +123,7 @@ function leaveView() {
   S.busy = false; $(".send").disabled = false;
   $("#question").disabled = false;
   $("#question").placeholder = "Ask about sales, returns, marketing, stock, customers…";
-  S.run = null;
+  S.run = null; S.pending = null;
   if ($("#chart") && window.Plotly) window.Plotly.purge($("#chart"));
   $("#panel-body").innerHTML = ""; $("#panel-sub").textContent = "";
   return S.view;
@@ -293,6 +293,7 @@ function renderChat(chat, connect = false) {
   let last = null;
   for (const m of chat.messages) {
     if (m.role === "user") box.insertAdjacentHTML("beforeend", userBubble(m.content));
+    else if (m.run?.type === "clarify") { box.appendChild(conversationMessage(m.run)); }
     else { box.appendChild(answerCard(m.run || {})); last = m.run; }
   }
   if (chat.interrupted_run) {
@@ -301,7 +302,8 @@ function renderChat(chat, connect = false) {
   if (connect && chat.pending_run) {
     const el = statusLine("Working on it…"); box.appendChild(el);
     const question = [...chat.messages].reverse().find((m) => m.role === "user")?.content;
-    streamRun(chat.pending_run, 0, el, question);
+    newTimeline(question, false);
+    streamRun(chat.pending_run, chat.pending_since || 0, el, question);
   }
   else if (last) showRunInPanel(last);
   renderSidebar(); scrollDown();
@@ -317,13 +319,14 @@ function statusLine(text) {
 function answerCard(run, replay = false) {
   const el = document.createElement("div"); el.className = "msg";
   if (run.status !== "done") {
-    el.innerHTML = `<div class="answer error-box"><h3>${run.status === "declined" ? "I can't answer that" : "Something went wrong"}</h3>
+    el.innerHTML = `<div class="answer error-box"><h3>${run.status === "cancelled" ? "Cancelled" : run.status === "declined" ? "I can't answer that" : "Something went wrong"}</h3>
       <div>${esc(run.message || "")}</div>
       ${run.status === "failed" && run.question ? `<button class="btn small" data-action="edit-question" data-q="${esc(run.question)}">Edit and retry</button>` : ""}</div>`;
     return el;
   }
   const a = run.analysis || {};
   el.innerHTML = `<div class="answer"><h3>${esc(a.headline)}</h3>
+    ${run.analyses?.length > 1 ? `<ul>${run.analyses.map(item => `<li><strong>${esc(item.purpose)}:</strong> ${esc(item.analysis.headline)}</li>`).join("")}</ul>` : ""}
     <ul>${(a.findings || []).slice(0, 3).map((f) => `<li>${esc(f)}</li>`).join("")}</ul>
     <div class="row"><button class="btn small" data-action="show-run">View analysis, chart & SQL</button>
     ${replay ? `<span class="tag replay">${run.offline ? "Offline demo · saved results" : "Replay · recorded run"} · data as of ${esc(run.data_as_of)}</span>` : `<span class="tag">Data as of ${esc(run.data_as_of)}</span>`}
@@ -351,11 +354,15 @@ async function ask(question) {
     $("#messages").insertAdjacentHTML("beforeend", userBubble(question));
     S.chatCache.delete(S.chatId);
     const status = statusLine("Starting…"); $("#messages").appendChild(status); scrollDown();
-    const { run_id } = await api(`/api/chats/${S.chatId}/ask`, { method: "POST", body: { question, use_defaults: $("#use-defaults").checked } });
+    const pending = S.pending;
+    const { run_id, since = 0 } = await api(`/api/chats/${S.chatId}/ask`, { method: "POST", body: {
+      question, idempotency_key: crypto.randomUUID(),
+      ...(pending ? { pending_run_id: pending.run_id, plan_version: pending.plan_version } : {}) } });
     if (view !== S.view) { refreshSidebar(); return; }
-    $("#chat-title").textContent = question.slice(0, 80);
+    if (!pending) $("#chat-title").textContent = question.slice(0, 80);
     refreshSidebar();
-    streamRun(run_id, 0, status, question);
+    S.pending = null;
+    streamRun(run_id, since, status, question);
   } catch (e) {
     if (view !== S.view) return;
     toast(e.message, 4500); S.busy = false; $(".send").disabled = false;
@@ -393,9 +400,16 @@ function onEvent(e, status) {
     openPanel();
   } else if (e.type === "clarify") {
     if (status) status.remove();
-    $("#messages").appendChild(clarifyCard(e)); scrollDown();
+    S.pending = e;
+    if (window.innerWidth <= 1180) $("#app").classList.add("panel-closed");
+    const old = [...document.querySelectorAll("[data-proposal]")].some(n => n.dataset.proposal === proposalKey(e));
+    if (!old) $("#messages").appendChild(conversationMessage(e));
+    $("#question").disabled = false;
+    $("#question").placeholder = "Confirm, describe a change, or cancel…";
+    scrollDown();
     S.busy = false; $(".send").disabled = false;
   } else if (e.type === "final") {
+    S.pending = null; $("#question").placeholder = "Ask a new question or continue the investigation…";
     if (S.chatId) S.chatCache.delete(S.chatId);
     if (status) status.remove();
     for (const item of S.run.steps) if (item.status === "needs_input") item.status = "done";
@@ -462,43 +476,12 @@ function streamRun(runId, since, status, question) {
   };
 }
 
-const clean = (o) => String(o).replace(/\s*\((recommended|default)\)\s*/gi, " ").trim();
-function clarifyCard(e) {
+function proposalKey(e) { return `${e.plan_version || 0}:${e.message || e.readback || ""}`; }
+function conversationMessage(e) {
   const el = document.createElement("div"); el.className = "msg";
-  const qs = e.questions || [];
-  const confirm = e.kind === "confirm";
-  const title = confirm ? "Here's what I'll compute" : (e.round || 1) > 1 ? `A few more questions (round ${e.round})` : "A few questions so I get this exactly right";
-  const readback = confirm && e.readback ? `<div class="readback">${e.readback.split("\n").map((l) => esc(l).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")).join("<br>")}</div>` : "";
-  el.innerHTML = `<div class="clarify"><h4>${esc(title)}</h4>${readback}
-    ${qs.map((q, i) => `<div class="q">${esc(q.question)}</div><div class="why">${esc(q.why || "")}</div>
-      <div class="chips" data-q="${i}">${q.options.map((o) => { const rec = clean(o) === clean(q.default); return `<button class="chip ${rec ? "selected" : ""}" data-opt="${esc(o)}">${esc(clean(o))}${rec ? '<span class="rec">recommended</span>' : ""}</button>`; }).join("")}</div>
-      <input class="other" data-q="${i}" maxlength="300" placeholder="${confirm ? "Or tell me what to change" : "Or type your own answer"}">`).join("")}
-    <div class="row" style="margin-top:14px"><button class="btn primary small" data-go>Continue</button>
-    ${confirm ? "" : '<button class="btn small" data-defaults>Use recommended</button>'}</div></div>`;
-  el.querySelectorAll(".chips").forEach((group) => group.addEventListener("click", (ev) => {
-    const chip = ev.target.closest(".chip"); if (!chip) return;
-    group.querySelectorAll(".chip").forEach((c) => c.classList.remove("selected")); chip.classList.add("selected");
-  }));
-  const submit = async (useDefaults) => {
-    const view = S.view;
-    const answers = {};
-    qs.forEach((q, i) => {
-      const sel = el.querySelector(`.chips[data-q="${i}"] .chip.selected`);
-      const own = el.querySelector(`.other[data-q="${i}"]`).value.trim();
-      answers[q.question] = useDefaults ? clean(q.default) : own || clean(!sel ? q.default : sel.dataset.opt);
-    });
-    el.querySelectorAll("button").forEach((b) => (b.disabled = true));
-    const summary = Object.entries(answers).map(([k, v]) => `${k} → ${v}`).join("\n");
-    el.insertAdjacentHTML("afterend", userBubble(summary));
-    const status = statusLine("Continuing…"); el.parentNode.appendChild(status); scrollDown();
-    S.busy = true; $(".send").disabled = true;
-    S.chatCache.delete(S.chatId);
-    try { await api(`/api/runs/${e.run_id}/answer`, { method: "POST", body: { answers } }); if (view === S.view) streamRun(e.run_id, e.count, status); }
-    catch (err) { if (view !== S.view) return; toast(err.message); status.remove(); S.busy = false; $(".send").disabled = false; }
-  };
-  el.querySelector("[data-go]").addEventListener("click", () => submit(false));
-  const defaults = el.querySelector("[data-defaults]");
-  if (defaults) defaults.addEventListener("click", () => submit(true));
+  el.dataset.proposal = proposalKey(e);
+  const text = e.message || e.readback || (e.questions || []).map(q => q.question).join("\n");
+  el.innerHTML = `<div class="answer conversation-message">${esc(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>")}</div>`;
   return el;
 }
 
@@ -602,7 +585,9 @@ function showRunInPanel(run) {
   $("#panel-body").scrollTop = 0;
 }
 
-function showResult(run) {
+function showResult(run, selected = 0) {
+  const whole = run;
+  if (run.analyses?.length) run = { ...run, ...run.analyses[selected] };
   const box = $("#result"); if (!box) return;
   S.run.final = run;
   if (run.status !== "done") { box.innerHTML = `<div class="result"><h3>${esc(run.status)}</h3><p>${esc(run.message || "")}</p></div>`; return; }
@@ -610,6 +595,7 @@ function showResult(run) {
   const list = (title, items) => items && items.length ? `<h4>${title}</h4><ul>${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
   const res = run.result || { columns: [], data: [] };
   box.innerHTML = `<div class="result">
+    ${whole.analyses?.length > 1 ? `<nav aria-label="Approved analyses">${whole.analyses.map((item, i) => `<button class="btn small" data-analysis="${i}" aria-pressed="${i === selected}">${i + 1}. ${esc(item.purpose)}</button>`).join("")}</nav>` : ""}
     <h3>${esc(a.headline)}</h3>
     <div id="chart-area"></div>
     <div class="exports">
@@ -619,7 +605,7 @@ function showResult(run) {
       ${run.offline ? "" : '<button class="btn small" data-action="export" data-kind="ppt">▤ PPT</button>'}
       <button class="btn small" data-action="export" data-kind="sql">{ } SQL</button>
     </div>
-    ${list("Findings", a.findings)}${list("Recommendations", a.recommendations)}${list("Caveats", a.caveats)}
+    ${list("Findings", a.findings)}${list("Hypotheses (unproven)", a.hypotheses)}${list("Recommendations", a.recommendations)}${list("Caveats", a.caveats)}
     ${(run.warnings || []).map((w) => `<div class="warning-box">⚠ ${esc(w)}</div>`).join("")}
     ${list("Follow-up questions", a.follow_up_questions)}
     <h4>Result (${res.data.length} rows${res.truncated ? ", truncated" : ""})</h4>
@@ -628,6 +614,7 @@ function showResult(run) {
     <div class="meta">Data as of ${esc(run.data_as_of)} (${esc(run.data_size)} shop) · ${run.trust === "verified" ? "verified query" : `${run.attempts || 1} SQL attempt(s)`}
       ${run.cost ? ` · ${run.cost.calls} LLM calls · ${run.cost.input + run.cost.output} tokens · $${(run.cost.usd || 0).toFixed(4)}` : ""}</div>
   </div>`;
+  box.querySelectorAll("[data-analysis]").forEach((b) => b.addEventListener("click", () => showResult(whole, Number(b.dataset.analysis))));
   box.querySelectorAll("[data-action='export']").forEach((b) => b.addEventListener("click", () => exportRun(b.dataset.kind, run)));
   const followUps = [...box.querySelectorAll("h4")].find((h) => h.textContent === "Follow-up questions");
   if (followUps && S.me.user && !run.replay) followUps.nextElementSibling.querySelectorAll("li").forEach((li) => {

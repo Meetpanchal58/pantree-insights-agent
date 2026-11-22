@@ -36,6 +36,8 @@ def sample():
             ('b','b2','y','2025-01-05','Sale',60,60,'2025-01-07',NULL,NULL),
             ('c','c1','x','2025-01-30','Sale',70,70,'2025-02-02',NULL,NULL),
             ('z','replacement','x','2025-01-04','Exchange',1000,1000,'2025-01-05',NULL,NULL)""")
+        db.execute("ALTER TABLE sales ADD COLUMN is_first_order BOOLEAN DEFAULT FALSE")
+        db.execute("UPDATE sales SET is_first_order = TRUE WHERE order_id IN ('old', 'b1', 'c1')")
         yield db
 
 
@@ -209,11 +211,14 @@ def test_shared_history_and_memory_still_use_zero_models(con, tmp_path):
     memory = Memory(tmp_path, 'small')
     agent = Agent(llm_factory=lambda: FakeLLM(forbidden), con=con, memory=memory)
     try:
-        _, events = agent.start('Show revenue by category')
-        first = list(events)[-1]
+        run_id, events = agent.start('Show revenue by category')
+        proposal = list(events)[-1]
+        first = list(agent.resume(run_id, 'Go ahead', proposal['plan_version']))[-1]
         assert first['status'] == 'done'
-        _, events = agent.start('And by brand?', history='User: Show revenue by category', previous_spec=first['spec'])
-        final = list(events)[-1]
+        run_id, events = agent.start('And by brand?', history='User: Show revenue by category',
+                                     previous_spec=first['spec'])
+        proposal = list(events)[-1]
+        final = list(agent.resume(run_id, 'Go ahead', proposal['plan_version']))[-1]
         assert final['status'] == 'done' and final['spec']['dimensions'] == ['brand'] and final['cost']['calls'] == 0
     finally:
         agent.close()
@@ -247,3 +252,79 @@ def test_semantic_policy_rejects_additive_ratio_and_distinct_counts():
         with pytest.raises(ValidationError, match='cannot be declared time-additive'):
             Metric(label='bad', description='bad', source='sales', numerator=numerator, denominator=denominator,
                    unit='inr', time_aggregation='additive')
+
+
+def test_contributions_reconcile_to_net_change(cat, sample):
+    query = spec(dimensions=['category'], time={'start': '2025-01-04', 'end': '2025-01-05'}, shares=['gmv'],
+                 operation={'kind': 'period_compare', 'previous_start': '2025-01-01', 'previous_end': '2025-01-02'})
+    frame = sample.execute(compile_spec(query, cat)).df().set_index('category')
+    # A moves 30 -> 40; B moves 50 -> 60. Each contributes half of the net +20.
+    assert frame.gmv_delta.to_dict() == {'A': 10, 'B': 10}
+    assert frame.gmv_contribution.to_dict() == {'A': .5, 'B': .5}
+
+
+@pytest.mark.parametrize('metric', ['orders', 'aov', 'return_rate'])
+def test_nonadditive_share_rejected(cat, metric):
+    assert any('additive' in p for p in validate(spec(measures=[{'name': 'value', 'metric': metric}],
+                                                      shares=['value']), cat))
+
+
+def test_entity_attribution_is_not_just_numeric_equality():
+    frame = pd.DataFrame({'city': ['Delhi', 'Mumbai'], 'revenue': [100, 100]})
+    claim = Claim(id='c1', column='revenue', row=[KeyValue(column='city', value='Delhi')], value=100, unit='inr')
+    assert verify(frame, [claim], {'headline': 'Delhi revenue was {c1}.'}).ok
+    assert not verify(frame, [claim], {'headline': 'Mumbai revenue was {c1}.'}).ok
+
+
+@pytest.mark.parametrize('changes,reason', [
+    ({'time': {'start': '2025-01-01', 'end': '2025-01-02'},
+      'operation': {'kind': 'rolling_sum', 'days': 3}}, 'lookback'),
+    ({'operation': {'kind': 'period_compare', 'previous_start': '2024-12-30',
+                    'previous_end': '2024-12-31'}}, 'comparison'),
+    ({'operation': {'kind': 'period_compare', 'previous_start': '2025-01-01',
+                    'previous_end': '2025-01-03'}}, 'equal-duration'),
+])
+def test_coverage_includes_lookback_and_comparison(changes, reason):
+    from pantree_insights.interpret import coverage_problems
+    assert reason in ' '.join(coverage_problems(spec(**changes), None,
+                                              {'first_day': '2025-01-01', 'last_day': '2025-01-31'}))
+
+
+def test_segmented_funnel_keeps_entry_population_and_zero_dropoff():
+    with duckdb.connect() as db:
+        db.execute('CREATE TABLE clickstream(session_id VARCHAR,event_at TIMESTAMP,event_type VARCHAR,device VARCHAR)')
+        db.execute("""INSERT INTO clickstream VALUES
+          ('a','2025-01-01 10:00','pdp_view','mobile'),
+          ('a','2025-01-01 10:01','add_to_cart','desktop'),
+          ('a','2025-01-01 10:02','purchase','desktop'),
+          ('b','2025-01-01 11:00','pdp_view','desktop'),
+          ('c','2025-01-01 12:00','purchase','mobile'),
+          ('c','2025-01-01 12:01','pdp_view','mobile')""")
+        sql, reading = build('session_funnel', {'start': '2025-01-01', 'end': '2025-01-01',
+            'steps': ['pdp_view', 'add_to_cart', 'purchase'], 'by': 'device'})
+        assert check_sql(sql).ok
+        frame = db.execute(sql).df().set_index(['device', 'step'])
+        assert frame.loc[('mobile', 'pdp_view'), 'sessions'] == 2
+        assert frame.loc[('mobile', 'purchase'), 'sessions'] == 1
+        assert frame.loc[('desktop', 'purchase'), 'sessions'] == 0
+        assert frame.loc[('mobile', 'purchase'), 'conversion'] == .5
+        assert 'first step' in reading
+
+
+def test_template_cannot_silently_drop_requested_population(cat):
+    from pantree_insights.interpret import TemplateCall, template_intent_problems
+    data = {'first_day': '2025-01-01', 'last_day': '2026-11-16'}
+    call = TemplateCall(name='customer_segments', start='2025-01-01', end='2025-01-31')
+    assert any('restricts city' in p for p in template_intent_problems('Customer segments in Mumbai', call, cat, data))
+    funnel = TemplateCall(name='session_funnel', start='2025-01-01', end='2025-01-31')
+    assert any('split by device' in p for p in template_intent_problems('Funnel by device', funnel, cat, data))
+    assert any('gross_sales' in p for p in template_intent_problems('Funnel and GMV', funnel, cat, data))
+
+
+
+def test_two_true_values_cannot_swap_entities_in_one_sentence():
+    frame = pd.DataFrame({'city': ['Delhi', 'Mumbai'], 'revenue': [100, 200]})
+    claims = [Claim(id='c1', column='revenue', row=[KeyValue(column='city', value='Delhi')], value=100, unit='inr'),
+              Claim(id='c2', column='revenue', row=[KeyValue(column='city', value='Mumbai')], value=200, unit='inr')]
+    assert verify(frame, claims, {'headline': 'Delhi {c1}, Mumbai {c2}.'}).ok
+    assert not verify(frame, claims, {'headline': 'Mumbai {c1}, Delhi {c2}.'}).ok

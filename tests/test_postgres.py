@@ -74,7 +74,7 @@ def test_postgres_terminal_failure_rolls_back_all_writes(postgres):
 
 def test_postgres_checkpoint_survives_agent_restart(postgres, con, tmp_path, monkeypatch):
     from pantree_insights.config import get_settings
-    from pantree_insights.graph import CONFIRM_QUESTION, CONFIRM_YES, Agent
+    from pantree_insights.graph import Agent
     from pantree_insights.llm import FakeLLM
     from pantree_insights.memory import Memory
     _, url, _ = postgres
@@ -94,8 +94,57 @@ def test_postgres_checkpoint_survives_agent_restart(postgres, con, tmp_path, mon
     second = Agent(llm_factory=lambda: FakeLLM(response), con=con, memory=memory)
     try:
         second.restore_memory(run_id, memory)
-        final = list(second.resume(run_id, {CONFIRM_QUESTION: CONFIRM_YES}))[-1]
+        final = list(second.resume(run_id, "Go ahead", 1))[-1]
         assert final["status"] == "done" and final["grounded"] and final["trust"] == "verified"
         assert second._checkpoint_context.get_stats()["pool_size"] <= 4
     finally:
         second.close()
+
+
+def test_concurrent_replies_are_persisted_once(postgres):
+    store, _, _ = postgres
+    user = store.upsert_user('reply@example.test')
+    chat = store.create_chat(user['id'])
+    store.create_run('reply-once', user['id'], chat['id'], 'Orders')
+    proposal = {'type': 'clarify', 'plan_version': 1, 'message': 'Count orders. Go ahead?'}
+    store.save_pause('reply-once', chat['id'], [proposal], proposal)
+    def reply(_):
+        try:
+            store.save_reply('reply-once', chat['id'], [proposal, {'type': 'answered'}], 'Go ahead')
+            return True
+        except ValueError:
+            return False
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert sum(pool.map(reply, range(20))) == 1
+    assert [m['role'] for m in store.messages(chat['id'])] == ['assistant', 'user']
+
+
+def test_investigation_survives_store_restart_and_history_window(postgres):
+    store, url, _ = postgres
+    user = store.upsert_user('context@example.test')
+    outsider = store.upsert_user('outsider@example.test')
+    chat = store.create_chat(user['id'])
+    for i in range(12):
+        run_id = f'context-{i}'
+        store.create_run(run_id, user['id'], chat['id'], f'Question {i}')
+        final = {'status': 'done', 'grounded': True, 'question': f'Question {i}', 'objective': 'Find volume drivers',
+                 'relationship': 'new' if i == 0 else 'drilldown',
+                 'confirmed_plan': [{'spec': {'metric': f'metric-{i}'}, 'sql': 'SELECT 1'}],
+                 'metric_definitions': {'orders': {'description': 'Distinct placed orders'}},
+                 'analysis': {'follow_up_questions': ['Investigate mix']}}
+        assert store.complete_run(run_id, final, [], {}, f'Finding {i}', final)
+    restarted = Store(url)
+    try:
+        context = restarted.investigation(user['id'], chat['id'])
+        assert context['objective'] == 'Find volume drivers'
+        assert context['origin_plan'][0]['spec']['metric'] == 'metric-0'
+        assert context['current_plan'][0]['spec']['metric'] == 'metric-11'
+        assert len(context['evidence']) == 8 and 'Finding 11' in str(context)
+        assert context['metric_definitions']['orders']['description'] == 'Distinct placed orders'
+        assert 'sql' not in context['current_plan'][0]
+        assert restarted.investigation(outsider['id'], chat['id']) == {}
+        assert 'Question 0' not in restarted.conversation(chat['id'])[0]
+        restarted.delete_chat(user['id'], chat['id'])
+        assert restarted.investigation(user['id'], chat['id']) == {}
+    finally:
+        restarted.engine.dispose()

@@ -195,6 +195,50 @@ const path = require('node:path');
     const timeoutMessage=await page.evaluate(()=>api('/api/slow',{timeoutMs:5}).catch(error=>error.message));
     assert.match(timeoutMessage,/timed out/);
     await page.waitForTimeout(100);
+    // Every conversation reply uses the ordinary composer and current plan identity on desktop/mobile.
+    const replies=[];
+    await page.route('**/api/chats/B/ask', async route=>{
+      replies.push(route.request().postDataJSON());
+      return route.fulfill({json:{run_id:'conversation',since:10}});
+    });
+    for (const width of [1440,390]) {
+      await page.setViewportSize({width,height:844});
+      await page.evaluate(()=>{
+        leaveView(); S.chatId='B'; newTimeline('Revenue',false);
+        onEvent({type:'clarify',kind:'confirm',run_id:'conversation',plan_version:2,
+                 message:'Revenue by brand. Shall I proceed?'},null);
+      });
+      assert.equal(await page.locator('#question').isDisabled(),false);
+      assert.equal(await page.locator('.clarify, input[type=radio], #use-defaults').count(),0);
+      await page.locator('#question').fill('No, by category instead');
+      const beforeReply=await page.evaluate(()=>streams.length);
+      await page.locator('.send').click();
+      await page.waitForFunction(n=>streams.length>n,beforeReply);
+      assert.equal(replies.at(-1).pending_run_id,'conversation');
+      assert.equal(replies.at(-1).plan_version,2);
+      await page.evaluate(()=>streams.at(-1).emit({type:'clarify',kind:'confirm',plan_version:3,
+        message:'Revised: revenue by category. Shall I proceed?'}));
+      assert.equal(await page.locator('#question').isDisabled(),false);
+      assert.match(await page.locator('#messages').innerText(),/Revised: revenue by category/);
+      const beforeCancel=await page.evaluate(()=>streams.length);
+      await page.locator('#question').fill('Cancel'); await page.locator('.send').click();
+      await page.waitForFunction(n=>streams.length>n,beforeCancel);
+      await page.evaluate(()=>streams.at(-1).emit({type:'final',status:'cancelled',message:'Cancelled.'}));
+      assert.equal(await page.evaluate(()=>S.pending),null);
+      assert.match(await page.locator('#messages').innerText(),/Cancelled/);
+    }
+    await page.setViewportSize({width:1440,height:900});
+    await page.evaluate(()=>{
+      showResult({status:'done',data_as_of:'2026-11-16',analyses:[
+        {purpose:'Volume',analysis:{headline:'Orders'},sql:'SELECT 1',result:{columns:['orders'],data:[[1]]}},
+        {purpose:'Value',analysis:{headline:'Revenue'},sql:'SELECT 2',result:{columns:['revenue'],data:[[2]]}}
+      ]}); openPanel();
+    });
+    await page.locator('[data-analysis="1"]').click();
+    assert.equal(await page.locator('#result h3').innerText(),'Revenue');
+    assert.equal(await page.locator('#result th').innerText(),'revenue');
+    assert.equal(await page.locator('[data-kind="csv"]').count(),1);
+
     // Offline demos appear before the account API responds, and a late failure cannot replace one.
     let releaseStartup;
     await page.route('**/api/me',async route=>{

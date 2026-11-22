@@ -85,6 +85,11 @@ messages = Table(
     Column("run", JSON),                                      # final result + events, for the UI and replays
     Column("created_at", DateTime, default=_now),
 )
+investigations = Table(
+    "investigations", metadata,
+    Column("chat_id", String(16), ForeignKey("chats.id", ondelete="CASCADE"), primary_key=True),
+    Column("context", JSON, nullable=False), Column("updated_at", DateTime, default=_now),
+)
 memories = Table(
     "memories", metadata,
     Column("id", String(16), primary_key=True, default=_id),
@@ -184,6 +189,24 @@ class Store:
             values["summary"] = to_json(summary)
         self._exec(update(run_records).where(run_records.c.id == run_id).values(**values))
 
+    def save_pause(self, run_id: str, chat_id: str, events: list[dict], event: dict) -> None:
+        """The assistant's proposal and paused run become visible together; replay cannot duplicate messages."""
+        mid = hashlib.sha256(f"{run_id}:{event.get('plan_version')}:{event.get('message')}".encode()).hexdigest()[:16]
+        with self.engine.begin() as c:
+            c.execute(update(run_records).where(run_records.c.id == run_id)
+                      .values(status="paused", events=to_json(events), updated_at=_now()))
+            c.execute(self._upsert(messages).values(id=mid, chat_id=chat_id, role="assistant",
+                      content=event.get("message", ""), run=to_json(event)).on_conflict_do_nothing())
+
+    def save_reply(self, run_id: str, chat_id: str, events: list[dict], message: str) -> None:
+        with self.engine.begin() as c:
+            changed = c.execute(update(run_records).where(run_records.c.id == run_id,
+                                run_records.c.chat_id == chat_id, run_records.c.status == "paused")
+                                .values(status="running", events=to_json(events), updated_at=_now()))
+            if not changed.rowcount:
+                raise ValueError("This proposal has already been answered")
+            c.execute(insert(messages).values(id=_id(), chat_id=chat_id, role="user", content=message))
+
     def complete_run(self, run_id: str, final: dict, events: list[dict], summary: dict,
                      headline: str, message: dict) -> bool:
         """Commit terminal state, answer and spend once, atomically, including concurrent retries."""
@@ -199,6 +222,32 @@ class Store:
                 return False
             c.execute(insert(messages).values(id=_id(), chat_id=row["chat_id"], role="assistant",
                                               content=headline, run=to_json(message)))
+            if (final.get("status") == "done" and final.get("grounded") and final.get("confirmed_plan")
+                    and not any(r["result"].get("truncated") for r in final.get("analyses", []))):
+                prior = c.execute(select(investigations.c.context)
+                                  .where(investigations.c.chat_id == row["chat_id"])).scalar() or {}
+                if final.get("relationship") == "new":
+                    prior = {}
+                compact_plan = [{k: v for k, v in item.items() if k != "sql"}
+                                for item in final["confirmed_plan"]]
+                evidence = {"run_id": run_id, "question": final.get("question"),
+                            "plan": compact_plan, "finding": headline,
+                            "data_as_of": final.get("data_as_of"), "snapshot": summary.get("snapshot"),
+                            "results": [{"purpose": r.get("purpose"), "columns": r["result"]["columns"],
+                                         "data": r["result"]["data"][:6], "row_count": len(r["result"]["data"]),
+                                         "excerpted": len(r["result"]["data"]) > 6,
+                                         "findings": r.get("analysis", {}).get("findings", []),
+                                         "truncated": r["result"].get("truncated")}
+                                        for r in final.get("analyses", [])],
+                            "next_questions": (final.get("analysis") or {}).get("follow_up_questions", [])}
+                context = {"objective": final.get("objective") or prior.get("objective") or final.get("question"),
+                           "origin_plan": prior.get("origin_plan") or compact_plan,
+                           "current_plan": compact_plan,
+                           "metric_definitions": final.get("metric_definitions", {}),
+                           "evidence": [*(prior.get("evidence") or []), evidence][-8:]}
+                c.execute(self._upsert(investigations).values(chat_id=row["chat_id"], context=to_json(context))
+                          .on_conflict_do_update(index_elements=[investigations.c.chat_id],
+                                                set_={"context": to_json(context), "updated_at": _now()}))
             c.execute(update(chats).where(chats.c.id == row["chat_id"]).values(updated_at=_now()))
             usd = (final.get("cost") or {}).get("usd", 0.0)
             c.execute(self._upsert(usage).values(user_id=row["user_id"], day=str(date.today()), questions=0, usd=usd)
@@ -384,6 +433,7 @@ class Store:
     def delete_chat(self, user_id: str, chat_id: str) -> None:
         if self.chat(user_id, chat_id):
             with self.engine.begin() as c:
+                c.execute(delete(investigations).where(investigations.c.chat_id == chat_id))
                 c.execute(delete(messages).where(messages.c.chat_id == chat_id))
                 c.execute(delete(chats).where(chats.c.id == chat_id))
 
@@ -400,6 +450,11 @@ class Store:
     def history(self, chat_id: str, turns: int = 4) -> str:
         return self.conversation(chat_id, turns)[0]
 
+    def investigation(self, user_id: str, chat_id: str) -> dict:
+        row = self._one(select(investigations.c.context).join(chats, chats.c.id == investigations.c.chat_id)
+                        .where(chats.c.user_id == user_id, chats.c.id == chat_id))
+        return row["context"] if row else {}
+
     def conversation(self, chat_id: str, turns: int = 4) -> tuple[str, dict | None]:
         """Fetch bounded history and the latest completed plan in one database roundtrip."""
         rows = list(reversed(self._all(select(messages).where(messages.c.chat_id == chat_id)
@@ -411,8 +466,9 @@ class Store:
                 lines.append(f"User: {m['content']}")
             else:
                 run = m.get("run") or {}
-                previous = run.get("spec") if run.get("status") == "done" else None
-                plan = run.get("restated") or (run.get("plan") or {}).get("restated_question")
+                if run.get("status") == "done":
+                    previous = run.get("spec")
+                plan = run.get("restated") or run.get("readback")
                 lines.append(f"Analyst: {m['content']}" + (f" (analysed: {plan})" if plan else ""))
         return "\n".join(lines), previous
 
