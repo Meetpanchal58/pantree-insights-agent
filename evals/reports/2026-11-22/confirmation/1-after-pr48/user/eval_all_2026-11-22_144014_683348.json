@@ -1,0 +1,4164 @@
+[
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "regression",
+  "set": "answer",
+  "id": "e04",
+  "question": "Which payment methods are used most?",
+  "seconds": 37.085,
+  "status": "done",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 3.5e-05,
+   "context": 0.001638,
+   "interpret": 13.904285,
+   "execute": 0.032077,
+   "analyse": 22.91356,
+   "reflect": 0.006716,
+   "chart": 0.18437,
+   "remember": 0.001916
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 19995,
+    "cached_tokens": 19992,
+    "output_tokens": 367,
+    "usd": 0.002838,
+    "seconds": 5.65,
+    "queue_seconds": 2.8e-05,
+    "inference_seconds": 5.652654,
+    "cost_known": true
+   },
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 20221,
+    "cached_tokens": 19964,
+    "output_tokens": 261,
+    "usd": 0.00256,
+    "seconds": 5.26,
+    "queue_seconds": 1.3e-05,
+    "inference_seconds": 5.258392,
+    "cost_known": true
+   },
+   {
+    "agent": "contrast",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 17417,
+    "cached_tokens": 17414,
+    "output_tokens": 58,
+    "usd": 0.001164,
+    "seconds": 2.17,
+    "queue_seconds": 1.4e-05,
+    "inference_seconds": 2.172765,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2036,
+    "cached_tokens": 1730,
+    "output_tokens": 948,
+    "usd": 0.005132,
+    "seconds": 11.68,
+    "queue_seconds": 9e-06,
+    "inference_seconds": 11.675599,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2107,
+    "cached_tokens": 1730,
+    "output_tokens": 921,
+    "usd": 0.005069,
+    "seconds": 11.17,
+    "queue_seconds": 9e-06,
+    "inference_seconds": 11.165424,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.001638,
+  "narrative_faithfulness": null,
+  "message": null,
+  "cost": 0.01676,
+  "trust": "verified",
+  "spec": {
+   "table": "sales",
+   "measures": [
+    {
+     "name": "orders",
+     "metric": "orders",
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": null
+    }
+   ],
+   "dimensions": [
+    "payment_method"
+   ],
+   "filters": [],
+   "time": null,
+   "ranking": {
+    "by": "orders",
+    "order": "desc",
+    "limit": 10,
+    "partition_by": []
+   },
+   "shares": [],
+   "columns": [],
+   "limit": null,
+   "operation": null
+  },
+  "template": null,
+  "sql": "SELECT\n  sales.payment_method AS payment_method,\n  COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\nGROUP BY\n  1\nORDER BY\n  orders DESC\nLIMIT 10",
+  "grounded": true,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 3.5e-05
+    },
+    "t": 1795358422.2622366
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.001638
+    },
+    "t": 1795358422.2660832
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 13.904285,
+     "decision": "spec",
+     "restated": "Which payment methods are used most often, ranked by number of orders?",
+     "reason": "",
+     "fast_path": false,
+     "readback": "**Measure:** Orders: Orders placed (any status, including later cancelled or returned).\n**Split by:** payment method\n**Period:** all available data\n**Filters:** none\n**Ranking:** top 10 by orders overall\n**Assumed:** Usage means orders placed, including orders later cancelled or returned.; Use all available order history.; Shares of total are omitted because the order count is not supported as an additive share numerator."
+    },
+    "t": 1795358436.1687346
+   },
+   {
+    "type": "clarify",
+    "run_id": "fbe7708bb245",
+    "kind": "confirm",
+    "message": "I understand you want to Which payment methods are used most often, ranked by number of orders.\n\n**Measure:** Orders: Orders placed (any status, including later cancelled or returned).\n**Split by:** payment method\n**Period:** all available data\n**Filters:** none\n**Ranking:** top 10 by orders overall\n**Assumed:** Usage means orders placed, including orders later cancelled or returned.; Use all available order history.; Shares of total are omitted because the order count is not supported as an additive share numerator.\n\nDoes this match your objective? Say \u2018go ahead\u2019 to run this plan, or tell me what to change.",
+    "questions": [
+     {
+      "question": "Is this what you want me to compute?",
+      "options": [],
+      "default": "",
+      "why": "Please confirm or tell me what to change"
+     }
+    ],
+    "plan_version": 1,
+    "readback": "**Measure:** Orders: Orders placed (any status, including later cancelled or returned).\n**Split by:** payment method\n**Period:** all available data\n**Filters:** none\n**Ranking:** top 10 by orders overall\n**Assumed:** Usage means orders placed, including orders later cancelled or returned.; Use all available order history.; Shares of total are omitted because the order count is not supported as an additive share numerator.",
+    "spec": {
+     "table": "sales",
+     "measures": [
+      {
+       "name": "orders",
+       "metric": "orders",
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": null
+      }
+     ],
+     "dimensions": [
+      "payment_method"
+     ],
+     "filters": [],
+     "time": null,
+     "ranking": {
+      "by": "orders",
+      "order": "desc",
+      "limit": 10,
+      "partition_by": []
+     },
+     "shares": [],
+     "columns": [],
+     "limit": null,
+     "operation": null
+    },
+    "template": null,
+    "plan": [
+     {
+      "purpose": "Which payment methods are used most often, ranked by number of orders?",
+      "spec": {
+       "table": "sales",
+       "measures": [
+        {
+         "name": "orders",
+         "metric": "orders",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        }
+       ],
+       "dimensions": [
+        "payment_method"
+       ],
+       "filters": [],
+       "time": null,
+       "ranking": {
+        "by": "orders",
+        "order": "desc",
+        "limit": 10,
+        "partition_by": []
+       },
+       "shares": [],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  sales.payment_method AS payment_method,\n  COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\nGROUP BY\n  1\nORDER BY\n  orders DESC\nLIMIT 10"
+     }
+    ],
+    "cost": {
+     "usd": 0.00656,
+     "calls": 3,
+     "input": 57633,
+     "cached": 57370,
+     "output": 686,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "execute",
+    "status": "done",
+    "detail": {
+     "seconds": 0.032077,
+     "queries": 1,
+     "query_seconds": 0.030502
+    },
+    "t": 1795358436.2205362
+   },
+   {
+    "type": "step",
+    "step": "analyse",
+    "status": "done",
+    "detail": {
+     "seconds": 22.91356
+    },
+    "t": 1795358459.135921
+   },
+   {
+    "type": "step",
+    "step": "reflect",
+    "status": "done",
+    "detail": {
+     "seconds": 0.006716
+    },
+    "t": 1795358459.143891
+   },
+   {
+    "type": "step",
+    "step": "chart",
+    "status": "done",
+    "detail": {
+     "seconds": 0.18437,
+     "charts": 1
+    },
+    "t": 1795358459.329958
+   },
+   {
+    "type": "step",
+    "step": "remember",
+    "status": "done",
+    "detail": {
+     "seconds": 0.001916,
+     "facts": 1,
+     "gaps_closed": 0
+    },
+    "t": 1795358459.3341537
+   }
+  ],
+  "result_correct": true,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": false,
+  "interactions": 1,
+  "first_turn_status": "clarify",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": true,
+  "confirmation_compliant": true,
+  "confirmations": 1,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null,
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": false,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "regression",
+  "set": "answer",
+  "id": "m10",
+  "question": "Which product categories get the worst reviews?",
+  "seconds": 28.595,
+  "status": "done",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 3.4e-05,
+   "context": 0.000373,
+   "interpret": 7.691355000000001,
+   "execute": 0.01206,
+   "analyse": 20.837846,
+   "reflect": 1.5e-05,
+   "chart": 0.023544,
+   "remember": 0.001372
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 20020,
+    "cached_tokens": 19964,
+    "output_tokens": 349,
+    "usd": 0.002799,
+    "seconds": 5.08,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 5.083084,
+    "cost_known": true
+   },
+   {
+    "agent": "contrast",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 17512,
+    "cached_tokens": 17291,
+    "output_tokens": 73,
+    "usd": 0.001451,
+    "seconds": 2.57,
+    "queue_seconds": 4.7e-05,
+    "inference_seconds": 2.569446,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2086,
+    "cached_tokens": 1730,
+    "output_tokens": 932,
+    "usd": 0.005103,
+    "seconds": 12.12,
+    "queue_seconds": 7e-06,
+    "inference_seconds": 12.11985,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2192,
+    "cached_tokens": 1730,
+    "output_tokens": 672,
+    "usd": 0.003908,
+    "seconds": 8.66,
+    "queue_seconds": 1.2e-05,
+    "inference_seconds": 8.657972,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.000373,
+  "narrative_faithfulness": null,
+  "message": null,
+  "cost": 0.01326,
+  "trust": "verified",
+  "spec": {
+   "table": "product_reviews",
+   "measures": [
+    {
+     "name": "average_rating",
+     "metric": "avg_rating",
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": null
+    },
+    {
+     "name": "review_count",
+     "metric": null,
+     "agg": "count",
+     "field": null,
+     "where": [],
+     "ratio": null
+    }
+   ],
+   "dimensions": [
+    "category"
+   ],
+   "filters": [
+    {
+     "field": "moderation_status",
+     "op": "eq",
+     "values": [
+      "Published"
+     ],
+     "other": null
+    }
+   ],
+   "time": null,
+   "ranking": {
+    "by": "average_rating",
+    "order": "asc",
+    "limit": 10,
+    "partition_by": []
+   },
+   "shares": [],
+   "columns": [],
+   "limit": null,
+   "operation": null
+  },
+  "template": null,
+  "sql": "SELECT\n  product_master.category AS category,\n  (\n    SUM(product_reviews.rating)\n  ) / NULLIF(COUNT(product_reviews.rating), 0) AS average_rating,\n  COUNT(*) AS review_count\nFROM product_reviews\nLEFT JOIN product_master\n  ON product_reviews.product_id = product_master.product_id\nWHERE\n  product_reviews.moderation_status = 'Published'\n  AND product_reviews.moderation_status = 'Published'\nGROUP BY\n  1\nORDER BY\n  average_rating ASC\nLIMIT 10",
+  "grounded": true,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 3.4e-05
+    },
+    "t": 1795358459.374829
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000322
+    },
+    "t": 1795358459.3772938
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 0.000524,
+     "decision": "clarify",
+     "restated": "",
+     "reason": "ambiguity register",
+     "fast_path": false,
+     "round": 1,
+     "questions": [
+      "What do you mean by 'worst reviews'?"
+     ]
+    },
+    "t": 1795358459.3774912
+   },
+   {
+    "type": "clarify",
+    "run_id": "b5392c893373",
+    "kind": "clarify",
+    "message": "What do you mean by 'worst reviews'? Possible meanings: Lowest average star rating of published reviews; Highest share of negative reviews",
+    "questions": [
+     {
+      "question": "What do you mean by 'worst reviews'?",
+      "options": [
+       "Lowest average star rating of published reviews",
+       "Highest share of negative reviews"
+      ],
+      "default": "Lowest average star rating of published reviews",
+      "why": "the two meanings give different numbers"
+     }
+    ],
+    "plan_version": 0,
+    "readback": null,
+    "spec": null,
+    "template": null,
+    "plan": [],
+    "cost": {
+     "usd": 0,
+     "calls": 0,
+     "input": 0,
+     "cached": 0,
+     "output": 0,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 5.1e-05
+    },
+    "t": 1795358459.384385
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 7.690831,
+     "decision": "spec",
+     "restated": "Which product categories have the lowest average star ratings among published reviews?",
+     "reason": "",
+     "fast_path": false,
+     "readback": "**Measure:** Average product rating: Average stars (1-5) of published reviews.\n**Measure:** review count: number of rows (one row = product review)\n**Split by:** product category\n**Period:** all available data\n**Filters:** moderation status is Published\n**Ranking:** bottom 10 by average rating overall\n**Assumed:** Use all available review dates and only published reviews.; Include review counts to give context to each average."
+    },
+    "t": 1795358467.0751812
+   },
+   {
+    "type": "clarify",
+    "run_id": "b5392c893373",
+    "kind": "confirm",
+    "message": "I understand you want to Which product categories have the lowest average star ratings among published reviews.\n\n**Measure:** Average product rating: Average stars (1-5) of published reviews.\n**Measure:** review count: number of rows (one row = product review)\n**Split by:** product category\n**Period:** all available data\n**Filters:** moderation status is Published\n**Ranking:** bottom 10 by average rating overall\n**Assumed:** Use all available review dates and only published reviews.; Include review counts to give context to each average.\n\nDoes this match your objective? Say \u2018go ahead\u2019 to run this plan, or tell me what to change.",
+    "questions": [
+     {
+      "question": "Is this what you want me to compute?",
+      "options": [],
+      "default": "",
+      "why": "Please confirm or tell me what to change"
+     }
+    ],
+    "plan_version": 1,
+    "readback": "**Measure:** Average product rating: Average stars (1-5) of published reviews.\n**Measure:** review count: number of rows (one row = product review)\n**Split by:** product category\n**Period:** all available data\n**Filters:** moderation status is Published\n**Ranking:** bottom 10 by average rating overall\n**Assumed:** Use all available review dates and only published reviews.; Include review counts to give context to each average.",
+    "spec": {
+     "table": "product_reviews",
+     "measures": [
+      {
+       "name": "average_rating",
+       "metric": "avg_rating",
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": null
+      },
+      {
+       "name": "review_count",
+       "metric": null,
+       "agg": "count",
+       "field": null,
+       "where": [],
+       "ratio": null
+      }
+     ],
+     "dimensions": [
+      "category"
+     ],
+     "filters": [
+      {
+       "field": "moderation_status",
+       "op": "eq",
+       "values": [
+        "Published"
+       ],
+       "other": null
+      }
+     ],
+     "time": null,
+     "ranking": {
+      "by": "average_rating",
+      "order": "asc",
+      "limit": 10,
+      "partition_by": []
+     },
+     "shares": [],
+     "columns": [],
+     "limit": null,
+     "operation": null
+    },
+    "template": null,
+    "plan": [
+     {
+      "purpose": "Which product categories have the lowest average star ratings among published reviews?",
+      "spec": {
+       "table": "product_reviews",
+       "measures": [
+        {
+         "name": "average_rating",
+         "metric": "avg_rating",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        },
+        {
+         "name": "review_count",
+         "metric": null,
+         "agg": "count",
+         "field": null,
+         "where": [],
+         "ratio": null
+        }
+       ],
+       "dimensions": [
+        "category"
+       ],
+       "filters": [
+        {
+         "field": "moderation_status",
+         "op": "eq",
+         "values": [
+          "Published"
+         ],
+         "other": null
+        }
+       ],
+       "time": null,
+       "ranking": {
+        "by": "average_rating",
+        "order": "asc",
+        "limit": 10,
+        "partition_by": []
+       },
+       "shares": [],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  product_master.category AS category,\n  (\n    SUM(product_reviews.rating)\n  ) / NULLIF(COUNT(product_reviews.rating), 0) AS average_rating,\n  COUNT(*) AS review_count\nFROM product_reviews\nLEFT JOIN product_master\n  ON product_reviews.product_id = product_master.product_id\nWHERE\n  product_reviews.moderation_status = 'Published'\n  AND product_reviews.moderation_status = 'Published'\nGROUP BY\n  1\nORDER BY\n  average_rating ASC\nLIMIT 10"
+     }
+    ],
+    "cost": {
+     "usd": 0.00425,
+     "calls": 2,
+     "input": 37532,
+     "cached": 37255,
+     "output": 422,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "execute",
+    "status": "done",
+    "detail": {
+     "seconds": 0.01206,
+     "queries": 1,
+     "query_seconds": 0.010876
+    },
+    "t": 1795358467.0935123
+   },
+   {
+    "type": "step",
+    "step": "analyse",
+    "status": "done",
+    "detail": {
+     "seconds": 20.837846
+    },
+    "t": 1795358487.9325895
+   },
+   {
+    "type": "step",
+    "step": "reflect",
+    "status": "done",
+    "detail": {
+     "seconds": 1.5e-05
+    },
+    "t": 1795358487.9341273
+   },
+   {
+    "type": "step",
+    "step": "chart",
+    "status": "done",
+    "detail": {
+     "seconds": 0.023544,
+     "charts": 1
+    },
+    "t": 1795358487.9595308
+   },
+   {
+    "type": "step",
+    "step": "remember",
+    "status": "done",
+    "detail": {
+     "seconds": 0.001372,
+     "facts": 0,
+     "gaps_closed": 0
+    },
+    "t": 1795358487.9626954
+   }
+  ],
+  "result_correct": false,
+  "questions": 1,
+  "corrections": 0,
+  "first_reading": null,
+  "interactions": 2,
+  "first_turn_status": "clarify",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": false,
+  "confirmation_compliant": true,
+  "confirmations": 1,
+  "passed": false,
+  "reason": "wrong metric value: 'negative_share' does not match (value, denominator or category)",
+  "failure_type": "silent_wrong",
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": false,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "regression",
+  "set": "answer",
+  "id": "m11",
+  "question": "What do customers contact support about most, and how satisfied are they?",
+  "seconds": 60.392,
+  "status": "done",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 5.3e-05,
+   "context": 0.000325,
+   "interpret": 10.093159,
+   "execute": 0.015804,
+   "analyse": 50.224958,
+   "reflect": 1.6e-05,
+   "chart": 0.035861,
+   "remember": 0.001274
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 20002,
+    "cached_tokens": 19999,
+    "output_tokens": 790,
+    "usd": 0.004953,
+    "seconds": 10.06,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 10.05776,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2498,
+    "cached_tokens": 1730,
+    "output_tokens": 1166,
+    "usd": 0.006685,
+    "seconds": 14.04,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 14.035104,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2625,
+    "cached_tokens": 1730,
+    "output_tokens": 1163,
+    "usd": 0.006796,
+    "seconds": 14.04,
+    "queue_seconds": 9e-06,
+    "inference_seconds": 14.041531,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2398,
+    "cached_tokens": 1730,
+    "output_tokens": 869,
+    "usd": 0.005099,
+    "seconds": 11.12,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 11.116702,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2476,
+    "cached_tokens": 1730,
+    "output_tokens": 852,
+    "usd": 0.005092,
+    "seconds": 10.93,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 10.933255,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.000325,
+  "narrative_faithfulness": null,
+  "message": null,
+  "cost": 0.02863,
+  "trust": "verified",
+  "spec": {
+   "table": "support_contacts",
+   "measures": [
+    {
+     "name": "contacts",
+     "metric": null,
+     "agg": "count",
+     "field": null,
+     "where": [],
+     "ratio": null
+    },
+    {
+     "name": "satisfaction",
+     "metric": "avg_csat",
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": null
+    }
+   ],
+   "dimensions": [
+    "issue"
+   ],
+   "filters": [],
+   "time": null,
+   "ranking": {
+    "by": "contacts",
+    "order": "desc",
+    "limit": 16,
+    "partition_by": []
+   },
+   "shares": [
+    "contacts"
+   ],
+   "columns": [],
+   "limit": null,
+   "operation": null
+  },
+  "template": null,
+  "sql": "SELECT\n  q.issue,\n  q.contacts,\n  q.satisfaction,\n  q.contacts * 1.0 / NULLIF(SUM(q.contacts) OVER (), 0) AS contacts_share\nFROM (\n  SELECT\n    support_contacts.issue_category AS issue,\n    COUNT(*) AS contacts,\n    (\n      SUM(support_contacts.csat)\n    ) / NULLIF(COUNT(support_contacts.csat), 0) AS satisfaction\n  FROM support_contacts\n  GROUP BY\n    1\n) AS q\nORDER BY\n  contacts DESC\nLIMIT 16",
+  "grounded": true,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 5.3e-05
+    },
+    "t": 1795358487.9948764
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000325
+    },
+    "t": 1795358487.9965596
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 10.093159,
+     "decision": "investigation",
+     "restated": "What are the most common reasons customers contact support, and how satisfied are they? Compare contact volumes and satisfaction by issue, alongside ticket resolution rates.",
+     "reason": "",
+     "fast_path": false,
+     "readback": "1. Rank support issues by contact volume, show their shares of all contacts, and report average satisfaction.\n**Measure:** contacts: number of rows (one row = support contact)\n**Measure:** Customer satisfaction (CSAT): Average satisfaction score (1-5) given when a ticket is resolved.\n**Split by:** support issue\n**Period:** all available data\n**Filters:** none\n**Ranking:** top 16 by contacts overall\n**Also shown:** share of the total for contacts\n\n2. Show ticket counts and resolution rates by issue so that satisfaction scores are interpreted alongside unresolved tickets.\n**Measure:** Support tickets: Support tickets opened, dated by their first contact.\n**Measure:** Tickets resolved: Share of tickets resolved so far (the rest are pending or escalated).\n**Split by:** issue category\n**Period:** all available data\n**Filters:** none"
+    },
+    "t": 1795358498.0894067
+   },
+   {
+    "type": "clarify",
+    "run_id": "61eeff08231f",
+    "kind": "confirm",
+    "message": "I understand you want to What are the most common reasons customers contact support, and how satisfied are they? Compare contact volumes and satisfaction by issue, alongside ticket resolution rates.\n\n1. Rank support issues by contact volume, show their shares of all contacts, and report average satisfaction.\n**Measure:** contacts: number of rows (one row = support contact)\n**Measure:** Customer satisfaction (CSAT): Average satisfaction score (1-5) given when a ticket is resolved.\n**Split by:** support issue\n**Period:** all available data\n**Filters:** none\n**Ranking:** top 16 by contacts overall\n**Also shown:** share of the total for contacts\n\n2. Show ticket counts and resolution rates by issue so that satisfaction scores are interpreted alongside unresolved tickets.\n**Measure:** Support tickets: Support tickets opened, dated by their first contact.\n**Measure:** Tickets resolved: Share of tickets resolved so far (the rest are pending or escalated).\n**Split by:** issue category\n**Period:** all available data\n**Filters:** none\n\nDoes this match your objective? Say \u2018go ahead\u2019 to run this plan, or tell me what to change.",
+    "questions": [
+     {
+      "question": "Is this what you want me to compute?",
+      "options": [],
+      "default": "",
+      "why": "Please confirm or tell me what to change"
+     }
+    ],
+    "plan_version": 1,
+    "readback": "1. Rank support issues by contact volume, show their shares of all contacts, and report average satisfaction.\n**Measure:** contacts: number of rows (one row = support contact)\n**Measure:** Customer satisfaction (CSAT): Average satisfaction score (1-5) given when a ticket is resolved.\n**Split by:** support issue\n**Period:** all available data\n**Filters:** none\n**Ranking:** top 16 by contacts overall\n**Also shown:** share of the total for contacts\n\n2. Show ticket counts and resolution rates by issue so that satisfaction scores are interpreted alongside unresolved tickets.\n**Measure:** Support tickets: Support tickets opened, dated by their first contact.\n**Measure:** Tickets resolved: Share of tickets resolved so far (the rest are pending or escalated).\n**Split by:** issue category\n**Period:** all available data\n**Filters:** none",
+    "spec": {
+     "table": "support_contacts",
+     "measures": [
+      {
+       "name": "contacts",
+       "metric": null,
+       "agg": "count",
+       "field": null,
+       "where": [],
+       "ratio": null
+      },
+      {
+       "name": "satisfaction",
+       "metric": "avg_csat",
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": null
+      }
+     ],
+     "dimensions": [
+      "issue"
+     ],
+     "filters": [],
+     "time": null,
+     "ranking": {
+      "by": "contacts",
+      "order": "desc",
+      "limit": 16,
+      "partition_by": []
+     },
+     "shares": [
+      "contacts"
+     ],
+     "columns": [],
+     "limit": null,
+     "operation": null
+    },
+    "template": null,
+    "plan": [
+     {
+      "purpose": "Rank support issues by contact volume, show their shares of all contacts, and report average satisfaction.",
+      "spec": {
+       "table": "support_contacts",
+       "measures": [
+        {
+         "name": "contacts",
+         "metric": null,
+         "agg": "count",
+         "field": null,
+         "where": [],
+         "ratio": null
+        },
+        {
+         "name": "satisfaction",
+         "metric": "avg_csat",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        }
+       ],
+       "dimensions": [
+        "issue"
+       ],
+       "filters": [],
+       "time": null,
+       "ranking": {
+        "by": "contacts",
+        "order": "desc",
+        "limit": 16,
+        "partition_by": []
+       },
+       "shares": [
+        "contacts"
+       ],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  q.issue,\n  q.contacts,\n  q.satisfaction,\n  q.contacts * 1.0 / NULLIF(SUM(q.contacts) OVER (), 0) AS contacts_share\nFROM (\n  SELECT\n    support_contacts.issue_category AS issue,\n    COUNT(*) AS contacts,\n    (\n      SUM(support_contacts.csat)\n    ) / NULLIF(COUNT(support_contacts.csat), 0) AS satisfaction\n  FROM support_contacts\n  GROUP BY\n    1\n) AS q\nORDER BY\n  contacts DESC\nLIMIT 16"
+     },
+     {
+      "purpose": "Show ticket counts and resolution rates by issue so that satisfaction scores are interpreted alongside unresolved tickets.",
+      "spec": {
+       "table": "tickets",
+       "measures": [
+        {
+         "name": "tickets",
+         "metric": "support_tickets",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        },
+        {
+         "name": "resolution_rate",
+         "metric": "ticket_resolution_rate",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        }
+       ],
+       "dimensions": [
+        "tickets.issue_category"
+       ],
+       "filters": [],
+       "time": null,
+       "ranking": null,
+       "shares": [],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  tickets.issue_category AS issue_category,\n  COUNT(*) AS tickets,\n  (\n    COUNT(*) FILTER(WHERE\n      tickets.resolution_status = 'Resolved')\n  ) / NULLIF(COUNT(*), 0) AS resolution_rate\nFROM (\n  (\n    SELECT\n      ticket_id,\n      MIN(contact_at) AS opened_at,\n      ARG_MIN(channel, contact_at) AS channel,\n      ARG_MIN(issue_category, contact_at) AS issue_category,\n      ARG_MAX(resolution_status, contact_at) AS resolution_status,\n      COUNT(*) AS contacts\n    FROM support_contacts\n    GROUP BY\n      ticket_id\n  )\n) AS tickets\nGROUP BY\n  1\nORDER BY\n  tickets DESC"
+     }
+    ],
+    "cost": {
+     "usd": 0.00495,
+     "calls": 1,
+     "input": 20002,
+     "cached": 19999,
+     "output": 790,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "execute",
+    "status": "done",
+    "detail": {
+     "seconds": 0.015804,
+     "queries": 2,
+     "query_seconds": 0.014374
+    },
+    "t": 1795358498.1113696
+   },
+   {
+    "type": "step",
+    "step": "analyse",
+    "status": "done",
+    "detail": {
+     "seconds": 50.224958
+    },
+    "t": 1795358548.337822
+   },
+   {
+    "type": "step",
+    "step": "reflect",
+    "status": "done",
+    "detail": {
+     "seconds": 1.6e-05
+    },
+    "t": 1795358548.3392816
+   },
+   {
+    "type": "step",
+    "step": "chart",
+    "status": "done",
+    "detail": {
+     "seconds": 0.035861,
+     "charts": 2
+    },
+    "t": 1795358548.3768163
+   },
+   {
+    "type": "step",
+    "step": "remember",
+    "status": "done",
+    "detail": {
+     "seconds": 0.001274,
+     "facts": 1,
+     "gaps_closed": 0
+    },
+    "t": 1795358548.3797407
+   }
+  ],
+  "result_correct": false,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": false,
+  "interactions": 1,
+  "first_turn_status": "clarify",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": true,
+  "confirmation_compliant": true,
+  "confirmations": 1,
+  "passed": false,
+  "reason": "wrong metric value: 'tickets' does not match (value, denominator or category)",
+  "failure_type": "silent_wrong",
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": false,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "regression",
+  "set": "answer",
+  "id": "h10",
+  "question": "Do customers who get the wrong size return more in footwear or apparel?",
+  "seconds": 33.566,
+  "status": "done",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 4.1e-05,
+   "context": 0.000381,
+   "interpret": 14.463049999999999,
+   "execute": 0.013405,
+   "analyse": 19.038495,
+   "reflect": 1.2e-05,
+   "chart": 0.020867,
+   "remember": 0.003165
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 20039,
+    "cached_tokens": 19964,
+    "output_tokens": 327,
+    "usd": 0.002708,
+    "seconds": 4.95,
+    "queue_seconds": 9e-06,
+    "inference_seconds": 4.946842,
+    "cost_known": true
+   },
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 20347,
+    "cached_tokens": 19964,
+    "output_tokens": 363,
+    "usd": 0.003196,
+    "seconds": 5.16,
+    "queue_seconds": 1e-05,
+    "inference_seconds": 5.160175,
+    "cost_known": true
+   },
+   {
+    "agent": "contrast",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 17568,
+    "cached_tokens": 17291,
+    "output_tokens": 237,
+    "usd": 0.002327,
+    "seconds": 4.29,
+    "queue_seconds": 9e-06,
+    "inference_seconds": 4.293941,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2430,
+    "cached_tokens": 1730,
+    "output_tokens": 684,
+    "usd": 0.004207,
+    "seconds": 8.5,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 8.500843,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2513,
+    "cached_tokens": 1730,
+    "output_tokens": 835,
+    "usd": 0.005045,
+    "seconds": 10.49,
+    "queue_seconds": 7e-06,
+    "inference_seconds": 10.486337,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.000381,
+  "narrative_faithfulness": null,
+  "message": null,
+  "cost": 0.01748,
+  "trust": "verified",
+  "spec": {
+   "table": "sales",
+   "measures": [
+    {
+     "name": "return_rate",
+     "metric": "return_rate",
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": null
+    },
+    {
+     "name": "realized_revenue",
+     "metric": "realized_revenue",
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": null
+    }
+   ],
+   "dimensions": [
+    "category"
+   ],
+   "filters": [
+    {
+     "field": "category",
+     "op": "in",
+     "values": [
+      "Footwear",
+      "Apparel"
+     ],
+     "other": null
+    },
+    {
+     "field": "size_fit",
+     "op": "in",
+     "values": [
+      "Too Small",
+      "Too Large"
+     ],
+     "other": null
+    },
+    {
+     "field": "sales.delivered_at",
+     "op": "is_set",
+     "values": [],
+     "other": null
+    }
+   ],
+   "time": null,
+   "ranking": null,
+   "shares": [],
+   "columns": [],
+   "limit": null,
+   "operation": null
+  },
+  "template": null,
+  "sql": "SELECT\n  product_master.category AS category,\n  (\n    COUNT(*) FILTER(WHERE\n      NOT sales.return_requested_at IS NULL)\n  ) / NULLIF(COUNT(*) FILTER(WHERE\n    NOT sales.delivered_at IS NULL), 0) AS return_rate,\n  SUM(\n    CASE\n      WHEN NOT sales.delivered_at IS NULL\n      THEN sales.net_amount - COALESCE(sales.refund_amount, 0)\n      ELSE 0\n    END\n  ) AS realized_revenue\nFROM sales\nLEFT JOIN product_master\n  ON sales.product_id = product_master.product_id\nWHERE\n  sales.line_type = 'Sale'\n  AND product_master.category IN ('Footwear', 'Apparel')\n  AND sales.size_fit IN ('Too Small', 'Too Large')\n  AND NOT sales.delivered_at IS NULL\nGROUP BY\n  1\nORDER BY\n  return_rate DESC",
+  "grounded": true,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 4.1e-05
+    },
+    "t": 1795358548.4073758
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000317
+    },
+    "t": 1795358548.4088693
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 0.000582,
+     "decision": "clarify",
+     "restated": "",
+     "reason": "ambiguity register",
+     "fast_path": false,
+     "round": 1,
+     "questions": [
+      "What do you mean by 'wrong size'?"
+     ]
+    },
+    "t": 1795358548.4091313
+   },
+   {
+    "type": "clarify",
+    "run_id": "13e1fae80eab",
+    "kind": "clarify",
+    "message": "What do you mean by 'wrong size'? Possible meanings: The item did not fit: delivered lines with size fit Too Small or Too Large (sales.size_fit); The return reason given was Size Issue (sales.return_reason)",
+    "questions": [
+     {
+      "question": "What do you mean by 'wrong size'?",
+      "options": [
+       "The item did not fit: delivered lines with size fit Too Small or Too Large (sales.size_fit)",
+       "The return reason given was Size Issue (sales.return_reason)"
+      ],
+      "default": "The item did not fit: delivered lines with size fit Too Small or Too Large (sales.size_fit)",
+      "why": "the two meanings give different numbers"
+     }
+    ],
+    "plan_version": 0,
+    "readback": null,
+    "spec": null,
+    "template": null,
+    "plan": [],
+    "cost": {
+     "usd": 0,
+     "calls": 0,
+     "input": 0,
+     "cached": 0,
+     "output": 0,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 6.4e-05
+    },
+    "t": 1795358548.4147136
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 14.462468,
+     "decision": "spec",
+     "restated": "Among delivered items recorded as too small or too large, compare the return-request rate and realized revenue for footwear and apparel.",
+     "reason": "",
+     "fast_path": false,
+     "readback": "**Measure:** Return rate: Share of delivered lines the customer asked to return (refund, store credit or exchange).\n**Measure:** Realized revenue: Money the shop keeps: delivered lines minus refunds. Excludes cancelled, returned-to-origin, lost and undelivered lines. THE default meaning of \"revenue\" or \"sales\" unless the user asks otherwise.\n**Split by:** product category\n**Period:** all available data\n**Filters:** product category is Footwear or Apparel; size fit is Too Small or Too Large; delivered at is recorded\n**Assumed:** Return rate is the share of delivered order lines with a return request, including refunds, store credit and exchanges.; Realized revenue is delivered revenue minus refunds, for the same selected lines.; Uses all available order dates. Recent deliveries may not yet have had enough time for a return request.; Size fit must be recorded as Too Small or Too Large; the result may not represent items without a recorded fit."
+    },
+    "t": 1795358562.877127
+   },
+   {
+    "type": "clarify",
+    "run_id": "13e1fae80eab",
+    "kind": "confirm",
+    "message": "I understand you want to Among delivered items recorded as too small or too large, compare the return-request rate and realized revenue for footwear and apparel.\n\n**Measure:** Return rate: Share of delivered lines the customer asked to return (refund, store credit or exchange).\n**Measure:** Realized revenue: Money the shop keeps: delivered lines minus refunds. Excludes cancelled, returned-to-origin, lost and undelivered lines. THE default meaning of \"revenue\" or \"sales\" unless the user asks otherwise.\n**Split by:** product category\n**Period:** all available data\n**Filters:** product category is Footwear or Apparel; size fit is Too Small or Too Large; delivered at is recorded\n**Assumed:** Return rate is the share of delivered order lines with a return request, including refunds, store credit and exchanges.; Realized revenue is delivered revenue minus refunds, for the same selected lines.; Uses all available order dates. Recent deliveries may not yet have had enough time for a return request.; Size fit must be recorded as Too Small or Too Large; the result may not represent items without a recorded fit.\n\nDoes this match your objective? Say \u2018go ahead\u2019 to run this plan, or tell me what to change.",
+    "questions": [
+     {
+      "question": "Is this what you want me to compute?",
+      "options": [],
+      "default": "",
+      "why": "Please confirm or tell me what to change"
+     }
+    ],
+    "plan_version": 1,
+    "readback": "**Measure:** Return rate: Share of delivered lines the customer asked to return (refund, store credit or exchange).\n**Measure:** Realized revenue: Money the shop keeps: delivered lines minus refunds. Excludes cancelled, returned-to-origin, lost and undelivered lines. THE default meaning of \"revenue\" or \"sales\" unless the user asks otherwise.\n**Split by:** product category\n**Period:** all available data\n**Filters:** product category is Footwear or Apparel; size fit is Too Small or Too Large; delivered at is recorded\n**Assumed:** Return rate is the share of delivered order lines with a return request, including refunds, store credit and exchanges.; Realized revenue is delivered revenue minus refunds, for the same selected lines.; Uses all available order dates. Recent deliveries may not yet have had enough time for a return request.; Size fit must be recorded as Too Small or Too Large; the result may not represent items without a recorded fit.",
+    "spec": {
+     "table": "sales",
+     "measures": [
+      {
+       "name": "return_rate",
+       "metric": "return_rate",
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": null
+      },
+      {
+       "name": "realized_revenue",
+       "metric": "realized_revenue",
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": null
+      }
+     ],
+     "dimensions": [
+      "category"
+     ],
+     "filters": [
+      {
+       "field": "category",
+       "op": "in",
+       "values": [
+        "Footwear",
+        "Apparel"
+       ],
+       "other": null
+      },
+      {
+       "field": "size_fit",
+       "op": "in",
+       "values": [
+        "Too Small",
+        "Too Large"
+       ],
+       "other": null
+      },
+      {
+       "field": "sales.delivered_at",
+       "op": "is_set",
+       "values": [],
+       "other": null
+      }
+     ],
+     "time": null,
+     "ranking": null,
+     "shares": [],
+     "columns": [],
+     "limit": null,
+     "operation": null
+    },
+    "template": null,
+    "plan": [
+     {
+      "purpose": "Among delivered items recorded as too small or too large, compare the return-request rate and realized revenue for footwear and apparel.",
+      "spec": {
+       "table": "sales",
+       "measures": [
+        {
+         "name": "return_rate",
+         "metric": "return_rate",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        },
+        {
+         "name": "realized_revenue",
+         "metric": "realized_revenue",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        }
+       ],
+       "dimensions": [
+        "category"
+       ],
+       "filters": [
+        {
+         "field": "category",
+         "op": "in",
+         "values": [
+          "Footwear",
+          "Apparel"
+         ],
+         "other": null
+        },
+        {
+         "field": "size_fit",
+         "op": "in",
+         "values": [
+          "Too Small",
+          "Too Large"
+         ],
+         "other": null
+        },
+        {
+         "field": "sales.delivered_at",
+         "op": "is_set",
+         "values": [],
+         "other": null
+        }
+       ],
+       "time": null,
+       "ranking": null,
+       "shares": [],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  product_master.category AS category,\n  (\n    COUNT(*) FILTER(WHERE\n      NOT sales.return_requested_at IS NULL)\n  ) / NULLIF(COUNT(*) FILTER(WHERE\n    NOT sales.delivered_at IS NULL), 0) AS return_rate,\n  SUM(\n    CASE\n      WHEN NOT sales.delivered_at IS NULL\n      THEN sales.net_amount - COALESCE(sales.refund_amount, 0)\n      ELSE 0\n    END\n  ) AS realized_revenue\nFROM sales\nLEFT JOIN product_master\n  ON sales.product_id = product_master.product_id\nWHERE\n  sales.line_type = 'Sale'\n  AND product_master.category IN ('Footwear', 'Apparel')\n  AND sales.size_fit IN ('Too Small', 'Too Large')\n  AND NOT sales.delivered_at IS NULL\nGROUP BY\n  1\nORDER BY\n  return_rate DESC"
+     }
+    ],
+    "cost": {
+     "usd": 0.00823,
+     "calls": 3,
+     "input": 57954,
+     "cached": 57219,
+     "output": 927,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "execute",
+    "status": "done",
+    "detail": {
+     "seconds": 0.013405,
+     "queries": 1,
+     "query_seconds": 0.012116
+    },
+    "t": 1795358562.8970962
+   },
+   {
+    "type": "step",
+    "step": "analyse",
+    "status": "done",
+    "detail": {
+     "seconds": 19.038495
+    },
+    "t": 1795358581.936888
+   },
+   {
+    "type": "step",
+    "step": "reflect",
+    "status": "done",
+    "detail": {
+     "seconds": 1.2e-05
+    },
+    "t": 1795358581.9385252
+   },
+   {
+    "type": "step",
+    "step": "chart",
+    "status": "done",
+    "detail": {
+     "seconds": 0.020867,
+     "charts": 1
+    },
+    "t": 1795358581.960736
+   },
+   {
+    "type": "step",
+    "step": "remember",
+    "status": "done",
+    "detail": {
+     "seconds": 0.003165,
+     "facts": 0,
+     "gaps_closed": 0
+    },
+    "t": 1795358581.9655285
+   }
+  ],
+  "result_correct": false,
+  "questions": 1,
+  "corrections": 0,
+  "first_reading": null,
+  "interactions": 2,
+  "first_turn_status": "clarify",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": false,
+  "confirmation_compliant": true,
+  "confirmations": 1,
+  "passed": false,
+  "reason": "extra rows for 'category'",
+  "failure_type": "silent_wrong",
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": false,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "holdout",
+  "set": "answer",
+  "id": "x11",
+  "question": "What is the cancellation rate for COD versus prepaid orders?",
+  "seconds": 24.326,
+  "status": "done",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 3.7e-05,
+   "context": 0.000316,
+   "interpret": 7.532827,
+   "execute": 0.008937,
+   "analyse": 16.743558,
+   "reflect": 1.4e-05,
+   "chart": 0.01808,
+   "remember": 0.001483
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 19999,
+    "cached_tokens": 19996,
+    "output_tokens": 190,
+    "usd": 0.001953,
+    "seconds": 3.13,
+    "queue_seconds": 9e-06,
+    "inference_seconds": 3.127636,
+    "cost_known": true
+   },
+   {
+    "agent": "contrast",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 17403,
+    "cached_tokens": 17400,
+    "output_tokens": 294,
+    "usd": 0.002343,
+    "seconds": 4.36,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 4.363948,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2067,
+    "cached_tokens": 1730,
+    "output_tokens": 640,
+    "usd": 0.003623,
+    "seconds": 8.12,
+    "queue_seconds": 9e-06,
+    "inference_seconds": 8.116281,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2139,
+    "cached_tokens": 1730,
+    "output_tokens": 699,
+    "usd": 0.003991,
+    "seconds": 8.58,
+    "queue_seconds": 7e-06,
+    "inference_seconds": 8.582637,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.000316,
+  "narrative_faithfulness": null,
+  "message": null,
+  "cost": 0.01191,
+  "trust": "verified",
+  "spec": {
+   "table": "sales",
+   "measures": [
+    {
+     "name": "cancellation_rate",
+     "metric": "cancellation_rate",
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": null
+    }
+   ],
+   "dimensions": [
+    "payment_type"
+   ],
+   "filters": [],
+   "time": null,
+   "ranking": null,
+   "shares": [],
+   "columns": [],
+   "limit": null,
+   "operation": null
+  },
+  "template": null,
+  "sql": "SELECT\n  CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type,\n  (\n    COUNT(*) FILTER(WHERE\n      NOT sales.cancelled_at IS NULL)\n  ) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\nGROUP BY\n  1\nORDER BY\n  cancellation_rate DESC",
+  "grounded": true,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 3.7e-05
+    },
+    "t": 1795358582.0069416
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000316
+    },
+    "t": 1795358582.00843
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 7.532827,
+     "decision": "spec",
+     "restated": "Compare the cancellation rate for COD versus prepaid purchases across all available dates.",
+     "reason": "",
+     "fast_path": false,
+     "readback": "**Measure:** Cancellation rate: Share of order lines cancelled before shipping.\n**Split by:** payment type (COD or prepaid)\n**Period:** all available data\n**Filters:** none\n**Assumed:** Cancellation rate is the share of order lines cancelled before shipping, not the share of orders with a cancellation.; Prepaid includes all payment methods other than COD.; All available dates are included; only sale lines are counted."
+    },
+    "t": 1795358589.5409539
+   },
+   {
+    "type": "clarify",
+    "run_id": "2707d435795f",
+    "kind": "confirm",
+    "message": "I understand you want to Compare the cancellation rate for COD versus prepaid purchases across all available dates.\n\n**Measure:** Cancellation rate: Share of order lines cancelled before shipping.\n**Split by:** payment type (COD or prepaid)\n**Period:** all available data\n**Filters:** none\n**Assumed:** Cancellation rate is the share of order lines cancelled before shipping, not the share of orders with a cancellation.; Prepaid includes all payment methods other than COD.; All available dates are included; only sale lines are counted.\n\nDoes this match your objective? Say \u2018go ahead\u2019 to run this plan, or tell me what to change.",
+    "questions": [
+     {
+      "question": "Is this what you want me to compute?",
+      "options": [],
+      "default": "",
+      "why": "Please confirm or tell me what to change"
+     }
+    ],
+    "plan_version": 1,
+    "readback": "**Measure:** Cancellation rate: Share of order lines cancelled before shipping.\n**Split by:** payment type (COD or prepaid)\n**Period:** all available data\n**Filters:** none\n**Assumed:** Cancellation rate is the share of order lines cancelled before shipping, not the share of orders with a cancellation.; Prepaid includes all payment methods other than COD.; All available dates are included; only sale lines are counted.",
+    "spec": {
+     "table": "sales",
+     "measures": [
+      {
+       "name": "cancellation_rate",
+       "metric": "cancellation_rate",
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": null
+      }
+     ],
+     "dimensions": [
+      "payment_type"
+     ],
+     "filters": [],
+     "time": null,
+     "ranking": null,
+     "shares": [],
+     "columns": [],
+     "limit": null,
+     "operation": null
+    },
+    "template": null,
+    "plan": [
+     {
+      "purpose": "Compare the cancellation rate for COD versus prepaid purchases across all available dates.",
+      "spec": {
+       "table": "sales",
+       "measures": [
+        {
+         "name": "cancellation_rate",
+         "metric": "cancellation_rate",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        }
+       ],
+       "dimensions": [
+        "payment_type"
+       ],
+       "filters": [],
+       "time": null,
+       "ranking": null,
+       "shares": [],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type,\n  (\n    COUNT(*) FILTER(WHERE\n      NOT sales.cancelled_at IS NULL)\n  ) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\nGROUP BY\n  1\nORDER BY\n  cancellation_rate DESC"
+     }
+    ],
+    "cost": {
+     "usd": 0.0043,
+     "calls": 2,
+     "input": 37402,
+     "cached": 37396,
+     "output": 484,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "execute",
+    "status": "done",
+    "detail": {
+     "seconds": 0.008937,
+     "queries": 1,
+     "query_seconds": 0.007894
+    },
+    "t": 1795358589.5572088
+   },
+   {
+    "type": "step",
+    "step": "analyse",
+    "status": "done",
+    "detail": {
+     "seconds": 16.743558
+    },
+    "t": 1795358606.3023214
+   },
+   {
+    "type": "step",
+    "step": "reflect",
+    "status": "done",
+    "detail": {
+     "seconds": 1.4e-05
+    },
+    "t": 1795358606.3038867
+   },
+   {
+    "type": "step",
+    "step": "chart",
+    "status": "done",
+    "detail": {
+     "seconds": 0.01808,
+     "charts": 1
+    },
+    "t": 1795358606.323098
+   },
+   {
+    "type": "step",
+    "step": "remember",
+    "status": "done",
+    "detail": {
+     "seconds": 0.001483,
+     "facts": 0,
+     "gaps_closed": 0
+    },
+    "t": 1795358606.3263903
+   }
+  ],
+  "result_correct": true,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": true,
+  "interactions": 1,
+  "first_turn_status": "clarify",
+  "first_turn_correct": true,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": true,
+  "confirmation_compliant": true,
+  "confirmations": 1,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null,
+  "final_intent_correct": true,
+  "plan_sql_evidence_correct": true,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "holdout",
+  "set": "answer",
+  "id": "z01",
+  "question": "How many orders were placed in December 2024?",
+  "seconds": 5.484,
+  "status": "done",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 3.6e-05,
+   "context": 0.000733,
+   "interpret": 5.449393,
+   "execute": 0.008396,
+   "analyse": 0.00167,
+   "reflect": 1.3e-05,
+   "chart": 0.000913,
+   "remember": 0.001112
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 19999,
+    "cached_tokens": 19996,
+    "output_tokens": 215,
+    "usd": 0.002078,
+    "seconds": 4.02,
+    "queue_seconds": 3.7e-05,
+    "inference_seconds": 4.024951,
+    "cost_known": true
+   },
+   {
+    "agent": "contrast",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 17426,
+    "cached_tokens": 17423,
+    "output_tokens": 16,
+    "usd": 0.000954,
+    "seconds": 1.39,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 1.39449,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.000733,
+  "narrative_faithfulness": null,
+  "message": null,
+  "cost": 0.00303,
+  "trust": "verified",
+  "spec": {
+   "table": "sales",
+   "measures": [
+    {
+     "name": "orders",
+     "metric": "orders",
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": null
+    }
+   ],
+   "dimensions": [],
+   "filters": [],
+   "time": {
+    "field": null,
+    "start": "2024-12-01",
+    "end": "2024-12-31",
+    "grain": null
+   },
+   "ranking": null,
+   "shares": [],
+   "columns": [],
+   "limit": null,
+   "operation": null
+  },
+  "template": null,
+  "sql": "SELECT\n  COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\n  AND sales.placed_at >= CAST('2024-12-01' AS TIMESTAMP)\n  AND sales.placed_at < CAST('2025-01-01' AS TIMESTAMP)",
+  "grounded": true,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 3.6e-05
+    },
+    "t": 1795358606.3547552
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000733
+    },
+    "t": 1795358606.3610804
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 5.449393,
+     "decision": "spec",
+     "restated": "How many orders were placed from December 1 through December 31, 2024?",
+     "reason": "",
+     "fast_path": false,
+     "readback": "**Measure:** Orders: Orders placed (any status, including later cancelled or returned).\n**Period:** 2024-12-01 to 2024-12-31\n**Filters:** none\n**Assumed:** Orders include all statuses, including those later cancelled or returned.; The requested period predates the available data, which starts on January 1, 2025; any zero or empty result reflects missing coverage, not necessarily zero orders.; The data covers 2025-01-01 to 2026-11-14; nothing is recorded in the requested period, so the result is empty for that period."
+    },
+    "t": 1795358611.8097432
+   },
+   {
+    "type": "clarify",
+    "run_id": "4f370c3ca8aa",
+    "kind": "confirm",
+    "message": "I understand you want to How many orders were placed from December 1 through December 31, 2024.\n\n**Measure:** Orders: Orders placed (any status, including later cancelled or returned).\n**Period:** 2024-12-01 to 2024-12-31\n**Filters:** none\n**Assumed:** Orders include all statuses, including those later cancelled or returned.; The requested period predates the available data, which starts on January 1, 2025; any zero or empty result reflects missing coverage, not necessarily zero orders.; The data covers 2025-01-01 to 2026-11-14; nothing is recorded in the requested period, so the result is empty for that period.\n\nDoes this match your objective? Say \u2018go ahead\u2019 to run this plan, or tell me what to change.",
+    "questions": [
+     {
+      "question": "Is this what you want me to compute?",
+      "options": [],
+      "default": "",
+      "why": "Please confirm or tell me what to change"
+     }
+    ],
+    "plan_version": 1,
+    "readback": "**Measure:** Orders: Orders placed (any status, including later cancelled or returned).\n**Period:** 2024-12-01 to 2024-12-31\n**Filters:** none\n**Assumed:** Orders include all statuses, including those later cancelled or returned.; The requested period predates the available data, which starts on January 1, 2025; any zero or empty result reflects missing coverage, not necessarily zero orders.; The data covers 2025-01-01 to 2026-11-14; nothing is recorded in the requested period, so the result is empty for that period.",
+    "spec": {
+     "table": "sales",
+     "measures": [
+      {
+       "name": "orders",
+       "metric": "orders",
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": null
+      }
+     ],
+     "dimensions": [],
+     "filters": [],
+     "time": {
+      "field": null,
+      "start": "2024-12-01",
+      "end": "2024-12-31",
+      "grain": null
+     },
+     "ranking": null,
+     "shares": [],
+     "columns": [],
+     "limit": null,
+     "operation": null
+    },
+    "template": null,
+    "plan": [
+     {
+      "purpose": "How many orders were placed from December 1 through December 31, 2024?",
+      "spec": {
+       "table": "sales",
+       "measures": [
+        {
+         "name": "orders",
+         "metric": "orders",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        }
+       ],
+       "dimensions": [],
+       "filters": [],
+       "time": {
+        "field": null,
+        "start": "2024-12-01",
+        "end": "2024-12-31",
+        "grain": null
+       },
+       "ranking": null,
+       "shares": [],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\n  AND sales.placed_at >= CAST('2024-12-01' AS TIMESTAMP)\n  AND sales.placed_at < CAST('2025-01-01' AS TIMESTAMP)"
+     }
+    ],
+    "cost": {
+     "usd": 0.00303,
+     "calls": 2,
+     "input": 37425,
+     "cached": 37419,
+     "output": 231,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "execute",
+    "status": "done",
+    "detail": {
+     "seconds": 0.008396,
+     "queries": 1,
+     "query_seconds": 0.007181
+    },
+    "t": 1795358611.8247087
+   },
+   {
+    "type": "step",
+    "step": "analyse",
+    "status": "done",
+    "detail": {
+     "seconds": 0.00167
+    },
+    "t": 1795358611.827701
+   },
+   {
+    "type": "step",
+    "step": "reflect",
+    "status": "done",
+    "detail": {
+     "seconds": 1.3e-05
+    },
+    "t": 1795358611.8288357
+   },
+   {
+    "type": "step",
+    "step": "chart",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000913,
+     "charts": 1
+    },
+    "t": 1795358611.8307352
+   },
+   {
+    "type": "step",
+    "step": "remember",
+    "status": "done",
+    "detail": {
+     "seconds": 0.001112,
+     "facts": 0,
+     "gaps_closed": 0
+    },
+    "t": 1795358611.833266
+   }
+  ],
+  "result_correct": true,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": true,
+  "interactions": 1,
+  "first_turn_status": "clarify",
+  "first_turn_correct": true,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": true,
+  "confirmation_compliant": true,
+  "confirmations": 1,
+  "passed": true,
+  "reason": "match",
+  "failure_type": null,
+  "final_intent_correct": true,
+  "plan_sql_evidence_correct": true,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "holdout",
+  "set": "false_decline",
+  "id": "f06",
+  "question": "How many support contacts were about payments, including password-reset style login problems?",
+  "seconds": 3.797,
+  "status": "declined",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 3.8e-05,
+   "context": 0.000288,
+   "interpret": 3.790701
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 20003,
+    "cached_tokens": 20000,
+    "output_tokens": 226,
+    "usd": 0.002133,
+    "seconds": 3.77,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 3.773052,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.000288,
+  "narrative_faithfulness": null,
+  "message": "I can't answer this as a verified number yet. The available support issue categories include 'Payments', but do not identify a category for password resets or login problems. We can count contacts tagged 'Payments'; login attempts are recorded separately, but cannot be counted as support contacts.",
+  "cost": 0.00213,
+  "trust": null,
+  "spec": null,
+  "template": null,
+  "sql": null,
+  "grounded": null,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 3.8e-05
+    },
+    "t": 1795358611.8519897
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000288
+    },
+    "t": 1795358611.8532543
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "done",
+    "detail": {
+     "seconds": 3.790701,
+     "decision": "unanswerable",
+     "restated": "Count support contacts about payments, including password-reset or login problems.",
+     "reason": "The available support issue categories include 'Payments', but do not identify a category for password resets or login problems. We can count contacts tagged 'Payments'; login attempts are recorded separately, but cannot be counted as support contacts.",
+     "fast_path": false
+    },
+    "t": 1795358615.6436772
+   }
+  ],
+  "result_correct": null,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": null,
+  "interactions": 0,
+  "first_turn_status": "declined",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": false,
+  "confirmation_compliant": true,
+  "confirmations": 0,
+  "passed": false,
+  "reason": "declined",
+  "failure_type": "declined_wrongly",
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": null,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "holdout",
+  "set": "false_decline",
+  "id": "f08",
+  "question": "How many customers opted in to email and to SMS?",
+  "seconds": 8.776,
+  "status": "clarify",
+  "final_type": "clarify",
+  "final_kind": "clarify",
+  "stage_seconds": {
+   "check_input": 2.9e-05,
+   "context": 0.000598,
+   "interpret": 8.770086
+  },
+  "calls": [],
+  "retrieval_seconds": 0.000598,
+  "narrative_faithfulness": null,
+  "message": "I can read this question in more than one way. Which one do you mean? Possible meanings: Measure: email opted in customers: number of rows where email opt in is True (one row = customer) \u00b7 Measure: sms opted in customers: number of rows where sms opt in is True (one row = customer) \u00b7 Filters: none; Measure: customers opted in to both: number of rows (one row = customer) \u00b7 Filters: email opt in is True; sms opt in is True",
+  "cost": 0.00472,
+  "trust": null,
+  "spec": null,
+  "template": null,
+  "sql": null,
+  "grounded": null,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 2.9e-05
+    },
+    "t": 1795358615.6496572
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000598
+    },
+    "t": 1795358615.6513057
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 8.770086,
+     "decision": "clarify",
+     "restated": "How many customers are opted in to email marketing, and how many are opted in to SMS marketing?",
+     "reason": "",
+     "fast_path": false,
+     "round": 1,
+     "questions": [
+      "I can read this question in more than one way. Which one do you mean?"
+     ]
+    },
+    "t": 1795358624.4208012
+   },
+   {
+    "type": "clarify",
+    "run_id": "dd8842ec17f8",
+    "kind": "clarify",
+    "message": "I can read this question in more than one way. Which one do you mean? Possible meanings: Measure: email opted in customers: number of rows where email opt in is True (one row = customer) \u00b7 Measure: sms opted in customers: number of rows where sms opt in is True (one row = customer) \u00b7 Filters: none; Measure: customers opted in to both: number of rows (one row = customer) \u00b7 Filters: email opt in is True; sms opt in is True",
+    "questions": [
+     {
+      "question": "I can read this question in more than one way. Which one do you mean?",
+      "options": [
+       "Measure: email opted in customers: number of rows where email opt in is True (one row = customer) \u00b7 Measure: sms opted in customers: number of rows where sms opt in is True (one row = customer) \u00b7 Filters: none",
+       "Measure: customers opted in to both: number of rows (one row = customer) \u00b7 Filters: email opt in is True; sms opt in is True"
+      ],
+      "default": "Measure: email opted in customers: number of rows where email opt in is True (one row = customer) \u00b7 Measure: sms opted in customers: number of rows where sms opt in is True (one row = customer) \u00b7 Filters: none",
+      "why": "these readings use different business definitions or populations"
+     }
+    ],
+    "plan_version": 0,
+    "readback": null,
+    "spec": null,
+    "template": null,
+    "plan": [],
+    "cost": {
+     "usd": 0.00472,
+     "calls": 2,
+     "input": 37484,
+     "cached": 37478,
+     "output": 568,
+     "unknown_cost_calls": 0
+    }
+   }
+  ],
+  "result_correct": null,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": null,
+  "interactions": 0,
+  "first_turn_status": "clarify",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": false,
+  "confirmation_compliant": true,
+  "confirmations": 0,
+  "passed": false,
+  "reason": "asked a clarifying question",
+  "failure_type": "over_asked",
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": null,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "holdout",
+  "set": "overask",
+  "id": "o-x11",
+  "question": "What is the cancellation rate for COD versus prepaid orders?",
+  "seconds": 25.695,
+  "status": "done",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 4.2e-05,
+   "context": 0.000305,
+   "interpret": 8.058143,
+   "execute": 0.002217,
+   "analyse": 17.596048,
+   "reflect": 1.3e-05,
+   "chart": 0.018968,
+   "remember": 0.001606
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 19999,
+    "cached_tokens": 19996,
+    "output_tokens": 187,
+    "usd": 0.001938,
+    "seconds": 3.54,
+    "queue_seconds": 9e-06,
+    "inference_seconds": 3.54325,
+    "cost_known": true
+   },
+   {
+    "agent": "contrast",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 17403,
+    "cached_tokens": 17400,
+    "output_tokens": 294,
+    "usd": 0.002343,
+    "seconds": 4.47,
+    "queue_seconds": 9e-06,
+    "inference_seconds": 4.473058,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2061,
+    "cached_tokens": 1730,
+    "output_tokens": 569,
+    "usd": 0.003263,
+    "seconds": 7.4,
+    "queue_seconds": 7e-06,
+    "inference_seconds": 7.395282,
+    "cost_known": true
+   },
+   {
+    "agent": "analyst",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 2133,
+    "cached_tokens": 1730,
+    "output_tokens": 741,
+    "usd": 0.004195,
+    "seconds": 10.16,
+    "queue_seconds": 1.1e-05,
+    "inference_seconds": 10.162188,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.000305,
+  "narrative_faithfulness": null,
+  "message": null,
+  "cost": 0.01174,
+  "trust": "verified",
+  "spec": {
+   "table": "sales",
+   "measures": [
+    {
+     "name": "cancellation_rate",
+     "metric": "cancellation_rate",
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": null
+    }
+   ],
+   "dimensions": [
+    "payment_type"
+   ],
+   "filters": [],
+   "time": null,
+   "ranking": null,
+   "shares": [],
+   "columns": [],
+   "limit": null,
+   "operation": null
+  },
+  "template": null,
+  "sql": "SELECT\n  CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type,\n  (\n    COUNT(*) FILTER(WHERE\n      NOT sales.cancelled_at IS NULL)\n  ) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\nGROUP BY\n  1\nORDER BY\n  cancellation_rate DESC",
+  "grounded": true,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 4.2e-05
+    },
+    "t": 1795358624.4263256
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000305
+    },
+    "t": 1795358624.427955
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 8.058143,
+     "decision": "spec",
+     "restated": "Compare the cancellation rate for COD and prepaid purchases across all available history.",
+     "reason": "",
+     "fast_path": false,
+     "readback": "**Measure:** Cancellation rate: Share of order lines cancelled before shipping.\n**Split by:** payment type (COD or prepaid)\n**Period:** all available data\n**Filters:** none\n**Assumed:** Cancellation rate is the share of order lines cancelled before shipping, not the share of orders.; Prepaid includes every payment method other than COD.; No period was specified, so all available history is included."
+    },
+    "t": 1795358632.4858043
+   },
+   {
+    "type": "clarify",
+    "run_id": "935705f52415",
+    "kind": "confirm",
+    "message": "I understand you want to Compare the cancellation rate for COD and prepaid purchases across all available history.\n\n**Measure:** Cancellation rate: Share of order lines cancelled before shipping.\n**Split by:** payment type (COD or prepaid)\n**Period:** all available data\n**Filters:** none\n**Assumed:** Cancellation rate is the share of order lines cancelled before shipping, not the share of orders.; Prepaid includes every payment method other than COD.; No period was specified, so all available history is included.\n\nDoes this match your objective? Say \u2018go ahead\u2019 to run this plan, or tell me what to change.",
+    "questions": [
+     {
+      "question": "Is this what you want me to compute?",
+      "options": [],
+      "default": "",
+      "why": "Please confirm or tell me what to change"
+     }
+    ],
+    "plan_version": 1,
+    "readback": "**Measure:** Cancellation rate: Share of order lines cancelled before shipping.\n**Split by:** payment type (COD or prepaid)\n**Period:** all available data\n**Filters:** none\n**Assumed:** Cancellation rate is the share of order lines cancelled before shipping, not the share of orders.; Prepaid includes every payment method other than COD.; No period was specified, so all available history is included.",
+    "spec": {
+     "table": "sales",
+     "measures": [
+      {
+       "name": "cancellation_rate",
+       "metric": "cancellation_rate",
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": null
+      }
+     ],
+     "dimensions": [
+      "payment_type"
+     ],
+     "filters": [],
+     "time": null,
+     "ranking": null,
+     "shares": [],
+     "columns": [],
+     "limit": null,
+     "operation": null
+    },
+    "template": null,
+    "plan": [
+     {
+      "purpose": "Compare the cancellation rate for COD and prepaid purchases across all available history.",
+      "spec": {
+       "table": "sales",
+       "measures": [
+        {
+         "name": "cancellation_rate",
+         "metric": "cancellation_rate",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        }
+       ],
+       "dimensions": [
+        "payment_type"
+       ],
+       "filters": [],
+       "time": null,
+       "ranking": null,
+       "shares": [],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type,\n  (\n    COUNT(*) FILTER(WHERE\n      NOT sales.cancelled_at IS NULL)\n  ) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\nGROUP BY\n  1\nORDER BY\n  cancellation_rate DESC"
+     }
+    ],
+    "cost": {
+     "usd": 0.00428,
+     "calls": 2,
+     "input": 37402,
+     "cached": 37396,
+     "output": 481,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "execute",
+    "status": "done",
+    "detail": {
+     "seconds": 0.002217,
+     "queries": 1,
+     "query_seconds": 0.001257
+    },
+    "t": 1795358632.4939082
+   },
+   {
+    "type": "step",
+    "step": "analyse",
+    "status": "done",
+    "detail": {
+     "seconds": 17.596048
+    },
+    "t": 1795358650.091244
+   },
+   {
+    "type": "step",
+    "step": "reflect",
+    "status": "done",
+    "detail": {
+     "seconds": 1.3e-05
+    },
+    "t": 1795358650.092708
+   },
+   {
+    "type": "step",
+    "step": "chart",
+    "status": "done",
+    "detail": {
+     "seconds": 0.018968,
+     "charts": 1
+    },
+    "t": 1795358650.1128483
+   },
+   {
+    "type": "step",
+    "step": "remember",
+    "status": "done",
+    "detail": {
+     "seconds": 0.001606,
+     "facts": 2,
+     "gaps_closed": 0
+    },
+    "t": 1795358650.1158822
+   }
+  ],
+  "result_correct": null,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": null,
+  "interactions": 1,
+  "first_turn_status": "clarify",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": true,
+  "confirmation_compliant": true,
+  "confirmations": 1,
+  "passed": true,
+  "reason": "understood",
+  "failure_type": null,
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": null,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "holdout",
+  "set": "overask",
+  "id": "o-z01",
+  "question": "How many orders were placed in December 2024?",
+  "seconds": 5.758,
+  "status": "done",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 2.5e-05,
+   "context": 0.000252,
+   "interpret": 5.733891,
+   "execute": 0.00262,
+   "analyse": 0.002269,
+   "reflect": 1.3e-05,
+   "chart": 0.0007,
+   "remember": 0.001457
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 19999,
+    "cached_tokens": 19996,
+    "output_tokens": 196,
+    "usd": 0.001983,
+    "seconds": 3.44,
+    "queue_seconds": 7e-06,
+    "inference_seconds": 3.441268,
+    "cost_known": true
+   },
+   {
+    "agent": "contrast",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 17426,
+    "cached_tokens": 17423,
+    "output_tokens": 16,
+    "usd": 0.000954,
+    "seconds": 2.26,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 2.263869,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.000252,
+  "narrative_faithfulness": null,
+  "message": null,
+  "cost": 0.00294,
+  "trust": "verified",
+  "spec": {
+   "table": "sales",
+   "measures": [
+    {
+     "name": "orders",
+     "metric": "orders",
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": null
+    }
+   ],
+   "dimensions": [],
+   "filters": [],
+   "time": {
+    "field": null,
+    "start": "2024-12-01",
+    "end": "2024-12-31",
+    "grain": null
+   },
+   "ranking": null,
+   "shares": [],
+   "columns": [],
+   "limit": null,
+   "operation": null
+  },
+  "template": null,
+  "sql": "SELECT\n  COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\n  AND sales.placed_at >= CAST('2024-12-01' AS TIMESTAMP)\n  AND sales.placed_at < CAST('2025-01-01' AS TIMESTAMP)",
+  "grounded": true,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 2.5e-05
+    },
+    "t": 1795358650.121355
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000252
+    },
+    "t": 1795358650.1225407
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 5.733891,
+     "decision": "spec",
+     "restated": "How many orders were placed in December 2024?",
+     "reason": "",
+     "fast_path": false,
+     "readback": "**Measure:** Orders: Orders placed (any status, including later cancelled or returned).\n**Period:** 2024-12-01 to 2024-12-31\n**Filters:** none\n**Assumed:** Orders include all statuses, including orders later cancelled or returned.; The available data starts on 1 January 2025, so December 2024 is outside its coverage.; The data covers 2025-01-01 to 2026-11-14; nothing is recorded in the requested period, so the result is empty for that period."
+    },
+    "t": 1795358655.8561895
+   },
+   {
+    "type": "clarify",
+    "run_id": "3cde0838b163",
+    "kind": "confirm",
+    "message": "I understand you want to How many orders were placed in December 2024.\n\n**Measure:** Orders: Orders placed (any status, including later cancelled or returned).\n**Period:** 2024-12-01 to 2024-12-31\n**Filters:** none\n**Assumed:** Orders include all statuses, including orders later cancelled or returned.; The available data starts on 1 January 2025, so December 2024 is outside its coverage.; The data covers 2025-01-01 to 2026-11-14; nothing is recorded in the requested period, so the result is empty for that period.\n\nDoes this match your objective? Say \u2018go ahead\u2019 to run this plan, or tell me what to change.",
+    "questions": [
+     {
+      "question": "Is this what you want me to compute?",
+      "options": [],
+      "default": "",
+      "why": "Please confirm or tell me what to change"
+     }
+    ],
+    "plan_version": 1,
+    "readback": "**Measure:** Orders: Orders placed (any status, including later cancelled or returned).\n**Period:** 2024-12-01 to 2024-12-31\n**Filters:** none\n**Assumed:** Orders include all statuses, including orders later cancelled or returned.; The available data starts on 1 January 2025, so December 2024 is outside its coverage.; The data covers 2025-01-01 to 2026-11-14; nothing is recorded in the requested period, so the result is empty for that period.",
+    "spec": {
+     "table": "sales",
+     "measures": [
+      {
+       "name": "orders",
+       "metric": "orders",
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": null
+      }
+     ],
+     "dimensions": [],
+     "filters": [],
+     "time": {
+      "field": null,
+      "start": "2024-12-01",
+      "end": "2024-12-31",
+      "grain": null
+     },
+     "ranking": null,
+     "shares": [],
+     "columns": [],
+     "limit": null,
+     "operation": null
+    },
+    "template": null,
+    "plan": [
+     {
+      "purpose": "How many orders were placed in December 2024?",
+      "spec": {
+       "table": "sales",
+       "measures": [
+        {
+         "name": "orders",
+         "metric": "orders",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        }
+       ],
+       "dimensions": [],
+       "filters": [],
+       "time": {
+        "field": null,
+        "start": "2024-12-01",
+        "end": "2024-12-31",
+        "grain": null
+       },
+       "ranking": null,
+       "shares": [],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE\n  sales.line_type = 'Sale'\n  AND sales.placed_at >= CAST('2024-12-01' AS TIMESTAMP)\n  AND sales.placed_at < CAST('2025-01-01' AS TIMESTAMP)"
+     }
+    ],
+    "cost": {
+     "usd": 0.00294,
+     "calls": 2,
+     "input": 37425,
+     "cached": 37419,
+     "output": 212,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "execute",
+    "status": "done",
+    "detail": {
+     "seconds": 0.00262,
+     "queries": 1,
+     "query_seconds": 0.00154
+    },
+    "t": 1795358655.8647768
+   },
+   {
+    "type": "step",
+    "step": "analyse",
+    "status": "done",
+    "detail": {
+     "seconds": 0.002269
+    },
+    "t": 1795358655.8681464
+   },
+   {
+    "type": "step",
+    "step": "reflect",
+    "status": "done",
+    "detail": {
+     "seconds": 1.3e-05
+    },
+    "t": 1795358655.8692136
+   },
+   {
+    "type": "step",
+    "step": "chart",
+    "status": "done",
+    "detail": {
+     "seconds": 0.0007,
+     "charts": 1
+    },
+    "t": 1795358655.8718731
+   },
+   {
+    "type": "step",
+    "step": "remember",
+    "status": "done",
+    "detail": {
+     "seconds": 0.001457,
+     "facts": 0,
+     "gaps_closed": 0
+    },
+    "t": 1795358655.874203
+   }
+  ],
+  "result_correct": null,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": null,
+  "interactions": 1,
+  "first_turn_status": "clarify",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": true,
+  "confirmation_compliant": true,
+  "confirmations": 1,
+  "passed": true,
+  "reason": "understood",
+  "failure_type": null,
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": null,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "coverage",
+  "set": "answer",
+  "id": "c06",
+  "question": "How many clearance price changes started in 2026 in each product category?",
+  "seconds": 7.118,
+  "status": "failed",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 3.6e-05,
+   "context": 0.000261,
+   "interpret": 7.105423,
+   "execute": 0.000716
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 20003,
+    "cached_tokens": 20000,
+    "output_tokens": 225,
+    "usd": 0.002128,
+    "seconds": 4.18,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 4.180573,
+    "cost_known": true
+   },
+   {
+    "agent": "contrast",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 17461,
+    "cached_tokens": 17458,
+    "output_tokens": 28,
+    "usd": 0.001016,
+    "seconds": 2.89,
+    "queue_seconds": 1e-05,
+    "inference_seconds": 2.8914,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.000261,
+  "narrative_faithfulness": null,
+  "message": "This exact plan needs explicit confirmation before execution.",
+  "cost": 0.00314,
+  "trust": null,
+  "spec": {
+   "table": "price_history",
+   "measures": [
+    {
+     "name": "clearance_price_changes",
+     "metric": null,
+     "agg": "count",
+     "field": null,
+     "where": [],
+     "ratio": null
+    }
+   ],
+   "dimensions": [
+    "category"
+   ],
+   "filters": [
+    {
+     "field": "price_change_reason",
+     "op": "eq",
+     "values": [
+      "Clearance"
+     ],
+     "other": null
+    }
+   ],
+   "time": {
+    "field": null,
+    "start": "2026-01-01",
+    "end": "2026-12-31",
+    "grain": null
+   },
+   "ranking": null,
+   "shares": [],
+   "columns": [],
+   "limit": null,
+   "operation": null
+  },
+  "template": null,
+  "sql": null,
+  "grounded": null,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 3.6e-05
+    },
+    "t": 1795358655.8797517
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000261
+    },
+    "t": 1795358655.8812203
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 7.105423,
+     "decision": "spec",
+     "restated": "How many clearance price periods began in 2026, by product category?",
+     "reason": "",
+     "fast_path": false,
+     "readback": "**Measure:** clearance price changes: number of rows (one row = product price period)\n**Split by:** product category\n**Period:** 2026-01-01 to 2026-12-31\n**Filters:** price change reason is Clearance\n**Assumed:** Counts price periods classified as Clearance by their start date, not distinct products.; Data is available through 14 November 2026, so the year is incomplete.; The data covers 2025-01-01 to 2026-11-14; the result covers 2026-01-01 to 2026-11-14, the observed part of the requested period."
+    },
+    "t": 1795358662.9863908
+   },
+   {
+    "type": "clarify",
+    "run_id": "d2ecc7ce686e",
+    "kind": "confirm",
+    "message": "I understand you want to How many clearance price periods began in 2026, by product category.\n\n**Measure:** clearance price changes: number of rows (one row = product price period)\n**Split by:** product category\n**Period:** 2026-01-01 to 2026-12-31\n**Filters:** price change reason is Clearance\n**Assumed:** Counts price periods classified as Clearance by their start date, not distinct products.; Data is available through 14 November 2026, so the year is incomplete.; The data covers 2025-01-01 to 2026-11-14; the result covers 2026-01-01 to 2026-11-14, the observed part of the requested period.\n\nDoes this match your objective? Say \u2018go ahead\u2019 to run this plan, or tell me what to change.",
+    "questions": [
+     {
+      "question": "Is this what you want me to compute?",
+      "options": [],
+      "default": "",
+      "why": "Please confirm or tell me what to change"
+     }
+    ],
+    "plan_version": 1,
+    "readback": "**Measure:** clearance price changes: number of rows (one row = product price period)\n**Split by:** product category\n**Period:** 2026-01-01 to 2026-12-31\n**Filters:** price change reason is Clearance\n**Assumed:** Counts price periods classified as Clearance by their start date, not distinct products.; Data is available through 14 November 2026, so the year is incomplete.; The data covers 2025-01-01 to 2026-11-14; the result covers 2026-01-01 to 2026-11-14, the observed part of the requested period.",
+    "spec": {
+     "table": "price_history",
+     "measures": [
+      {
+       "name": "clearance_price_changes",
+       "metric": null,
+       "agg": "count",
+       "field": null,
+       "where": [],
+       "ratio": null
+      }
+     ],
+     "dimensions": [
+      "category"
+     ],
+     "filters": [
+      {
+       "field": "price_change_reason",
+       "op": "eq",
+       "values": [
+        "Clearance"
+       ],
+       "other": null
+      }
+     ],
+     "time": {
+      "field": null,
+      "start": "2026-01-01",
+      "end": "2026-12-31",
+      "grain": null
+     },
+     "ranking": null,
+     "shares": [],
+     "columns": [],
+     "limit": null,
+     "operation": null
+    },
+    "template": null,
+    "plan": [
+     {
+      "purpose": "How many clearance price periods began in 2026, by product category?",
+      "spec": {
+       "table": "price_history",
+       "measures": [
+        {
+         "name": "clearance_price_changes",
+         "metric": null,
+         "agg": "count",
+         "field": null,
+         "where": [],
+         "ratio": null
+        }
+       ],
+       "dimensions": [
+        "category"
+       ],
+       "filters": [
+        {
+         "field": "price_change_reason",
+         "op": "eq",
+         "values": [
+          "Clearance"
+         ],
+         "other": null
+        }
+       ],
+       "time": {
+        "field": null,
+        "start": "2026-01-01",
+        "end": "2026-12-31",
+        "grain": null
+       },
+       "ranking": null,
+       "shares": [],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  product_master.category AS category,\n  COUNT(*) AS clearance_price_changes\nFROM price_history\nLEFT JOIN product_master\n  ON price_history.product_id = product_master.product_id\nWHERE\n  price_history.price_change_reason = 'Clearance'\n  AND price_history.valid_from >= CAST('2026-01-01' AS TIMESTAMP)\n  AND price_history.valid_from < CAST('2027-01-01' AS TIMESTAMP)\nGROUP BY\n  1\nORDER BY\n  clearance_price_changes DESC"
+     }
+    ],
+    "cost": {
+     "usd": 0.00314,
+     "calls": 2,
+     "input": 37464,
+     "cached": 37458,
+     "output": 253,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "execute",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000716
+    },
+    "t": 1795358662.9923856
+   }
+  ],
+  "result_correct": false,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": true,
+  "interactions": 1,
+  "first_turn_status": "clarify",
+  "first_turn_correct": true,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": true,
+  "confirmation_compliant": true,
+  "confirmations": 1,
+  "passed": false,
+  "reason": "no answer (failed: This exact plan needs explicit confirmation before execution.)",
+  "failure_type": "failed",
+  "final_intent_correct": true,
+  "plan_sql_evidence_correct": false,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "coverage",
+  "set": "answer",
+  "id": "c24",
+  "question": "How was paid ad spend split across targeted regions in 2026, and what click-through rate did the ads get in each?",
+  "seconds": 8.373,
+  "status": "failed",
+  "final_type": "final",
+  "final_kind": null,
+  "stage_seconds": {
+   "check_input": 5.2e-05,
+   "context": 0.000272,
+   "interpret": 8.34733,
+   "execute": 0.001146
+  },
+  "calls": [
+   {
+    "agent": "interpreter",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 20014,
+    "cached_tokens": 20011,
+    "output_tokens": 399,
+    "usd": 0.002999,
+    "seconds": 6.65,
+    "queue_seconds": 8e-06,
+    "inference_seconds": 6.653325,
+    "cost_known": true
+   },
+   {
+    "agent": "contrast",
+    "model": "openai:gpt-6.1-terra",
+    "input_tokens": 17605,
+    "cached_tokens": 17291,
+    "output_tokens": 36,
+    "usd": 0.001359,
+    "seconds": 1.64,
+    "queue_seconds": 1.1e-05,
+    "inference_seconds": 1.643328,
+    "cost_known": true
+   }
+  ],
+  "retrieval_seconds": 0.000272,
+  "narrative_faithfulness": null,
+  "message": "This exact plan needs explicit confirmation before execution.",
+  "cost": 0.00436,
+  "trust": null,
+  "spec": {
+   "table": "marketing_spend",
+   "measures": [
+    {
+     "name": "paid_ad_spend",
+     "metric": "marketing_spend",
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": null
+    },
+    {
+     "name": "ad_clicks",
+     "metric": null,
+     "agg": "sum",
+     "field": "marketing_spend.clicks",
+     "where": [],
+     "ratio": null
+    },
+    {
+     "name": "ad_impressions",
+     "metric": null,
+     "agg": "sum",
+     "field": "marketing_spend.impressions",
+     "where": [],
+     "ratio": null
+    },
+    {
+     "name": "ad_click_through_rate",
+     "metric": null,
+     "agg": null,
+     "field": null,
+     "where": [],
+     "ratio": [
+      "ad_clicks",
+      "ad_impressions"
+     ]
+    }
+   ],
+   "dimensions": [
+    "region"
+   ],
+   "filters": [
+    {
+     "field": "channel_group",
+     "op": "in",
+     "values": [
+      "Paid Search",
+      "Paid Social",
+      "Display"
+     ],
+     "other": null
+    }
+   ],
+   "time": {
+    "field": null,
+    "start": "2026-01-01",
+    "end": "2026-12-31",
+    "grain": null
+   },
+   "ranking": null,
+   "shares": [
+    "paid_ad_spend"
+   ],
+   "columns": [],
+   "limit": null,
+   "operation": null
+  },
+  "template": null,
+  "sql": null,
+  "grounded": null,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 5.2e-05
+    },
+    "t": 1795358662.9972165
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000272
+    },
+    "t": 1795358663.000008
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 8.34733,
+     "decision": "spec",
+     "restated": "For paid media in 2026, show spend and its share by targeted region, alongside ad click-through rate in each region.",
+     "reason": "",
+     "fast_path": false,
+     "readback": "**Measure:** Marketing spend: Money spent on paid media, affiliates and CRM messages.\n**Measure:** ad clicks: sum of clicks (one row = campaign-hour ad delivery)\n**Measure:** ad impressions: sum of impressions (one row = campaign-hour ad delivery)\n**Measure:** ad click through rate = ad clicks / ad impressions\n**Split by:** customers' / delivery region\n**Period:** 2026-01-01 to 2026-12-31\n**Filters:** marketing channel group is Paid Search or Paid Social or Display\n**Also shown:** share of the total for paid ad spend\n**Assumed:** Paid ads include paid search, paid social and display; affiliate and CRM are excluded.; Ad click-through rate is ad clicks divided by ad impressions, not the product-list CTR metric.; 2026 data is available through 14 November; the remainder of the year is not observed.; The data covers 2025-01-01 to 2026-11-14; the result covers 2026-01-01 to 2026-11-14, the observed part of the requested period."
+    },
+    "t": 1795358671.3470876
+   },
+   {
+    "type": "clarify",
+    "run_id": "d32579d21bd6",
+    "kind": "confirm",
+    "message": "I understand you want to For paid media in 2026, show spend and its share by targeted region, alongside ad click-through rate in each region.\n\n**Measure:** Marketing spend: Money spent on paid media, affiliates and CRM messages.\n**Measure:** ad clicks: sum of clicks (one row = campaign-hour ad delivery)\n**Measure:** ad impressions: sum of impressions (one row = campaign-hour ad delivery)\n**Measure:** ad click through rate = ad clicks / ad impressions\n**Split by:** customers' / delivery region\n**Period:** 2026-01-01 to 2026-12-31\n**Filters:** marketing channel group is Paid Search or Paid Social or Display\n**Also shown:** share of the total for paid ad spend\n**Assumed:** Paid ads include paid search, paid social and display; affiliate and CRM are excluded.; Ad click-through rate is ad clicks divided by ad impressions, not the product-list CTR metric.; 2026 data is available through 14 November; the remainder of the year is not observed.; The data covers 2025-01-01 to 2026-11-14; the result covers 2026-01-01 to 2026-11-14, the observed part of the requested period.\n\nDoes this match your objective? Say \u2018go ahead\u2019 to run this plan, or tell me what to change.",
+    "questions": [
+     {
+      "question": "Is this what you want me to compute?",
+      "options": [],
+      "default": "",
+      "why": "Please confirm or tell me what to change"
+     }
+    ],
+    "plan_version": 1,
+    "readback": "**Measure:** Marketing spend: Money spent on paid media, affiliates and CRM messages.\n**Measure:** ad clicks: sum of clicks (one row = campaign-hour ad delivery)\n**Measure:** ad impressions: sum of impressions (one row = campaign-hour ad delivery)\n**Measure:** ad click through rate = ad clicks / ad impressions\n**Split by:** customers' / delivery region\n**Period:** 2026-01-01 to 2026-12-31\n**Filters:** marketing channel group is Paid Search or Paid Social or Display\n**Also shown:** share of the total for paid ad spend\n**Assumed:** Paid ads include paid search, paid social and display; affiliate and CRM are excluded.; Ad click-through rate is ad clicks divided by ad impressions, not the product-list CTR metric.; 2026 data is available through 14 November; the remainder of the year is not observed.; The data covers 2025-01-01 to 2026-11-14; the result covers 2026-01-01 to 2026-11-14, the observed part of the requested period.",
+    "spec": {
+     "table": "marketing_spend",
+     "measures": [
+      {
+       "name": "paid_ad_spend",
+       "metric": "marketing_spend",
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": null
+      },
+      {
+       "name": "ad_clicks",
+       "metric": null,
+       "agg": "sum",
+       "field": "marketing_spend.clicks",
+       "where": [],
+       "ratio": null
+      },
+      {
+       "name": "ad_impressions",
+       "metric": null,
+       "agg": "sum",
+       "field": "marketing_spend.impressions",
+       "where": [],
+       "ratio": null
+      },
+      {
+       "name": "ad_click_through_rate",
+       "metric": null,
+       "agg": null,
+       "field": null,
+       "where": [],
+       "ratio": [
+        "ad_clicks",
+        "ad_impressions"
+       ]
+      }
+     ],
+     "dimensions": [
+      "region"
+     ],
+     "filters": [
+      {
+       "field": "channel_group",
+       "op": "in",
+       "values": [
+        "Paid Search",
+        "Paid Social",
+        "Display"
+       ],
+       "other": null
+      }
+     ],
+     "time": {
+      "field": null,
+      "start": "2026-01-01",
+      "end": "2026-12-31",
+      "grain": null
+     },
+     "ranking": null,
+     "shares": [
+      "paid_ad_spend"
+     ],
+     "columns": [],
+     "limit": null,
+     "operation": null
+    },
+    "template": null,
+    "plan": [
+     {
+      "purpose": "For paid media in 2026, show spend and its share by targeted region, alongside ad click-through rate in each region.",
+      "spec": {
+       "table": "marketing_spend",
+       "measures": [
+        {
+         "name": "paid_ad_spend",
+         "metric": "marketing_spend",
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": null
+        },
+        {
+         "name": "ad_clicks",
+         "metric": null,
+         "agg": "sum",
+         "field": "marketing_spend.clicks",
+         "where": [],
+         "ratio": null
+        },
+        {
+         "name": "ad_impressions",
+         "metric": null,
+         "agg": "sum",
+         "field": "marketing_spend.impressions",
+         "where": [],
+         "ratio": null
+        },
+        {
+         "name": "ad_click_through_rate",
+         "metric": null,
+         "agg": null,
+         "field": null,
+         "where": [],
+         "ratio": [
+          "ad_clicks",
+          "ad_impressions"
+         ]
+        }
+       ],
+       "dimensions": [
+        "region"
+       ],
+       "filters": [
+        {
+         "field": "channel_group",
+         "op": "in",
+         "values": [
+          "Paid Search",
+          "Paid Social",
+          "Display"
+         ],
+         "other": null
+        }
+       ],
+       "time": {
+        "field": null,
+        "start": "2026-01-01",
+        "end": "2026-12-31",
+        "grain": null
+       },
+       "ranking": null,
+       "shares": [
+        "paid_ad_spend"
+       ],
+       "columns": [],
+       "limit": null,
+       "operation": null
+      },
+      "template": null,
+      "sql": "SELECT\n  q.region,\n  q.paid_ad_spend,\n  q.ad_clicks,\n  q.ad_impressions,\n  q.ad_click_through_rate,\n  q.paid_ad_spend * 1.0 / NULLIF(SUM(q.paid_ad_spend) OVER (), 0) AS paid_ad_spend_share\nFROM (\n  SELECT\n    marketing_spend.region AS region,\n    SUM(marketing_spend.spend) AS paid_ad_spend,\n    SUM(marketing_spend.clicks) AS ad_clicks,\n    SUM(marketing_spend.impressions) AS ad_impressions,\n    (\n      SUM(marketing_spend.clicks)\n    ) * 1.0 / NULLIF((\n      SUM(marketing_spend.impressions)\n    ), 0) AS ad_click_through_rate\n  FROM marketing_spend\n  LEFT JOIN campaigns\n    ON marketing_spend.campaign_id = campaigns.campaign_id\n  WHERE\n    campaigns.channel_group IN ('Paid Search', 'Paid Social', 'Display')\n    AND marketing_spend.date_hour >= CAST('2026-01-01' AS TIMESTAMP)\n    AND marketing_spend.date_hour < CAST('2027-01-01' AS TIMESTAMP)\n  GROUP BY\n    1\n) AS q\nORDER BY\n  paid_ad_spend DESC"
+     }
+    ],
+    "cost": {
+     "usd": 0.00436,
+     "calls": 2,
+     "input": 37619,
+     "cached": 37302,
+     "output": 435,
+     "unknown_cost_calls": 0
+    }
+   },
+   {
+    "type": "step",
+    "step": "execute",
+    "status": "done",
+    "detail": {
+     "seconds": 0.001146
+    },
+    "t": 1795358671.3646772
+   }
+  ],
+  "result_correct": false,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": false,
+  "interactions": 1,
+  "first_turn_status": "clarify",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": true,
+  "confirmation_compliant": true,
+  "confirmations": 1,
+  "passed": false,
+  "reason": "no answer (failed: This exact plan needs explicit confirmation before execution.)",
+  "failure_type": "failed",
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": false,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "flow",
+  "set": "clarify",
+  "id": "flow-typo",
+  "question": "How many orders were shipped to Mumbay across all available dates?",
+  "seconds": 7.919,
+  "status": "clarify",
+  "final_type": "clarify",
+  "final_kind": "clarify",
+  "stage_seconds": {
+   "check_input": 3.6e-05,
+   "context": 0.000356,
+   "interpret": 7.905187
+  },
+  "calls": [],
+  "retrieval_seconds": 0.000356,
+  "narrative_faithfulness": null,
+  "message": "I can read this question in more than one way. Which one do you mean? Possible meanings: Filters: customers' / delivery city is Mumbai; shipped at is recorded; Filters: customers' / delivery city is Mumbai",
+  "cost": 0.00384,
+  "trust": null,
+  "spec": null,
+  "template": null,
+  "sql": null,
+  "grounded": null,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 3.6e-05
+    },
+    "t": 1795358671.3745875
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000356
+    },
+    "t": 1795358671.3763382
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 7.905187,
+     "decision": "clarify",
+     "restated": "How many orders shipped to Mumbai across all available dates?",
+     "reason": "",
+     "fast_path": false,
+     "round": 1,
+     "questions": [
+      "I can read this question in more than one way. Which one do you mean?"
+     ]
+    },
+    "t": 1795358679.2811995
+   },
+   {
+    "type": "clarify",
+    "run_id": "a497a4ffbf2b",
+    "kind": "clarify",
+    "message": "I can read this question in more than one way. Which one do you mean? Possible meanings: Filters: customers' / delivery city is Mumbai; shipped at is recorded; Filters: customers' / delivery city is Mumbai",
+    "questions": [
+     {
+      "question": "I can read this question in more than one way. Which one do you mean?",
+      "options": [
+       "Filters: customers' / delivery city is Mumbai; shipped at is recorded",
+       "Filters: customers' / delivery city is Mumbai"
+      ],
+      "default": "Filters: customers' / delivery city is Mumbai; shipped at is recorded",
+      "why": "these readings use different business definitions or populations"
+     }
+    ],
+    "plan_version": 0,
+    "readback": null,
+    "spec": null,
+    "template": null,
+    "plan": [],
+    "cost": {
+     "usd": 0.00384,
+     "calls": 2,
+     "input": 37448,
+     "cached": 37442,
+     "output": 392,
+     "unknown_cost_calls": 0
+    }
+   }
+  ],
+  "result_correct": null,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": null,
+  "interactions": 0,
+  "first_turn_status": "clarify",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": false,
+  "confirmation_compliant": true,
+  "confirmations": 0,
+  "passed": true,
+  "reason": "asked",
+  "failure_type": null,
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": null,
+  "snapshot_verified": true
+ },
+ {
+  "code_revision": "1775b02c13c7181f26bdc0fe95134939189bba8b",
+  "working_tree_dirty": false,
+  "source_sha256": "2908175dc07e943578330a001e72932c4bb783ecf4678a5147cc06ed64d8ea3a",
+  "data_sha256": "d1145af6e317e0314c52652f7afe050c67c1f7e5858766c1d3f880566a906f74",
+  "data_manifest": {
+   "size": "small",
+   "seed": 42,
+   "first_day": "2025-01-01",
+   "last_day": "2026-11-14",
+   "package_version": "1.0.0",
+   "n_products": 1500,
+   "n_sellers": 80,
+   "traffic_scale": 0.17,
+   "daily_new_visitors": 30.0
+  },
+  "cases_sha256": "14199d5b0633f4740d08db76d8d717d30a33bc523c1800b6079feaac54151554",
+  "scorer_version": "strict-v1",
+  "python": "3.13.18",
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.1",
+   "sqlglot": "30.31.0",
+   "langgraph": "1.2.22"
+  },
+  "settings": {
+   "model_main": "openai:gpt-6.1-terra",
+   "model_light": "openai:gpt-6-luna",
+   "temperature": null,
+   "contrast_check": true,
+   "query_timeout_s": 30.0,
+   "max_rows": 500
+  },
+  "evaluation_mode": "user",
+  "model": "openai:gpt-6.1-terra",
+  "repeat": 0,
+  "preparation_seconds": 6.6345892159997675,
+  "memory_mode": "isolated_per_question",
+  "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
+  "suite": "flow",
+  "set": "answer",
+  "id": "flow-context",
+  "question": "Now split those orders by payment method, keeping that same city and all available dates.",
+  "seconds": 4.493,
+  "status": "clarify",
+  "final_type": "clarify",
+  "final_kind": "clarify",
+  "stage_seconds": {
+   "check_input": 5.4e-05,
+   "context": 0.000632,
+   "interpret": 4.485602
+  },
+  "calls": [],
+  "retrieval_seconds": 0.000632,
+  "narrative_faithfulness": null,
+  "message": "Which earlier groups should I use? Please run their analysis first or name the groups.",
+  "cost": 0.00253,
+  "trust": null,
+  "spec": null,
+  "template": null,
+  "sql": null,
+  "grounded": null,
+  "trace": [
+   {
+    "type": "step",
+    "step": "check_input",
+    "status": "done",
+    "detail": {
+     "seconds": 5.4e-05
+    },
+    "t": 1795358679.2912128
+   },
+   {
+    "type": "step",
+    "step": "context",
+    "status": "done",
+    "detail": {
+     "seconds": 0.000632
+    },
+    "t": 1795358679.2931113
+   },
+   {
+    "type": "step",
+    "step": "interpret",
+    "status": "needs_input",
+    "detail": {
+     "seconds": 4.485602,
+     "decision": "clarify",
+     "restated": "",
+     "reason": "",
+     "fast_path": false,
+     "round": 1,
+     "questions": [
+      "Which earlier groups should I use? Please run their analysis first or name the groups."
+     ]
+    },
+    "t": 1795358683.7780921
+   },
+   {
+    "type": "clarify",
+    "run_id": "c026cf0434c6",
+    "kind": "clarify",
+    "message": "Which earlier groups should I use? Please run their analysis first or name the groups.",
+    "questions": [
+     {
+      "question": "Which earlier groups should I use? Please run their analysis first or name the groups.",
+      "options": [],
+      "default": "",
+      "why": "A result reference needs complete verified evidence"
+     }
+    ],
+    "plan_version": 0,
+    "readback": null,
+    "spec": null,
+    "template": null,
+    "plan": [],
+    "cost": {
+     "usd": 0.00253,
+     "calls": 1,
+     "input": 20067,
+     "cached": 20064,
+     "output": 304,
+     "unknown_cost_calls": 0
+    }
+   }
+  ],
+  "result_correct": false,
+  "questions": 0,
+  "corrections": 0,
+  "first_reading": null,
+  "interactions": 0,
+  "first_turn_status": "clarify",
+  "first_turn_correct": false,
+  "first_turn_answered": false,
+  "first_turn_plan_ready": false,
+  "confirmation_compliant": true,
+  "confirmations": 0,
+  "passed": false,
+  "reason": "still unresolved after the stakeholder's answers",
+  "failure_type": "unresolved",
+  "final_intent_correct": false,
+  "plan_sql_evidence_correct": false,
+  "snapshot_verified": true
+ }
+]
