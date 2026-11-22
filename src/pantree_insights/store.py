@@ -139,6 +139,13 @@ usage = Table(
 
 
 class Store:
+    def _upsert(self, table):
+        if self.engine.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        return dialect_insert(table)
+
     def __init__(self, url: str | None = None):
         url = url or get_settings().database_url
         if url.startswith("postgres://"):
@@ -250,28 +257,26 @@ class Store:
     def new_email_code(self, email: str, minutes: int = 10) -> str | None:
         """A 6-digit code, or None if one was sent less than 60 seconds ago (rate limit)."""
         email = email.strip().lower()
-        existing = self._one(select(email_codes).where(email_codes.c.email == email))
-        if existing and existing["sent_at"] > _now() - timedelta(seconds=60):
-            return None
         code = f"{secrets.randbelow(10**6):06d}"
         values = {"code_hash": hashlib.sha256(f"{email}:{code}".encode()).hexdigest(),
                   "expires_at": _now() + timedelta(minutes=minutes), "attempts": 0, "sent_at": _now()}
         with self.engine.begin() as c:
-            c.execute(delete(email_codes).where(email_codes.c.email == email))
-            c.execute(insert(email_codes).values(email=email, **values))
-        return code
+            inserted = c.execute(self._upsert(email_codes).values(email=email, **values).on_conflict_do_update(
+                index_elements=[email_codes.c.email], set_=values,
+                where=email_codes.c.sent_at <= _now() - timedelta(seconds=60)).returning(email_codes.c.email)).first()
+        return code if inserted else None
 
     def check_email_code(self, email: str, code: str) -> bool:
         email = email.strip().lower()
-        row = self._one(select(email_codes).where(email_codes.c.email == email))
-        if not row or row["expires_at"] < _now() or row["attempts"] >= 5:
-            return False
-        ok = secrets.compare_digest(row["code_hash"], hashlib.sha256(f"{email}:{code.strip()}".encode()).hexdigest())
-        if ok:
-            self._exec(delete(email_codes).where(email_codes.c.email == email))
-        else:
-            self._exec(update(email_codes).where(email_codes.c.email == email).values(attempts=row["attempts"] + 1))
-        return ok
+        with self.engine.begin() as c:
+            row = c.execute(update(email_codes).where(email_codes.c.email == email,
+                email_codes.c.expires_at >= _now(), email_codes.c.attempts < 5)
+                .values(attempts=email_codes.c.attempts + 1).returning(email_codes.c.code_hash)).first()
+            digest = hashlib.sha256(f"{email}:{code.strip()}".encode()).hexdigest()
+            if not row or not secrets.compare_digest(row[0], digest):
+                return False
+            return c.execute(delete(email_codes).where(email_codes.c.email == email,
+                                                       email_codes.c.code_hash == row[0])).rowcount == 1
 
     # ------------------------------------------------------------------ usage
     def questions_today(self, user_id: str) -> int:
@@ -279,13 +284,18 @@ class Store:
         return row["questions"] if row else 0
 
     def count_question(self, user_id: str, usd: float = 0.0) -> None:
-        day = str(date.today())
-        row = self._one(select(usage).where(usage.c.user_id == user_id, usage.c.day == day))
-        if row:
-            self._exec(update(usage).where(usage.c.user_id == user_id, usage.c.day == day).values(
-                questions=row["questions"] + 1, usd=row["usd"] + usd))
-        else:
-            self._exec(insert(usage).values(user_id=user_id, day=day, questions=1, usd=usd))
+        self.reserve_question(user_id, usd=usd)
+
+    def reserve_question(self, user_id: str, limit: int | None = None, usd: float = 0.0) -> bool:
+        """Check the daily quota and increment it atomically, including concurrent first requests."""
+        if limit is not None and limit < 1:
+            return False
+        statement = self._upsert(usage).values(user_id=user_id, day=str(date.today()), questions=1, usd=usd)
+        statement = statement.on_conflict_do_update(index_elements=[usage.c.user_id, usage.c.day],
+            set_={"questions": usage.c.questions + 1, "usd": usage.c.usd + usd},
+            where=usage.c.questions < limit if limit is not None else None)
+        with self.engine.begin() as c:
+            return c.execute(statement.returning(usage.c.user_id)).first() is not None
 
     def usd_today(self, key: str) -> float:
         row = self._one(select(usage).where(usage.c.user_id == key, usage.c.day == str(date.today())))
@@ -293,12 +303,9 @@ class Store:
 
     def add_usd_today(self, key: str, usd: float) -> None:
         """Add spend for today under a key (atomic update; the row is created on first use)."""
-        day = str(date.today())
         with self.engine.begin() as c:
-            done = c.execute(update(usage).where(usage.c.user_id == key, usage.c.day == day)
-                             .values(usd=usage.c.usd + usd)).rowcount
-            if not done:
-                c.execute(insert(usage).values(user_id=key, day=day, questions=0, usd=usd))
+            c.execute(self._upsert(usage).values(user_id=key, day=str(date.today()), questions=0, usd=usd)
+                .on_conflict_do_update(index_elements=[usage.c.user_id, usage.c.day], set_={"usd": usage.c.usd + usd}))
 
     def add_cost(self, user_id: str, usd: float) -> None:
         day = str(date.today())

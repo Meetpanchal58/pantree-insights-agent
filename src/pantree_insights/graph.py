@@ -33,7 +33,7 @@ from .catalog import label_columns, load_catalog
 from .charts import build_chart
 from .config import get_settings
 from .db import connect, manifest, run_query, snapshot_signature
-from .grounding import free_numbers, verify
+from .grounding import Claim, KeyValue, free_numbers, unsupported_assertion, verify
 from .guardrails import check_question, check_sql
 from .interpret import READINGS, Decision, TemplateCall, canonical, decide, readback
 from .joins import JoinGraph
@@ -41,8 +41,8 @@ from .llm import LLM, BudgetExceeded, ChatLLM
 from .memory import Memory
 from .profile import profile_for
 from .semantic import load_concepts, load_glossary, load_metrics, load_schema
-from .spec import Catalog, QuerySpec, SpecError, compile_spec
-from .templates import TemplateError
+from .spec import Catalog, QuerySpec, SpecError, compile_spec, validate
+from .templates import RESULT_UNITS, TemplateError
 from .templates import build as build_template
 
 MAX_CLARIFY_ROUNDS = 6        # stop without computing if material questions remain unresolved
@@ -79,6 +79,7 @@ class State(TypedDict, total=False):
     open_points: list[dict]
     clarify_rounds: int
     confirmed: bool
+    fast_path: bool
     readings: list[dict]                       # different readings offered to the user
     spec: dict | None                          # the confirmed QuerySpec
     template: dict | None                      # or the confirmed template call
@@ -106,7 +107,7 @@ def _frame(result: dict) -> pd.DataFrame:
 
 
 def _result(frame: pd.DataFrame, truncated: bool) -> dict:
-    split = json.loads(frame.to_json(orient="split", date_format="iso", index=False))
+    split = json.loads(frame.to_json(orient="split", date_format="iso", index=False, double_precision=15))
     return {"columns": split["columns"], "data": split["data"], "truncated": truncated}
 
 
@@ -117,7 +118,8 @@ def drop_unverified(analysis: agents.Analysis, problems: list[str]) -> agents.An
 
     def clean(text: str) -> bool:
         used = set(re.findall(r"\{(c\d+)\}", text or ""))
-        return not (used & bad) and not free_numbers(text or "") and used <= {c.id for c in claims}
+        return (not (used & bad) and not free_numbers(text or "") and used <= {c.id for c in claims}
+                and not unsupported_assertion(text or ""))
 
     headline = analysis.headline if clean(analysis.headline) else \
         "The verified result is in the table below; no number in the summary could be checked."
@@ -126,7 +128,10 @@ def drop_unverified(analysis: agents.Analysis, problems: list[str]) -> agents.An
         "findings": [t for t in analysis.findings if clean(t)],
         "recommendations": [t for t in analysis.recommendations if clean(t)],
         "caveats": [t for t in analysis.caveats if clean(t)],
-        "memory": [m for m in analysis.memory if clean(m.statement)]})
+        "chart_title": analysis.chart_title if clean(analysis.chart_title) else "Verified result",
+        "chart_subtitle": analysis.chart_subtitle if clean(analysis.chart_subtitle) else "",
+        "follow_up_questions": [t for t in analysis.follow_up_questions if clean(t)],
+        "memory": [m for m in analysis.memory if clean(m.statement) and re.search(r"\{c\d+\}", m.statement)]})
 
 
 def _emit(step: str, status: str, **detail: Any) -> None:
@@ -197,6 +202,7 @@ class Agent:
             saver.setup()
         else:
             saver = InMemorySaver()
+        self._saver = saver
         self.graph = self._build().compile(checkpointer=saver)
         log.info("agent_prepare phase=checkpoint seconds=%.2f", time.monotonic() - started)
 
@@ -245,6 +251,9 @@ class Agent:
         """Question -> spec or template, with every doubt turned into a question and a read-back to confirm."""
         answers, choices = dict(state.get("answers") or {}), dict(state.get("choices") or {})
         rounds = state.get("clarify_rounds", 0)
+        background = state.get("memory")
+        if background is None:
+            background = self.mem(state).context(state["question"], as_of=self.data["last_day"])
         pick = choices.pop("reading", None)
         if pick is not None and state.get("readings"):           # the user chose one of the readings
             spec = QuerySpec.model_validate(state["readings"][int(pick)])
@@ -252,9 +261,9 @@ class Agent:
         else:
             decision = decide(self.llm(state), self.catalog, self.glossary.terms, self.aliases, self.data,
                               state["question"], state.get("history", ""), answers, self.glossary.ambiguous,
-                              run=lambda sql: self.query(sql)[0], contrast=get_settings().contrast_check,
-                              background=self.mem(state).context(state["question"], as_of=self.data["last_day"]))
-        detail = {"decision": decision.kind, "restated": decision.restated, "reason": decision.reason}
+                              contrast=get_settings().contrast_check, background=background)
+        detail = {"decision": decision.kind, "restated": decision.restated, "reason": decision.reason,
+                  "fast_path": bool(decision.detail.get("fast_path"))}
         if decision.kind == "decline":
             return {"status": "declined", "message": decision.reason, "route": "finish", "_status": "declined",
                     "_detail": {**detail, "decision": "decline"}}
@@ -281,6 +290,7 @@ class Agent:
                 return {"answers": answers, "clarify_rounds": rounds + 1, "route": "interpret",
                         "_detail": {**detail, "defaults": [p.question for p in pending]}}
             return {"open_points": [p.__dict__ for p in pending], "route": "clarify", "_status": "needs_input",
+                    "memory": background,
                     "readings": [r.model_dump(mode="json") for r in decision.readings],
                     "restated": decision.restated,
                     "_detail": {**detail, "round": rounds + 1, "questions": [p.question for p in pending]}}
@@ -293,9 +303,10 @@ class Agent:
             summary = readback(decision.spec, self.catalog, decision.assumptions)
             out = {"spec": decision.spec.model_dump(mode="json"), "template": None}
         out.update({"readback": summary, "restated": decision.restated, "notes": decision.assumptions,
-                    "trust": "verified", "open_points": [], "answers": answers, "choices": choices,
+                    "trust": None, "open_points": [], "answers": answers, "choices": choices,
+                    "memory": background, "fast_path": bool(decision.detail.get("fast_path")),
                     "_detail": {**detail, "readback": summary}})
-        if not state.get("use_defaults") and not state.get("confirmed"):
+        if not out["fast_path"] and not state.get("use_defaults") and not state.get("confirmed"):
             point = OpenPoint("confirm", CONFIRM_QUESTION, [CONFIRM_YES, CONFIRM_NO], CONFIRM_YES,
                               "nothing is computed until you confirm", {CONFIRM_YES: "yes"})
             return {**out, "open_points": [point.__dict__], "route": "clarify", "_status": "needs_input"}
@@ -340,17 +351,29 @@ class Agent:
                 metrics: list[str] = []
             else:
                 spec = QuerySpec.model_validate(state["spec"])
+                problems = validate(spec, self.catalog)
+                if problems:
+                    raise SpecError("; ".join(problems))
                 sql = compile_spec(spec, self.catalog)
                 metrics = [m.metric for m in spec.measures if m.metric]
             if not check_sql(sql).ok:                                       # defence in depth: same safety rules
                 raise SpecError("the verified query failed the safety checks")
             started = time.perf_counter()
             frame, truncated = self.query(sql)
+            if self.snapshot and snapshot_signature() != self.snapshot:
+                raise SpecError("the data changed during execution; please ask again")
         except (SpecError, TemplateError) as error:
             return {"status": "failed", "route": "finish", "message": f"The verified query could not be built: {error}"}
-        return {"sql": sql, "metric_names": metrics, "result": _result(frame, truncated),
-                "memory": self.mem(state).context(state["question"], as_of=self.data["last_day"]),
-                "verification": {"status": "verified", "how": "compiled from the governed definitions"},
+        result = _result(frame, truncated)
+        verification = {"status": "verified", "how": "compiled from governed definitions; SQL safety checked",
+                        "scope": "query and numeric evidence; not a proof of natural-language interpretation"}
+        with contextlib.suppress(RuntimeError):
+            get_stream_writer()({"type": "result", "run_id": state["run_id"], "result": result,
+                                 "sql": sql, "readback": state.get("readback"), "trust": "verified",
+                                 "verification": verification, "data_as_of": self.data["last_day"],
+                                 "data_size": self.data["size"], "warnings": state.get("notes", [])})
+        return {"sql": sql, "metric_names": metrics, "result": result, "trust": "verified",
+                "verification": verification,
                 "route": "analyse",
                 "_detail": {"sql": sql, "rows": len(frame), "columns": list(frame.columns), "truncated": truncated,
                             "query_seconds": round(time.perf_counter() - started, 2)}}
@@ -363,17 +386,32 @@ class Agent:
         facts = list(state.get("notes") or [])
         if state["result"].get("truncated"):
             facts.append("The result is truncated; do not treat partial rows as the complete population.")
-        args = (self.llm(state), state["question"], state.get("readback", ""), state["sql"], frame, state["memory"],
-                notes, self.data)
-        analysis = agents.analyse(*args, concerns=facts)
-        check = verify(frame, analysis.claims, analysis.texts())
+        units = {c: RESULT_UNITS[c] for c in frame.columns if c in RESULT_UNITS} if state.get("template") else {}
+        if state.get("spec"):
+            for m in QuerySpec.model_validate(state["spec"]).measures:
+                if m.metric:
+                    units[m.name] = self.metrics.metrics[m.metric].unit
+                elif m.ratio or m.agg == "share":
+                    units[m.name] = "ratio"
+                elif m.agg in ("count", "count_distinct"):
+                    units[m.name] = "count"
+        notes += "\nResult units: " + ", ".join(f"{c}={u}" for c, u in units.items())
+        args = (self.llm(state), state["question"], state.get("readback", ""), state["sql"], frame,
+                state.get("memory", ""), notes, self.data)
+        analysis = (deterministic_analysis(frame, units) if state.get("fast_path")
+                    else agents.analyse(*args, concerns=facts))
+        def checked(a):
+            return verify(frame, a.claims, a.texts(), units=units, truncated=state["result"].get("truncated", False))
+        check = checked(analysis)
         rewrote = not check.ok
         if rewrote:                                                         # one rewrite with the exact problems
             analysis = agents.analyse(*args, fix_numbers=check.problems, concerns=facts)
-            check = verify(frame, analysis.claims, analysis.texts())
+            check = checked(analysis)
         if not check.ok:                     # an uncheckable sentence is removed; the verified table still answers
             analysis = drop_unverified(analysis, check.problems)
-            check = verify(frame, analysis.claims, analysis.texts())
+            check = checked(analysis)
+        # Render database-derived values, even when the model's rounded approximation was acceptable.
+        analysis = analysis.model_copy(update={"claims": check.claims})
         shown = analysis.rendered()
         warnings = [*state.get("warnings", []), *facts]
         return {"analysis": shown.model_dump(), "grounded": check.ok, "warnings": warnings, "route": "chart",
@@ -463,7 +501,7 @@ class Agent:
         state = self.graph.get_state({"configurable": {"thread_id": run_id}}).values
         llm = self._llms.pop(run_id, None)
         self._memories.pop(run_id, None)
-        return {"type": "final", "run_id": run_id, "status": state.get("status"), "message": state.get("message"),
+        result = {"type": "final", "run_id": run_id, "status": state.get("status"), "message": state.get("message"),
                 "question": state.get("question"), "restated": state.get("restated"),
                 "readback": state.get("readback"), "spec": state.get("spec"),
                 "template": state.get("template"), "trust": state.get("trust"), "sql": state.get("sql"),
@@ -473,11 +511,34 @@ class Agent:
                 "data_as_of": self.data["last_day"], "data_size": self.data["size"],
                 "cost": llm.tracker.summary() if llm else None,
                 "calls": [c.__dict__ for c in llm.tracker.calls] if llm else []}
+        if isinstance(self._saver, InMemorySaver):
+            self._saver.delete_thread(run_id)  # terminal results live in the app store, not unbounded RAM
+        return result
 
 
 def spec_key(spec: dict | None) -> str | None:
     """What a spec computes, for comparing with an intended spec (evaluation)."""
     return canonical(QuerySpec.model_validate(spec)) if spec else None
+
+
+def deterministic_analysis(frame: pd.DataFrame, units: dict[str, str]) -> agents.Analysis:
+    """Describe a few cells without making an untested causal, trend or ranking assertion."""
+    claims, findings = [], []
+    keys = [c for c in frame.columns if c not in units]
+    for _, row in frame.head(5).iterrows():
+        for column, unit in units.items():
+            if column not in row or pd.isna(row[column]):
+                continue
+            claim = Claim(id=f"c{len(claims) + 1}", value=float(row[column]), unit=unit, column=column,
+                          row=[KeyValue(column=k, value=str(row[k])) for k in keys])
+            claims.append(claim)
+            label = ", ".join(str(row[k]) for k in keys)
+            # Dimension labels may contain numbers; keep labels in the result table in that case.
+            label = "" if free_numbers(label) else label
+            findings.append(f"{label + ': ' if label else ''}{column.replace('_', ' ')} = {{{claim.id}}}")
+    return agents.Analysis(headline=findings[0] if findings else "No observed value for the requested scope.",
+                           findings=findings[1:], claims=claims, chart_metric=next(iter(units), None),
+                           chart_title="Verified result")
 
 
 # ----------------------------------------------------------------------------- command line

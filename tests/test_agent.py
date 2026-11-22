@@ -42,7 +42,8 @@ def analysis_from(user: str, wrong: bool = False) -> dict:
         except ValueError:
             return None
     col = next(i for i, v in enumerate(first) if number(v) is not None and i > 0)
-    claim = {"id": "c1", "value": 123456789.0 if wrong else number(first[col]), "unit": "number",
+    claim = {"id": "c1", "value": 123456789.0 if wrong else number(first[col]),
+             "unit": "inr" if header[col] in ("realized_revenue", "net_sales", "spend", "revenue") else "number",
              "column": header[col], "row": [{"column": header[0], "value": first[0]}], "op": "value"}
     return {"headline": f"{first[0]} leads with {{c1}}.", "findings": [f"{first[0]} brings {{c1}}."],
             "memory": [{"statement": f"{first[0]} is the top group", "type": "fact"}],
@@ -84,12 +85,14 @@ def test_a_clear_question_is_compiled_verified_and_explained(con, tmp_path):
     assert out["status"] == "done" and out["trust"] == "verified" and out["grounded"]
     assert "product_master.category AS category" in out["sql"]
     assert steps(events)[:4] == ["check_input", "interpret", "execute", "analyse"]
-    assert [a for a, _, _ in fakes[0].prompts] == ["interpreter", "contrast", "analyst"]   # no model writes SQL
+    assert not fakes[0].prompts  # reviewed grammar and deterministic summary need no model calls
+    assert next(i for i, e in enumerate(events) if e["type"] == "result") < next(
+        i for i, e in enumerate(events) if e.get("step") == "analyse")
 
 
 def test_nothing_runs_until_the_readback_is_confirmed(con, tmp_path):
     agent, _ = make_agent(con, tmp_path, Script(interpreter=[BY_CATEGORY]))
-    run_id, events = run(agent, "What is realized revenue by category?", confirm=False)
+    run_id, events = run(agent, "Break down realized revenue by category", confirm=False)
     ask = events[-1]
     assert ask["type"] == "clarify" and ask["kind"] == "confirm" and "Realized revenue" in ask["readback"]
     assert ask["spec"]["dimensions"] == ["category"] and "execute" not in steps(events)
@@ -189,7 +192,7 @@ def test_a_period_without_data_is_stated(con, tmp_path):
 def test_an_unverifiable_claim_is_removed_not_failing_the_answer(con, tmp_path):
     agent, _ = make_agent(con, tmp_path, Script(interpreter=[BY_CATEGORY],
                                                 analyst=[lambda u: analysis_from(u, wrong=True)]))
-    _, events = run(agent, "What is realized revenue by category?", use_defaults=True)
+    _, events = run(agent, "Break down realized revenue by category", use_defaults=True)
     out = events[-1]
     assert out["status"] == "done" and out["grounded"] and "could be checked" in out["analysis"]["headline"]
 

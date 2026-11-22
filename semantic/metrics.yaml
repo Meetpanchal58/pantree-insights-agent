@@ -287,7 +287,7 @@ metrics:
     source: marketing
     numerator: SUM(m.platform_revenue) FILTER (WHERE cp.channel_group <> 'CRM')
     denominator: SUM(m.spend) FILTER (WHERE cp.channel_group <> 'CRM')
-    unit: ratio
+    unit: multiple
     higher_is_better: true
 
   cpc:
@@ -399,7 +399,7 @@ custom_metrics:
       Use this, not platform_roas, to judge channels. order_revenue is the net amount when the order was
       placed (later cancellations and returns are not deducted). Orders with no campaign touch
       (Direct/Organic) are not credited to any channel.
-    unit: ratio
+    unit: multiple
     sql: |
       WITH revenue AS (
         SELECT c.channel, SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue

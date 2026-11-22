@@ -8,26 +8,25 @@ The model may decide WHICH question is answered, never WHICH number is returned 
    a spec, a template call, questions, a decline, or "unanswerable".
 3. Code normalises values to their stored spelling and validates; one repair round with the exact problems; still
    invalid -> the problems become questions.
-4. Contrast: a second call proposes materially different readings (definition, filter, split, grouping, ranking).
-   Each is compiled and RUN; only if a reading gives different numbers does the user choose. Readings that give the
-   same numbers are not worth a question (disagreement-guided clarification, 2026 research).
+4. Reviewed, context-free KPI questions use a full-match grammar without model calls. Other specs get a
+   conditional semantic contrast check; meaningful differences require clarification even on equal results.
+   Alternative SQL is never executed as a proxy for semantic agreement.
 5. Premise check: a period outside the data is stated, never silently answered as zero.
 """
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
 
-import pandas as pd
 from pydantic import BaseModel, Field, model_validator
 
 from .agents import ClarifyingQuestion, system_prompt
 from .catalog import describe
-from .spec import TICKETS, Catalog, QuerySpec, SpecError, compile_spec, validate
+from .fastpath import parse as fast_spec
+from .spec import TICKETS, Catalog, QuerySpec, validate
 from .templates import TemplateError
 from .templates import build as build_template
 from .templates import describe as describe_templates
@@ -81,6 +80,9 @@ class Alternatives(BaseModel):
 # ----------------------------------------------------------------------------- prompt
 def catalog_text(cat: Catalog, terms: dict[str, str]) -> str:
     """Everything a spec may name, as stable text (cached by the provider as the prompt prefix)."""
+    key = tuple(sorted(terms.items()))
+    if getattr(cat, "_prompt_key", None) == key:
+        return cat._prompt_text
     out = ["## Tables a spec can be about (table: what one row is; main date)"]
     for name, info in cat.catalog.items():
         subject = cat.subject_of.get(name)
@@ -109,7 +111,8 @@ def catalog_text(cat: Catalog, terms: dict[str, str]) -> str:
     if terms:
         out.append("\n## Business terms")
         out += [f"- {t}: {m}" for t, m in terms.items()]
-    return "\n".join(out)
+    cat._prompt_key, cat._prompt_text = key, "\n".join(out)
+    return cat._prompt_text
 
 
 def ask_model(llm, cat: Catalog, terms: dict[str, str], data: dict, question: str, history: str = "",
@@ -303,25 +306,62 @@ def premise_notes(spec: QuerySpec, data: dict) -> list[str]:
     return notes
 
 
-def _same(a: pd.DataFrame, b: pd.DataFrame) -> bool:
-    """Do two results carry the same numbers (ignoring column names, row order and rounding)?"""
-    if a.shape != b.shape:
-        return False
-    def norm(f: pd.DataFrame) -> list:
-        rows = [tuple(round(v, 6) if isinstance(v, float) else str(v) for v in r) for r in f.itertuples(index=False)]
-        return sorted(rows, key=str)
-    return norm(a) == norm(b)
+def intent_problems(question: str, spec: QuerySpec, cat: Catalog) -> list[str]:
+    """Check explicit business terminology, independently of structural validity.
+
+    This is a conservative lexical check, not a claim of complete language understanding.
+    Longest phrases win so "last-click revenue" is not mistaken for default revenue.
+    """
+    from .fastpath import METRICS
+
+    remaining = question.casefold().replace("_", " ")
+    required = set()
+    vocabulary = {**METRICS, "last-click revenue": "last_click_revenue",
+                  "platform-reported roas": "platform_roas"}
+    for phrase in sorted(vocabulary, key=len, reverse=True):
+        pattern = rf"(?<![\w-]){re.escape(phrase)}(?![\w-])"
+        if re.search(pattern, remaining):
+            required.add(vocabulary[phrase])
+            remaining = re.sub(pattern, " ", remaining)
+    present = {m.metric for m in spec.measures}
+    if len(required) > 1 and not re.search(
+            r"\b(?:and|vs|versus) orders\b|\borders (?:and|vs|versus)\b", question, re.I):
+        required.discard("orders")  # e.g. revenue for cash-on-delivery orders names a population
+    # Rates and per-order metrics mention their populations; do not demand extra count measures.
+    if present & {"return_rate", "cancellation_rate", "aov", "conversion_rate"}:
+        required -= {"orders", "sessions"}
+    problems = [f"the question explicitly requests {m}; use its governed metric" for m in sorted(required - present)]
+    if present & {"return_rate", "cancellation_rate"} and re.search(
+            r"\b(order[- ]level|share of orders|percentage of orders|order (?:return|cancellation) rate)\b",
+            question, re.I):
+        problems.append("the requested order grain differs from the governed line-level rate; clarify the denominator")
+    for word in ("category", "brand", "city", "channel"):
+        if re.search(rf"\bby {word}\b", question, re.I) and word not in spec.dimensions:
+            # Qualified columns may be the same governed cut.
+            wanted = cat.concepts.column(word, cat.subject_of.get(spec.table))
+            if wanted and wanted.column not in spec.dimensions:
+                problems.append(f"the question asks for a split by {word}")
+    return problems
 
 
 def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], data: dict, question: str,
            history: str = "", answers: dict[str, str] | None = None, register: dict[str, list[str]] | None = None,
-           run: Callable[[str], pd.DataFrame] | None = None, contrast: bool = True,
+           contrast: bool = True,
            background: str = "") -> Decision:
     """Read the question and decide: answer (spec / template), ask, decline or say it cannot be answered."""
     answers = answers or {}
     unsettled = register_questions(question, register or {}, answers)
     if unsettled:
         return Decision("clarify", questions=unsettled, required=True, reason="ambiguity register")
+
+    if not history and not answers and background in ("", "(nothing remembered yet)"):
+        direct = fast_spec(question, cat, data["last_day"])
+        if direct is not None:
+            notes = premise_notes(direct, data)
+            if re.search(r"\b(today|yesterday|last)\b", question, re.I):
+                notes.append(f"Relative dates are measured from the snapshot's last day, {data['last_day']}.")
+            return Decision("spec", spec=direct, restated=question, assumptions=notes,
+                            detail={"fast_path": True})
 
     reading = ask_model(llm, cat, terms, data, question, history, answers, background=background)
     detail: dict = {"reading": reading.model_dump(mode="json")}
@@ -337,6 +377,11 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
         if reading.route == "template" and reading.template:
             try:
                 build_template(reading.template.name, reading.template.params)
+                # Reviewed SQL is not evidence that its unrestricted scope matches this request.
+                if re.search(r"\b(?:20\d{2}|january|february|march|april|may|june|july|august|september|"
+                             r"october|november|december|yesterday|today|last (?:week|month|year|\d+ days))\b",
+                             question, re.I):
+                    raise TemplateError("this template has no date filter; use a dated spec or clarify the scope")
                 return Decision("template", template=reading.template, restated=reading.restated_question,
                                 assumptions=reading.assumptions, detail=detail)
             except TemplateError as error:
@@ -344,6 +389,8 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
         elif reading.spec is not None:
             spec = normalise(reading.spec, cat, aliases)
             problems = validate(spec, cat)
+            if not problems:
+                problems = intent_problems(question, spec, cat) if not answers else []
             if not problems:
                 break
         else:
@@ -362,32 +409,25 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
     notes = premise_notes(spec, data)
     decision = Decision("spec", spec=spec, restated=reading.restated_question,
                         assumptions=[*reading.assumptions, *notes], detail=detail)
-    if not contrast or run is None:
+    if not contrast:
         return decision
 
-    # contrast: materially different readings, compiled and run; ask only when the numbers differ
+    # Semantic differences matter even when a snapshot happens to produce equal values.
+    # No speculative database executions: truncated or coincidentally equal results prove nothing.
     alternatives = ask_alternatives(llm, cat, terms, data, question, history, answers, spec)
     detail["alternatives"] = alternatives.model_dump(mode="json")
-    try:
-        base = run(compile_spec(spec, cat))
-    except Exception:                                  # noqa: BLE001 - the main reading is executed later anyway
-        return decision
     different = []
     for alt in alternatives.readings[:MAX_ALTERNATIVES]:
         alt = normalise(alt, cat, aliases)
-        if validate(alt, cat) or canonical(alt) == canonical(spec):
+        if validate(alt, cat) or intent_problems(question, alt, cat) or canonical(alt) == canonical(spec):
             continue
-        try:
-            if not _same(base, run(compile_spec(alt, cat))):
-                different.append(alt)
-        except (SpecError, Exception):                 # noqa: BLE001 - an alternative that cannot run is no option
-            continue
+        different.append(alt)
     if not different:
         return decision
     readings = [spec, *different]
     options = reading_options(readings, cat)
     choice = ClarifyingQuestion(question=f"{READINGS}. Which one do you mean?", options=options, default=options[0],
-                                why="these readings give different numbers")
+                                why="these readings use different business definitions or populations")
     return Decision("clarify", questions=[choice], required=True, restated=reading.restated_question,
                     readings=readings, detail={**detail, "different": len(different)})
 

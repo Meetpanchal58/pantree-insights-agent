@@ -13,6 +13,12 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 PAID = "('Paid Search', 'Paid Social', 'Display')"
+RESULT_UNITS = {
+    "event_daily_net_sales": "inr", "before_daily_net_sales": "inr", "lift": "ratio",
+    "last_click_revenue": "inr", "spend": "inr", "roas_last_click": "multiple",
+    "platform_orders": "count", "recorded_orders": "count", "over_reporting": "multiple",
+    "repeat_share": "ratio", "buyers": "count",
+}
 
 
 class EventLift(BaseModel):
@@ -130,6 +136,9 @@ def build(name: str, params: dict | None) -> tuple[str, str]:
     if name not in TEMPLATES:
         raise TemplateError(f"unknown analysis '{name}'")
     t = TEMPLATES[name]
+    unknown = set(params or {}) - set(t.params.model_fields)
+    if unknown:
+        raise TemplateError(f"{name}: unsupported parameters {', '.join(sorted(unknown))}")
     try:
         p = t.params.model_validate(params or {})
     except ValidationError as error:

@@ -158,6 +158,13 @@ def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None) -> tupl
                                  memory=memory)
     events = list(stream)
     turns = {"questions": 0, "corrections": 0, "first_reading": None, "interactions": 0}
+    first = events[-1]
+    turns["first_turn_status"] = first.get("status") or first["type"]
+    turns["first_turn_correct"] = (stakeholder.matches(first) if stakeholder is not None
+                                   and (first.get("spec") or first.get("template")) else False)
+    turns["first_turn_answered"] = first.get("status") == "done"
+    if first.get("status") == "done" and stakeholder is not None:
+        turns["first_reading"] = turns["first_turn_correct"]
     while events[-1]["type"] == "clarify" and stakeholder is not None and turns["interactions"] < MAX_TURNS:
         event = events[-1]
         turns["interactions"] += 1
@@ -311,6 +318,9 @@ def summary(rows: list[dict]) -> str:
             ("Silent wrong answers (gate 0)", str(sum(r["failure_type"] == "silent_wrong" for r in answer))),
             ("First reading correct (before any correction)",
              _rate([{**r, "f": bool(r["first_reading"])} for r in confirmed], "f")),
+            ("First-turn intended plan (all answer questions, before stakeholder assistance)",
+             _rate([{**r, "f": bool(r.get('first_turn_correct'))} for r in answer], "f")),
+            ("First-turn completed answer", _rate(answer, "first_turn_answered")),
             ("Clarifying questions per answer", f"{statistics.mean(r.get('questions', 0) for r in answer):.2f}"
              if answer else "-"),
             ("Vague questions clarified", _rate([r for r in part if r["set"] == "clarify"])),

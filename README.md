@@ -12,12 +12,15 @@ the SQL behind it, a chart and an explanation.
    structured request: metric, splits, filters, period.
 2. **Asks** when something is genuinely open: a phrase with two meanings, or two readings that give different
    numbers.
-3. **Confirms**: shows exactly what it will compute (definitions, filters, period); nothing runs until you agree.
+3. **Routes**: complete, context-free KPI questions use a reviewed grammar and deterministic summary with zero
+   model calls. Other questions receive a read-back for confirmation; material ambiguity is always asked.
 4. **Computes** with SQL built by code from the governed definitions (or a reviewed analysis template). No model
    writes SQL.
-5. **Explains** the result; every number in the text is filled in from the result by code.
+5. **Delivers** the checked table immediately, then explains it. Accepted numerical claims are replaced with
+   recomputed values; units, incomplete populations and common unsupported causal assertions are checked.
 
-Every answer is labelled **Verified**. A question it cannot answer that way gets "I can't answer this as a verified
+**Verified** describes the governed query and checked numeric evidence, not a proof that every interpretation
+or narrative conclusion is correct. A question it cannot answer that way gets "I can't answer this as a verified
 number yet", never a guess. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Repository
@@ -77,6 +80,11 @@ DATA_SIZE=full uv run python evals/spec_eval.py           # every gold question 
 DATA_SIZE=full uv run python evals/run_eval.py --suite all --yes --max-cost-usd 4 --gate   # paid, see evals/README.md
 ```
 
+```bash
+DATA_SIZE=small uv run python evals/fastpath_baseline.py    # five reviewed questions vs independent SQL
+DATA_SIZE=small uv run python evals/context_retrieval.py    # lexical metric-retrieval ablation
+```
+
 ## Deploy
 
 Google Cloud Run, Neon Postgres, Google sign-in and email codes, data from Cloud Storage:
@@ -86,7 +94,12 @@ Google Cloud Run, Neon Postgres, Google sign-in and email codes, data from Cloud
 
 - Simulated data: numbers describe the simulator, not a real shop.
 - Questions outside the request format and the analysis templates are declined until a template is added.
-- The confirmation step relies on the user reading the read-back; it states exact definitions to make that easy.
+- The model path still relies on accurate interpretation and the read-back. Explicit intent checks and contrast
+  reduce mistakes but do not prove semantic correctness.
+- Multi-fact plans require named metrics and conformed dimensions. Unsupported cohorts, per-group ranking and
+  ambiguous cross-source dates still require a reviewed template or safe abstention.
+- Active work is bounded to one process; deployment remains at one instance. PostgreSQL stores paused checkpoints.
+- See [measured changes and remaining limits](docs/refactoring-validation.md).
 
 ## License
 

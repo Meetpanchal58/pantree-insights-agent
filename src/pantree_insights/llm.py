@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
+from functools import lru_cache
 from typing import Any, Protocol, TypeVar
 
 from pydantic import BaseModel
@@ -106,6 +107,19 @@ _slots_lock = threading.Lock()
 _slots: dict[int, threading.BoundedSemaphore] = {}
 
 
+@lru_cache(maxsize=16)
+def _shared_model(name: str, effort: str, max_tokens: int, timeout: float, retries: int, temperature: float | None):
+    """Reuse provider connection pools across requests; usage trackers remain private to each run."""
+    from langchain.chat_models import init_chat_model
+
+    kwargs: dict[str, Any] = {"max_tokens": max_tokens, "timeout": timeout, "max_retries": retries}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if name.startswith("openai:") and effort != "none":
+        kwargs["reasoning"] = {"effort": effort}
+    return init_chat_model(name, **kwargs)
+
+
 def _provider_slots(limit: int) -> threading.BoundedSemaphore:
     """Prevent concurrent agent runs from stampeding the shared API quota."""
     with _slots_lock:
@@ -122,22 +136,11 @@ class ChatLLM:
         self.tracker = tracker or CostTracker()
         self.main = main or settings.model_main
         self.light = light or settings.model_light
-        self._models: dict[tuple[str, str], Any] = {}
 
     def _model(self, name: str, effort: str):
-        from langchain.chat_models import init_chat_model
-
-        key = (name, effort)
-        if key not in self._models:
-            settings = get_settings()
-            kwargs: dict[str, Any] = {"max_tokens": settings.max_output_tokens, "timeout": settings.llm_timeout_s,
-                                      "max_retries": settings.llm_max_retries}
-            if get_settings().temperature is not None:
-                kwargs["temperature"] = get_settings().temperature
-            if name.startswith("openai:") and effort != "none":
-                kwargs["reasoning"] = {"effort": effort}
-            self._models[key] = init_chat_model(name, **kwargs)
-        return self._models[key]
+        settings = get_settings()
+        return _shared_model(name, effort, settings.max_output_tokens, settings.llm_timeout_s,
+                             settings.llm_max_retries, settings.temperature)
 
     def ask(self, agent: str, schema: type[T], system: str, user: str, *, effort: str | None = None,
             light: bool = False) -> T:

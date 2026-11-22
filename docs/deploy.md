@@ -1,7 +1,7 @@
 # Deploy on Google Cloud Run
 
 Everything below runs in **Google Cloud Shell** (the terminal button at the top right of the Google Cloud
-console): it is already signed in and has `gcloud`, `git` and bash. Settings keep it inside the free tier:
+console): it is already signed in and has `gcloud`, `git` and bash. Default resource limits are:
 **0 instances when idle, at most 1**, request-based billing, data mounted from Cloud Storage.
 
 **1. Database (Neon Postgres, free).** Create a project at neon.tech, copy the connection string
@@ -66,29 +66,43 @@ script set them). In the Cloud console of this project:
 Click **Run** on the trigger once to test it; builds show under Cloud Build → History. Use the deploy script
 again when secrets, the data or service settings change.
 
-The first request after an idle period starts a new instance (about 20-40 seconds: indexes and the KPI pulse
-are rebuilt). Live questions are limited to 10 per user per day and the app stops calling the model after
+The first request after an idle period starts a new instance. Publish measured join metadata with
+`DATA_SIZE=full uv run pantree-profile --publish-joins` as part of the data upload (the upload script does this).
+A matching artifact avoids join scans; a missing or stale artifact safely falls back to profiling.
+KPI pulse work no longer runs at web startup: run `pantree-pulse` as a separate data-maintenance job and
+publish its generated memory/kpis files with the deployment. The pulse page otherwise shows its last saved snapshot. Live questions are limited to 10 per user per day and the app stops calling the model after
 US$0.50 a day; the OpenAI project has its own monthly limit.
 
-## Keep the instance warm (optional, about free)
+## Keep the instance warm (optional)
 
-The service scales to zero, so the first visit after a quiet period waits 20-40 seconds. To avoid that during
+The service scales to zero, so the first visit after a quiet period may wait for startup. To avoid that during
 usage hours, a Cloud Scheduler job can call `/healthz` every 10 minutes from 08:00 to 23:00 India time:
 
 ```bash
 bash scripts/keep_warm.sh
 ```
 
-With request-based billing an idle instance that is not a minimum instance is not charged, and Cloud
-Scheduler includes 3 free jobs per billing account, so this costs about nothing. It is not a guarantee
-(Cloud Run can still restart an instance; outside those hours the first visit is cold). The guaranteed option
-is `--min-instances 1`, about 19 USD a month for 1 vCPU and 2 GiB at the idle rate.
+Warm-up requests do not guarantee that an instance stays alive. Cloud Run can still restart it.
+Minimum instances reduce idle cold starts but incur charges; check current regional pricing and measure
+the actual service before changing billing or resource settings.
 
 ## Cold starts
 
-The first question after an instance starts prepares the data profile and catalog (about 13 s on local disk,
-longer from the Cloud Storage mount). The question request returns at once and the app shows "Preparing the data"
+The first question after an instance starts loads the catalog, connects DuckDB and checks profile metadata.
+Cloud Storage mount latency and missing profile artifacts can still increase preparation time. The question request returns at once and the app shows "Preparing the data"
 as a step, so the browser never times out. With `--cpu-throttling` the start-up warm-up only gets CPU while a
 request is open; `--no-cpu-throttling` (CPU always allocated) or `--min-instances 1` makes the first question fast
 at a higher idle cost.
 
+
+## Resource and concurrency controls
+
+`MIN_INSTANCES`, `CPU`, `MEMORY` and `CONCURRENCY` can be set when invoking the deploy script; defaults
+remain 0, 1, 2Gi and 20. Changing resources may increase costs. Measure on the deployed workload before tuning.
+`MAX_PENDING_RUNS=32` bounds active, queued and paused requests in the process, and only 128 completed
+run histories remain in RAM; completed histories are also stored in the database.
+
+Keep `max-instances=1` and one Uvicorn worker. Durable checkpoints alone do not provide distributed job
+leases, active-run recovery or cross-instance event delivery. Do not raise replica counts until those
+protocols are implemented and load-tested. GCS-mounted Parquet is retained; no local-copy performance
+claim has been made without testing the actual deployment.

@@ -120,6 +120,7 @@ class Runner:
         self._agent = None
         self._snapshot = None
         self._lock = threading.Lock()
+        self.admission_lock = threading.Lock()
         self.runs: dict[str, Run] = {}
         self._slots = threading.BoundedSemaphore(max(1, get_settings().max_concurrent_runs))
         self._waiting = 0                                   # runs queued for a free slot (shown to the user)
@@ -227,26 +228,30 @@ class Runner:
                                    "detail": {"seconds": round(time.time() - started, 2)}})
             try:
                 for event in events:
-                    run.events.append({**event, "t": event.get("t", time.time())})
+                    event = {**event, "t": event.get("t", time.time())}
                     if event["type"] == "clarify":
+                        store.save_run(run.id, "paused", [*run.events, event])
                         run.paused = True
-                        store.save_run(run.id, "paused", run.events)
                     elif event["type"] == "final":
                         self._save(store, run, event)
+                    # A terminal event must not reach the browser before its chat/feedback record exists.
+                    run.events.append(event)
+                    if event["type"] == "final":
+                        run.finished = True
             except Exception as error:                      # never leave the browser waiting
                 log.exception("run %s failed", run.id)
                 final = {"type": "final", "run_id": run.id, "question": run.question,
                          "status": "failed", "t": time.time(),
                          **failure_details(error)}
-                run.events.append(final)
                 self._save(store, run, final)
+                run.events.append(final)
+                run.finished = True
             finally:
                 self._slots.release()
                 run.segment_done.set()
         threading.Thread(target=work, daemon=True, name=f"run-{run.id}").start()
 
     def _save(self, store: Store, run: Run, final: dict) -> None:
-        run.finished = True
         headline = ((final.get("analysis") or {}).get("headline") or final.get("message") or "")
         timeline = [{**e, "t": round(e["t"] - run.started, 2)} for e in run.events if e["type"] != "final"]
         stage_times = {}
@@ -256,7 +261,7 @@ class Runner:
                 if isinstance(detail.get("seconds"), (float, int)):
                     stage_times[event["step"]] = round(stage_times.get(event["step"], 0) + detail["seconds"], 2)
         calls = final.get("calls") or []
-        store.save_run(run.id, final.get("status", "failed"), run.events,
+        store.save_run(run.id, final.get("status", "failed"), [*run.events, final],
                        {"stages": stage_times, "cost_usd": (final.get("cost") or {}).get("usd", 0),
                         "llm_calls": len(calls), "trust": final.get("trust"),
                         "verification": (final.get("verification") or {}).get("status")})
@@ -264,6 +269,13 @@ class Runner:
         if final.get("cost"):
             store.add_cost(run.user["id"], final["cost"].get("usd", 0.0))
         run.agent = None  # Finished runs no longer need to retain an older snapshot's entire agent/index.
+
+    def prune(self) -> None:
+        """Completed histories are durable; retain only a bounded recent set for live stream reconnects."""
+        completed = sorted((r for r in self.runs.values() if r.finished and r.segment_done.is_set()),
+                           key=lambda r: r.started, reverse=True)
+        for run in completed[128:]:
+            self.runs.pop(run.id, None)
 
 
 runner = Runner()
@@ -277,19 +289,15 @@ async def lifespan(app: FastAPI):
             _ = runner.agent                                  # the agent first: questions must not wait for pulse
         except Exception:
             log.exception("agent failed to start")
-        try:
-            from .pulse import run as pulse
-            pulse()                                           # KPI history + open gaps for this data
-        except Exception:
-            log.exception("pulse failed at startup")
     threading.Thread(target=warm, daemon=True).start()
     yield
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    if settings.app_env == "production" and settings.session_secret.startswith("dev-only"):
-        raise RuntimeError("Set SESSION_SECRET in production.")
+    if settings.app_env == "production" and (len(settings.session_secret.strip()) < 32
+                                              or settings.session_secret.startswith("dev-only")):
+        raise RuntimeError("Set a random SESSION_SECRET of at least 32 characters in production.")
     app = FastAPI(title="Pantree Insights", lifespan=lifespan, docs_url=None, redoc_url=None)
     @app.middleware("http")
     async def request_reference(request: Request, call_next):
@@ -405,27 +413,31 @@ def create_app() -> FastAPI:
         chat = store.chat(user["id"], chat_id)
         if not chat:
             raise HTTPException(404, "Chat not found")
-        if any(r.chat["id"] == chat_id and not r.finished for r in runner.runs.values()):
-            raise HTTPException(409, "This chat is already answering a question.")
-        if not user["is_admin"] and store.questions_today(user["id"]) >= settings.daily_question_limit:
-            raise HTTPException(429, f"You have used today's {settings.daily_question_limit} live questions. "
-                                     "Demo replays are still available.")
-        store.count_question(user["id"])
-        run = runner.start(store, user, chat, body.question.strip(), body.use_defaults)
-        return {"run_id": run.id}
+        with runner.admission_lock:
+            runner.prune()
+            if sum(not r.finished for r in runner.runs.values()) >= settings.max_pending_runs:
+                raise HTTPException(429, "The analysis queue is full. Please retry later.")
+            if any(r.chat["id"] == chat_id and not r.finished for r in runner.runs.values()):
+                raise HTTPException(409, "This chat is already answering a question.")
+            if not store.reserve_question(user["id"], None if user["is_admin"] else settings.daily_question_limit):
+                raise HTTPException(429, f"You have used today's {settings.daily_question_limit} live questions. "
+                                         "Demo replays are still available.")
+            run = runner.start(store, user, chat, body.question.strip(), body.use_defaults)
+            return {"run_id": run.id}
 
     @app.post("/api/runs/{run_id}/answer")
     def answer(run_id: str, body: AnswerIn, user=Depends(require_user), store: Store = Depends(get_store)):
-        run = runner.restore(store, user, run_id)
-        if not run or run.user["id"] != user["id"]:
-            raise HTTPException(404, "Run not found")
-        if not run.paused:
-            raise HTTPException(409, "This run is not waiting for answers.")
-        runner.answer(store, run, body.answers)
-        return {"ok": True}
+        with runner.admission_lock:
+            run = runner.restore(store, user, run_id)
+            if not run or run.user["id"] != user["id"]:
+                raise HTTPException(404, "Run not found")
+            if not run.paused:
+                raise HTTPException(409, "This run is not waiting for answers.")
+            runner.answer(store, run, body.answers)
+            return {"ok": True}
 
     @app.get("/api/runs/{run_id}/stream")
-    async def stream(run_id: str, request: Request, since: int = 0,
+    async def stream(run_id: str, request: Request, since: int = Query(0, ge=0),
                      user=Depends(require_user), store: Store = Depends(get_store)):
         run = runner.restore(store, user, run_id)
         if not run or run.user["id"] != user["id"]:
