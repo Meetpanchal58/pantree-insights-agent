@@ -296,7 +296,12 @@ function renderChat(chat, connect = false) {
   const box = $("#messages"); box.innerHTML = "";
   let last = null;
   for (const m of chat.messages) {
-    if (m.role === "user") box.insertAdjacentHTML("beforeend", userBubble(m.content));
+    if (m.role === "user") box.insertAdjacentHTML("beforeend", userBubble(m.content, m.id, !!(m.run?.edits?.length || m.run?.original !== undefined)));
+    else if (m.run?.superseded_by_edit) {
+      const prior = document.createElement('details'); prior.className = 'msg previous-reply';
+      prior.innerHTML = `<summary>Previous reply (before edit)</summary><div class="answer">${esc(m.content).replace(/\n/g,'<br>')}</div>`;
+      box.appendChild(prior);
+    }
     else if (m.run?.type === "clarify") { box.appendChild(conversationMessage(m.run)); }
     else { box.appendChild(answerCard(m.run || {})); last = m.run; }
   }
@@ -313,7 +318,49 @@ function renderChat(chat, connect = false) {
   renderSidebar(); scrollDown();
 }
 
-const userBubble = (text) => `<div class="msg user"><div class="bubble">${esc(text)}</div></div>`;
+const userBubble = (text, id = null, edited = false) => `<div class="msg user" ${id ? `data-message-id="${esc(id)}"` : ""}>
+  <div class="user-message"><div class="bubble"><span class="user-text">${esc(text)}</span></div>
+  ${id ? `<div class="message-actions">${edited ? '<span class="muted">Edited</span>' : ''}<button class="btn small" data-action="edit-message" aria-label="Edit your message">Edit</button></div>` : ""}</div></div>`;
+
+function editMessage(element) {
+  if (!element || S.busy || S.run?.replay) return toast('Wait for the current response before editing.');
+  if (element.querySelector('.message-editor')) return;
+  const chatId = S.chatId, id = element.dataset.messageId;
+  const original = element.querySelector('.user-text').textContent;
+  const latest = [...document.querySelectorAll('.msg.user[data-message-id]')].at(-1) === element;
+  const pending = S.pending;
+  const inline = latest && pending;
+  const editor = document.createElement('div'); editor.className = 'message-editor';
+  editor.innerHTML = `<label>Edit your message<textarea maxlength="2000" aria-label="Edit your message"></textarea></label>
+    <p class="muted">${inline ? 'Send the corrected reply to the pending analysis. If this is the original question, an edited copy will be created.' : 'Creates an edited copy from this point. Later replies will be regenerated; the original chat stays available.'}</p>
+    <div class="edit-error" role="alert"></div><div class="row"><button class="btn" data-edit-cancel>Cancel</button><button class="btn primary" data-edit-save>Save & send</button></div>`;
+  element.querySelector('.user-message').appendChild(editor);
+  const input = editor.querySelector('textarea'), save = editor.querySelector('[data-edit-save]');
+  input.value = original; input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+  editor.querySelector('[data-edit-cancel]').onclick = () => editor.remove();
+  let retryKey = null, lastContent = null;
+  save.onclick = async () => {
+    const content = input.value.trim();
+    if (!content) { editor.querySelector('.edit-error').textContent = 'Enter a message before saving.'; return; }
+    if (content === original) { editor.remove(); return; }
+    if (S.chatId !== chatId || S.busy) return;
+    if (content !== lastContent) { retryKey = crypto.randomUUID(); lastContent = content; }
+    save.disabled = true; input.disabled = true; editor.querySelector('[data-edit-cancel]').disabled = true;
+    S.busy = true; $('.send').disabled = true;
+    editor.querySelector('.edit-error').textContent = '';
+    try {
+      const result = await api(`/api/chats/${chatId}/messages/${id}/edit`, {method:'POST', body:{
+        content, expected_content:original, idempotency_key:retryKey,
+        ...(pending ? {pending_run_id:pending.run_id, plan_version:pending.plan_version} : {})}});
+      S.chatCache.delete(chatId); S.chatCache.delete(result.chat_id);
+      if (S.chatId === chatId && editor.isConnected) { await openChat(result.chat_id, true); refreshSidebar(); }
+    } catch (error) {
+      if (editor.isConnected) { editor.querySelector('.edit-error').textContent = error.message; save.disabled = false;
+        input.disabled = false; editor.querySelector('[data-edit-cancel]').disabled = false; }
+    } finally { if (S.chatId === chatId && editor.isConnected) { S.busy = false; $('.send').disabled = false; } }
+  };
+  input.addEventListener('keydown', e => {if(e.key === 'Escape' && !save.disabled) {e.preventDefault();editor.remove();}});
+}
 function statusLine(text) {
   const el = document.createElement("div"); el.className = "msg";
   el.innerHTML = `<div class="answer status-line"><span class="spinner"></span><span class="txt">${esc(text)}</span></div>`;
@@ -343,6 +390,7 @@ function answerCard(run, replay = false) {
 
 /* ---------------------------------------------------------------- asking */
 async function ask(question) {
+  question = question.trim();
   if (S.run?.replay || S.busy || !question.trim()) return false;
   if (!S.me.user) { showSignin(); return; }
   const view = ++S.view;
@@ -357,12 +405,14 @@ async function ask(question) {
     }
     $("#messages").insertAdjacentHTML("beforeend", userBubble(question));
     S.chatCache.delete(S.chatId);
+    const sentBubble = $("#messages").lastElementChild;
     const status = statusLine("Starting…"); $("#messages").appendChild(status); scrollDown();
     const pending = S.pending;
-    const { run_id, since = 0 } = await api(`/api/chats/${S.chatId}/ask`, { method: "POST", body: {
+    const { run_id, since = 0, message_id } = await api(`/api/chats/${S.chatId}/ask`, { method: "POST", body: {
       question, idempotency_key: crypto.randomUUID(),
       ...(pending ? { pending_run_id: pending.run_id, plan_version: pending.plan_version } : {}) } });
     if (view !== S.view) { refreshSidebar(); return; }
+    if (message_id && sentBubble.isConnected) sentBubble.outerHTML = userBubble(question, message_id);
     if (!pending) $("#chat-title").textContent = question.slice(0, 80);
     refreshSidebar();
     S.pending = null;
@@ -483,12 +533,22 @@ function streamRun(runId, since, status, question) {
   };
 }
 
-function proposalKey(e) { return `${e.plan_version || 0}:${e.message || e.readback || ""}`; }
+function proposalKey(e) { return `${e.run_id || ""}:${e.plan_version || 0}:${e.message || e.readback || ""}`; }
 function conversationMessage(e) {
   const el = document.createElement("div"); el.className = "msg";
   el.dataset.proposal = proposalKey(e);
   const text = e.message || e.readback || (e.questions || []).map(q => q.question).join("\n");
   el.innerHTML = `<div class="answer conversation-message">${esc(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>")}</div>`;
+  if (e.kind === 'confirm' && e.run_id) {
+    const button = document.createElement('button'); button.className = 'btn primary confirm-plan';
+    button.textContent = 'Run this plan'; button.dataset.confirmVersion = e.plan_version;
+    button.onclick = () => {
+      if (S.busy || !S.pending || S.pending.plan_version !== e.plan_version ||
+          S.pending.run_id !== e.run_id || proposalKey(S.pending) !== proposalKey(e)) return toast('Use the latest pending plan.');
+      ask('Go ahead');
+    };
+    el.querySelector('.answer').appendChild(button);
+  }
   return el;
 }
 
@@ -871,6 +931,7 @@ document.addEventListener("click", async (ev) => {
   const a = t.dataset.action, id = t.dataset.id;
   if (["chat-menu", "edit-project"].includes(a)) ev.stopPropagation();
   switch (a) {
+    case "edit-message": editMessage(t.closest(".msg.user")); break;
     case "edit-question": $("#question").value = t.dataset.q; autosize(); $("#question").focus(); break;
     case "dataset": openDataset(); break;
     case "back-chat": backToChat(); break;

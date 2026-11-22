@@ -253,6 +253,40 @@ const path = require('node:path');
     assert.match(await page.locator('#result details').innerText(),/recomputation required/);
     assert.equal(await page.locator('#result th').innerText(),'revenue');
 
+    // Edits work on desktop and mobile, preserve drafts on failure, and retry with one stable key.
+    const editPosts=[]; let failEdit=true;
+    await page.route('**/api/chats/edit-source/messages/user-edit/edit',async route=>{
+      editPosts.push(route.request().postDataJSON());
+      if(failEdit){failEdit=false;return route.fulfill({status:503,json:{detail:'Temporary save failure'}});}
+      await route.fulfill({json:{chat_id:'edited-copy',run_id:'edited-run',mode:'fork'}});
+    });
+    await page.route('**/api/chats/edited-copy',route=>route.fulfill({json:{id:'edited-copy',title:'Edited question',
+      messages:[{id:'saved-edit',role:'user',content:'Orders by brand',run:{original:'Revenue by brand'}}],pending_run:null}}));
+    for(const width of [1440,390]) {
+      await page.setViewportSize({width,height:900});
+      await page.evaluate(()=>{$('#app').classList.add('panel-closed');S.chatId='edit-source';S.busy=false;S.pending=null;S.run=null;
+        renderChat({title:'Editing',messages:[{id:'user-edit',role:'user',content:'Revenue by brand'}]},false);});
+      await page.getByRole('button',{name:'Edit your message'}).click();
+      await page.getByRole('textbox',{name:'Edit your message'}).fill('Cancelled draft');
+      await page.locator('[data-edit-cancel]').click();
+      assert.equal(await page.locator('.user-text').innerText(),'Revenue by brand');
+      await page.getByRole('button',{name:'Edit your message'}).click();
+      await page.getByRole('textbox',{name:'Edit your message'}).fill('Orders by brand');
+      if(process.env.PANTREE_EDIT_SCREENSHOTS){fs.mkdirSync(process.env.PANTREE_EDIT_SCREENSHOTS,{recursive:true});await page.screenshot({path:path.join(process.env.PANTREE_EDIT_SCREENSHOTS,`edit-${width}.png`)});}
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+      await page.locator('[data-edit-save]').click();
+      if(width===1440){
+        await page.locator('.edit-error').filter({hasText:'temporarily unavailable'}).waitFor();
+        assert.equal(await page.getByRole('textbox',{name:'Edit your message'}).inputValue(),'Orders by brand');
+        await page.locator('[data-edit-save]').click();
+        await page.waitForFunction(()=>S.chatId==='edited-copy');
+        assert.equal(editPosts[0].idempotency_key,editPosts[1].idempotency_key);
+      }
+      await page.waitForFunction(()=>S.chatId==='edited-copy' && document.querySelector('.user-text')?.textContent==='Orders by brand');
+      assert.match(await page.locator('.message-actions').innerText(),/Edited/);
+    }
+    await page.setViewportSize({width:1440,height:900});
+
     // Offline demos appear before the account API responds, and a late failure cannot replace one.
     let releaseStartup;
     await page.route('**/api/me',async route=>{
