@@ -1,0 +1,3001 @@
+{
+  "kind": "compiler_only",
+  "created_at": "2026-11-22T07:40:46.348386+00:00",
+  "inputs": {
+    "code_revision": "04d6b8019572f3856ac915d273935dd451794958",
+    "working_tree_dirty": true,
+    "source_sha256": "5d73e7e741771749a3170c6656e53c588661d446139370cd82a61eb2bac57608",
+    "data_sha256": "f9fdee9b835d3db540f2f681202892150a89e925de764914545f0ddbbd1fe333",
+    "data_manifest": {
+      "size": "small",
+      "seed": 42,
+      "first_day": "2025-01-01",
+      "last_day": "2026-11-22",
+      "package_version": "1.0.0",
+      "n_products": 1500,
+      "n_sellers": 80,
+      "traffic_scale": 0.17,
+      "daily_new_visitors": 30.0
+    },
+    "cases_sha256": "0116da319c10d4a3d1b1b3d1c91d0a764692bcb23e266229cddf17fb80485d48",
+    "scorer_version": "strict-v1",
+    "python": "3.12.14",
+    "packages": {
+      "duckdb": "2.0.0",
+      "pandas": "3.1.1",
+      "sqlglot": "30.31.0",
+      "langgraph": "1.2.22"
+    },
+    "settings": {
+      "model_main": "openai:gpt-6.1-terra",
+      "model_light": "openai:gpt-6-luna",
+      "temperature": null,
+      "contrast_check": true,
+      "query_timeout_s": 30.0,
+      "max_rows": 500
+    }
+  },
+  "repeats": 3,
+  "cases": 98,
+  "snapshot_verified": true,
+  "setup_seconds": 19.01246498800083,
+  "cache_mode": "shared_connection; no_agent_sql_result_cache",
+  "model_accuracy": null,
+  "retrieval_accuracy": null,
+  "retrieval_seconds": null,
+  "model_cost_usd": 0,
+  "query_latency": {
+    "n": 294,
+    "p50": 0.010234362499886629,
+    "p95": 0.21296298100060085,
+    "max": 0.48018760700051644
+  },
+  "compile_latency": {
+    "n": 294,
+    "p50": 0.003845034999812924,
+    "p95": 0.027794266999990214,
+    "max": 0.16794707999997627
+  },
+  "rows": [
+    {
+      "id": "regression/e01",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(*) AS customers\nFROM customers",
+      "compile_seconds": 0.0821107520005171,
+      "query_seconds": 0.01149454199912725
+    },
+    {
+      "id": "regression/e02",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(*) AS active_products\nFROM product_master\nWHERE product_master.is_active = TRUE",
+      "compile_seconds": 0.0014727269999639248,
+      "query_seconds": 0.0031583520003550802
+    },
+    {
+      "id": "regression/e03",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale'",
+      "compile_seconds": 0.003033980000509473,
+      "query_seconds": 0.00747005699940928
+    },
+    {
+      "id": "regression/e04",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.payment_method AS payment_method, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.002951537999251741,
+      "query_seconds": 0.00885711800037825
+    },
+    {
+      "id": "regression/e05",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(*) FILTER (WHERE customers.is_prime = TRUE) * 1.0 / NULLIF(COUNT(*), 0) AS prime_share, COUNT(*) AS customers\nFROM customers",
+      "compile_seconds": 0.003865701999529847,
+      "query_seconds": 0.02537010800006101
+    },
+    {
+      "id": "regression/e06",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nWHERE sales.line_type = 'Sale'",
+      "compile_seconds": 0.004933639999762818,
+      "query_seconds": 0.005972691000351915
+    },
+    {
+      "id": "regression/m01",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nWHERE sales.line_type = 'Sale'",
+      "compile_seconds": 0.009225124000295182,
+      "query_seconds": 0.010751545999482914
+    },
+    {
+      "id": "regression/m02",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', sales.placed_at) AS month, COUNT(DISTINCT sales.order_id) AS orders, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.007677704999878188,
+      "query_seconds": 0.015892465999968408
+    },
+    {
+      "id": "regression/m03",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST",
+      "compile_seconds": 0.004458422999960021,
+      "query_seconds": 0.04381430800003727
+    },
+    {
+      "id": "regression/m04",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate, COUNT(*) FILTER (WHERE sales.delivered_at IS NOT NULL) AS delivered_lines\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.005212847000620968,
+      "query_seconds": 0.013551923999330029
+    },
+    {
+      "id": "regression/m05",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT q.return_reason, q.returned_lines, q.returned_lines * 1.0 / NULLIF(SUM(q.returned_lines) OVER (), 0) AS returned_lines_share\nFROM (SELECT sales.return_reason AS return_reason, COUNT(*) AS returned_lines\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.return_requested_at IS NOT NULL\nGROUP BY 1) AS q\nORDER BY returned_lines DESC NULLS LAST",
+      "compile_seconds": 0.005421290000413137,
+      "query_seconds": 0.009432615999685368
+    },
+    {
+      "id": "regression/m06",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type, (COUNT(*) FILTER(WHERE NOT sales.rto_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.shipped_at IS NULL), 0) AS rto_rate, COUNT(*) FILTER (WHERE sales.shipped_at IS NOT NULL) AS shipped_lines\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY rto_rate DESC NULLS LAST",
+      "compile_seconds": 0.005086113999823283,
+      "query_seconds": 0.0070656480002071476
+    },
+    {
+      "id": "regression/m07",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.position AS list_position, (COUNT(*) FILTER(WHERE impressions.clicked)) / NULLIF(COUNT(*), 0) AS ctr, COUNT(*) AS impressions\nFROM impressions\nWHERE impressions.position <= 10.0\nGROUP BY 1\nORDER BY ctr DESC NULLS LAST",
+      "compile_seconds": 0.0045201269995232,
+      "query_seconds": 0.2505955169999652
+    },
+    {
+      "id": "regression/m08",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT inventory_live.sku_id AS sku_id, product_master.product_name AS product_name, product_master.category AS category, inventory_live.inbound_qty AS inbound_qty\nFROM inventory_live\nLEFT JOIN product_master ON inventory_live.product_id = product_master.product_id\nWHERE inventory_live.on_hand_qty <= 0.0 AND product_master.is_active = TRUE\nORDER BY 1, 2, 3, 4\nLIMIT 100",
+      "compile_seconds": 0.00040182700013247086,
+      "query_seconds": 0.006017067999891879
+    },
+    {
+      "id": "regression/m09",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel_group AS channel_group, campaigns.channel AS marketing_channel, SUM(marketing_spend.spend) AS spend\nFROM marketing_spend\nLEFT JOIN campaigns ON marketing_spend.campaign_id = campaigns.campaign_id\nGROUP BY 1, 2\nORDER BY spend DESC NULLS LAST",
+      "compile_seconds": 0.002328489000319678,
+      "query_seconds": 0.02149468799962051
+    },
+    {
+      "id": "regression/m10",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, (SUM(product_reviews.rating)) / NULLIF(COUNT(product_reviews.rating), 0) AS avg_rating, (COUNT(*) FILTER(WHERE product_reviews.sentiment = 'Negative')) / NULLIF(COUNT(*), 0) AS negative_share, COUNT(*) AS reviews\nFROM product_reviews\nLEFT JOIN product_master ON product_reviews.product_id = product_master.product_id\nWHERE product_reviews.moderation_status = 'Published'\nGROUP BY 1\nORDER BY avg_rating DESC NULLS LAST",
+      "compile_seconds": 0.00541953299943998,
+      "query_seconds": 0.019937312000365637
+    },
+    {
+      "id": "regression/m11",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT support_contacts.issue_category AS issue, COUNT(DISTINCT support_contacts.ticket_id) AS tickets, (SUM(support_contacts.csat)) / NULLIF(COUNT(support_contacts.csat), 0) AS avg_csat, (SUM(support_contacts.first_response_minutes)) / NULLIF(COUNT(support_contacts.first_response_minutes), 0) AS avg_first_response_minutes\nFROM support_contacts\nGROUP BY 1\nORDER BY tickets DESC NULLS LAST",
+      "compile_seconds": 0.003986149999946065,
+      "query_seconds": 0.006083838999984437
+    },
+    {
+      "id": "regression/m12",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.is_first_order THEN 'New' ELSE 'Repeat' END AS new_or_repeat, COUNT(DISTINCT sales.order_id) AS orders, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.0040779509999993024,
+      "query_seconds": 0.009470440999393759
+    },
+    {
+      "id": "regression/h01",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT clickstream.device AS device, (COUNT(DISTINCT CASE WHEN clickstream.event_type = 'purchase' THEN clickstream.session_id END)) / NULLIF(COUNT(DISTINCT clickstream.session_id), 0) AS conversion_rate, COUNT(DISTINCT clickstream.session_id) AS sessions\nFROM clickstream\nGROUP BY 1\nORDER BY conversion_rate DESC NULLS LAST",
+      "compile_seconds": 0.004502898000282585,
+      "query_seconds": 0.32469047799986583
+    },
+    {
+      "id": "regression/h02",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sale_events.event_id AS event_id, sale_events.name AS sale_event, COUNT(DISTINCT sales.order_id) AS orders, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue, SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END) AS net_sales\nFROM sales\nJOIN sale_events ON sales.placed_at >= sale_events.start_date AND sales.placed_at < sale_events.end_date + INTERVAL 1 DAY\nWHERE sales.line_type = 'Sale' AND sale_events.name IN ('Diwali 2025', 'Diwali 2026')\nGROUP BY 1, 2\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.008973089999926742,
+      "query_seconds": 0.019473798999570135
+    },
+    {
+      "id": "regression/h03",
+      "repeat": 0,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH daily AS (\n  SELECT CAST(placed_at AS DATE) AS day, SUM(CASE WHEN cancelled_at IS NULL THEN net_amount ELSE 0 END) AS net_sales\n  FROM sales WHERE line_type = 'Sale' GROUP BY 1)\nSELECT e.event_id, e.name, CAST(e.start_date AS DATE) AS start_date, CAST(e.end_date AS DATE) AS end_date,\n       COALESCE(SUM(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date AND e.end_date), 0)\n         / (date_diff('day', e.start_date, e.end_date) + 1) AS event_daily_net_sales,\n       COALESCE(SUM(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date - INTERVAL 14 DAY\n                                            AND e.start_date - INTERVAL 1 DAY), 0) / 14 AS before_daily_net_sales,\n       event_daily_net_sales / NULLIF(before_daily_net_sales, 0) - 1 AS lift\nFROM sale_events e LEFT JOIN daily d ON d.day BETWEEN e.start_date - INTERVAL 14 DAY AND e.end_date\nWHERE e.end_date <= (SELECT MAX(day) FROM daily)\n  AND e.start_date - INTERVAL 14 DAY >= (SELECT MIN(day) FROM daily)\nGROUP BY e.event_id, e.name, e.start_date, e.end_date\nORDER BY lift DESC",
+      "compile_seconds": 7.300400011445163e-05,
+      "query_seconds": 0.012029894999614044
+    },
+    {
+      "id": "regression/h04",
+      "repeat": 0,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH revenue AS (\n  SELECT c.channel, SUM(a.credit_last_click * a.order_revenue) AS last_click_revenue\n  FROM marketing_attribution a JOIN campaigns c ON c.campaign_id = a.campaign_id GROUP BY 1),\nspend AS (\n  SELECT c.channel, SUM(m.spend) AS spend\n  FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id GROUP BY 1)\nSELECT s.channel, r.last_click_revenue, s.spend, r.last_click_revenue / NULLIF(s.spend, 0) AS roas_last_click\nFROM spend s LEFT JOIN revenue r ON r.channel = s.channel\nORDER BY roas_last_click DESC NULLS LAST",
+      "compile_seconds": 6.969799960643286e-05,
+      "query_seconds": 0.03809294599977875
+    },
+    {
+      "id": "regression/h05",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.campaign_id AS campaign_id, campaigns.campaign_name AS campaign, marketing_attribution.channel_group AS channel_group, SUM(marketing_attribution.credit_last_click * marketing_attribution.order_revenue) AS last_click_revenue\nFROM marketing_attribution\nLEFT JOIN campaigns ON marketing_attribution.campaign_id = campaigns.campaign_id\nWHERE NOT marketing_attribution.campaign_id IS NULL\nGROUP BY 1, 2, 3\nORDER BY last_click_revenue DESC NULLS LAST\nLIMIT 10",
+      "compile_seconds": 0.020438701999410114,
+      "query_seconds": 0.009607492999748501
+    },
+    {
+      "id": "regression/h06",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.courier AS courier, (COUNT(*) FILTER(WHERE CAST(sales.delivered_at AS DATE) > CAST(sales.promised_delivery_date AS DATE))) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS late_delivery_rate, COUNT(*) FILTER (WHERE sales.delivered_at IS NOT NULL) AS delivered_lines\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY late_delivery_rate DESC NULLS LAST",
+      "compile_seconds": 0.004187796999758575,
+      "query_seconds": 0.006128884000645485
+    },
+    {
+      "id": "regression/h07",
+      "repeat": 0,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH platform AS (\n  SELECT c.channel, SUM(m.platform_conversions) AS platform_orders\n  FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id\n  WHERE c.channel_group IN ('Paid Search', 'Paid Social', 'Display') GROUP BY 1),\nshop AS (\n  SELECT c.channel, COUNT(DISTINCT s.order_id) AS recorded_orders\n  FROM sales s JOIN campaigns c ON c.campaign_id = s.campaign_id\n  WHERE s.line_type = 'Sale' GROUP BY 1)\nSELECT p.channel, p.platform_orders, sh.recorded_orders,\n       p.platform_orders * 1.0 / NULLIF(sh.recorded_orders, 0) AS over_reporting\nFROM platform p LEFT JOIN shop sh ON sh.channel = p.channel\nORDER BY over_reporting DESC NULLS LAST",
+      "compile_seconds": 4.007799998362316e-05,
+      "query_seconds": 0.02883926499998779
+    },
+    {
+      "id": "regression/h08",
+      "repeat": 0,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH firsts AS (\n  SELECT customer_id, MIN(placed_at) AS first_at FROM sales WHERE line_type = 'Sale' GROUP BY 1),\neligible AS (\n  SELECT customer_id, first_at FROM firsts\n  WHERE first_at <= (SELECT MAX(placed_at) FROM sales) - INTERVAL 90 DAY),\nagain AS (\n  SELECT DISTINCT e.customer_id FROM eligible e JOIN sales s ON s.customer_id = e.customer_id\n  WHERE s.line_type = 'Sale' AND s.placed_at > e.first_at AND s.placed_at <= e.first_at + INTERVAL 90 DAY)\nSELECT COUNT(a.customer_id) * 1.0 / NULLIF(COUNT(*), 0) AS repeat_share, COUNT(*) AS buyers\nFROM eligible e LEFT JOIN again a ON a.customer_id = e.customer_id",
+      "compile_seconds": 4.6039000153541565e-05,
+      "query_seconds": 0.012417621999702533
+    },
+    {
+      "id": "regression/h09",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, product_skus.size AS size, SUM(inventory_history.lost_sales_units) AS lost_units, SUM(inventory_history.demand_units) AS demand_units, (SUM(inventory_history.lost_sales_units)) * 1.0 / NULLIF((SUM(inventory_history.demand_units)), 0) AS lost_share\nFROM inventory_history\nLEFT JOIN product_master ON inventory_history.product_id = product_master.product_id\nLEFT JOIN product_skus ON inventory_history.sku_id = product_skus.sku_id\nGROUP BY 1, 2\nORDER BY lost_units DESC NULLS LAST\nLIMIT 20",
+      "compile_seconds": 0.002878190000046743,
+      "query_seconds": 0.021374552999986918
+    },
+    {
+      "id": "regression/h10",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, sales.size_fit AS size_fit, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate, COUNT(*) AS delivered_lines\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND sales.delivered_at IS NOT NULL AND product_master.category IN ('Footwear', 'Apparel')\nGROUP BY 1, 2\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.0072311889998673,
+      "query_seconds": 0.009350242000436992
+    },
+    {
+      "id": "regression/n01",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.event_id IS NULL THEN 'Normal day' ELSE 'Sale-event day' END AS day_type, (SUM((sales.mrp - sales.unit_price) * sales.quantity)) / NULLIF(SUM(sales.mrp * sales.quantity), 0) AS avg_discount_pct\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY avg_discount_pct DESC NULLS LAST",
+      "compile_seconds": 0.005299413999637181,
+      "query_seconds": 0.005747420999796304
+    },
+    {
+      "id": "regression/n02",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.region AS region, COUNT(*) AS customers\nFROM customers\nGROUP BY 1\nORDER BY customers DESC NULLS LAST",
+      "compile_seconds": 0.001170537999314547,
+      "query_seconds": 0.0033180639993588557
+    },
+    {
+      "id": "regression/n03",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT (COUNT(*) FILTER(WHERE tickets.resolution_status = 'Resolved')) / NULLIF(COUNT(*), 0) AS ticket_resolution_rate\nFROM ((SELECT ticket_id, MIN(contact_at) AS opened_at,\n        arg_min(channel, contact_at) AS channel, arg_min(issue_category, contact_at) AS issue_category,\n        arg_max(resolution_status, contact_at) AS resolution_status, COUNT(*) AS contacts\n FROM support_contacts GROUP BY ticket_id)) AS tickets",
+      "compile_seconds": 0.005415487999925972,
+      "query_seconds": 0.005120554000313859
+    },
+    {
+      "id": "regression/n04",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', marketing_spend.date_hour) AS month, SUM(marketing_spend.spend) AS spend\nFROM marketing_spend\nWHERE marketing_spend.date_hour >= TIMESTAMP '2026-01-01' AND marketing_spend.date_hour < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.0033704059997035074,
+      "query_seconds": 0.012553700999887951
+    },
+    {
+      "id": "regression/n05",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.ship_city AS city, (COUNT(*) FILTER(WHERE NOT sales.rto_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.shipped_at IS NULL), 0) AS rto_rate\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY rto_rate DESC NULLS LAST\nLIMIT 10",
+      "compile_seconds": 0.011176815999533574,
+      "query_seconds": 0.006652717999713786
+    },
+    {
+      "id": "regression/n06",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sellers.seller_type AS seller_type, (COUNT(*) FILTER(WHERE NOT sales.cancelled_at IS NULL)) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nLEFT JOIN sellers ON sales.seller_id = sellers.seller_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY cancellation_rate DESC NULLS LAST",
+      "compile_seconds": 0.004274920000170823,
+      "query_seconds": 0.007367698000052769
+    },
+    {
+      "id": "regression/n07",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT clickstream.traffic_source AS traffic_source, (COUNT(DISTINCT CASE WHEN clickstream.event_type = 'purchase' THEN clickstream.session_id END)) / NULLIF(COUNT(DISTINCT clickstream.session_id), 0) AS conversion_rate\nFROM clickstream\nGROUP BY 1\nORDER BY conversion_rate DESC NULLS LAST",
+      "compile_seconds": 0.004746996999529074,
+      "query_seconds": 0.2896195599996645
+    },
+    {
+      "id": "regression/n08",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, (SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee - sales.unit_cost * sales.quantity END)) / NULLIF(SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee END), 0) AS gross_margin_pct\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY gross_margin_pct DESC NULLS LAST",
+      "compile_seconds": 0.0076618690000032075,
+      "query_seconds": 0.011750179999580723
+    },
+    {
+      "id": "regression/n09",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT (SUM(product_reviews.rating)) / NULLIF(COUNT(product_reviews.rating), 0) AS avg_rating\nFROM product_reviews\nWHERE product_reviews.moderation_status = 'Published'",
+      "compile_seconds": 0.0021914740000283928,
+      "query_seconds": 0.002366259999689646
+    },
+    {
+      "id": "regression/n10",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.surface AS surface, (COUNT(*) FILTER(WHERE impressions.clicked)) / NULLIF(COUNT(*), 0) AS ctr\nFROM impressions\nGROUP BY 1\nORDER BY ctr DESC NULLS LAST",
+      "compile_seconds": 0.0019636849992821226,
+      "query_seconds": 0.16167160300028627
+    },
+    {
+      "id": "holdout/x01",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customer_addresses.region AS region, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN customer_addresses ON sales.address_id = customer_addresses.address_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST",
+      "compile_seconds": 0.007040935999611975,
+      "query_seconds": 0.012738440000248374
+    },
+    {
+      "id": "holdout/x02",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.sub_category AS sub_category, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Apparel'\nGROUP BY 1\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.005532797999876493,
+      "query_seconds": 0.01258048400086409
+    },
+    {
+      "id": "holdout/x03",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.is_prime AS prime, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nLEFT JOIN customers ON sales.customer_id = customers.customer_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.004212299999380775,
+      "query_seconds": 0.014014013999258168
+    },
+    {
+      "id": "holdout/x04",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.device AS device, (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY aov DESC NULLS LAST",
+      "compile_seconds": 0.006460393999986991,
+      "query_seconds": 0.010369587999775831
+    },
+    {
+      "id": "holdout/x05",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.warehouse_id AS warehouse, (COUNT(*) FILTER(WHERE CAST(sales.delivered_at AS DATE) > CAST(sales.promised_delivery_date AS DATE))) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS late_delivery_rate\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY late_delivery_rate DESC NULLS LAST",
+      "compile_seconds": 0.005957203000434674,
+      "query_seconds": 0.01291758800016396
+    },
+    {
+      "id": "holdout/x06",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel AS marketing_channel, (SUM(marketing_spend.spend) FILTER(WHERE campaigns.channel_group IN ('Paid Search', 'Paid Social', 'Display'))) / NULLIF(SUM(marketing_spend.clicks) FILTER(WHERE campaigns.channel_group IN ('Paid Search', 'Paid Social', 'Display')), 0) AS cpc\nFROM marketing_spend\nLEFT JOIN campaigns ON marketing_spend.campaign_id = campaigns.campaign_id\nWHERE campaigns.channel_group IN ('Paid Search', 'Paid Social', 'Display') AND marketing_spend.date_hour >= TIMESTAMP '2025-01-01' AND marketing_spend.date_hour < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY cpc DESC NULLS LAST",
+      "compile_seconds": 0.006043508000402653,
+      "query_seconds": 0.02776097799960553
+    },
+    {
+      "id": "holdout/x07",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT support_contacts.channel AS support_channel, (SUM(support_contacts.csat)) / NULLIF(COUNT(support_contacts.csat), 0) AS avg_csat\nFROM support_contacts\nGROUP BY 1\nORDER BY avg_csat DESC NULLS LAST",
+      "compile_seconds": 0.003060230999835767,
+      "query_seconds": 0.003765395999835164
+    },
+    {
+      "id": "holdout/x08",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_reviews.aspect AS review_aspect, (COUNT(*) FILTER(WHERE product_reviews.sentiment = 'Negative')) / NULLIF(COUNT(*), 0) AS negative_review_share\nFROM product_reviews\nLEFT JOIN product_master ON product_reviews.product_id = product_master.product_id\nWHERE product_reviews.moderation_status = 'Published' AND product_master.category = 'Footwear'\nGROUP BY 1\nORDER BY negative_review_share DESC NULLS LAST",
+      "compile_seconds": 0.004261289000169199,
+      "query_seconds": 0.006032285000401316
+    },
+    {
+      "id": "holdout/x09",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', clickstream.event_at) AS month, (COUNT(DISTINCT CASE WHEN clickstream.event_type = 'purchase' THEN clickstream.session_id END)) / NULLIF(COUNT(DISTINCT clickstream.session_id), 0) AS conversion_rate\nFROM clickstream\nWHERE clickstream.event_at >= TIMESTAMP '2026-01-01' AND clickstream.event_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.0060889910000696545,
+      "query_seconds": 0.25043722499958676
+    },
+    {
+      "id": "holdout/x10",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.brand_name AS brand, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST\nLIMIT 5",
+      "compile_seconds": 0.007585183000628604,
+      "query_seconds": 0.029024059000221314
+    },
+    {
+      "id": "holdout/x11",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type, (COUNT(*) FILTER(WHERE NOT sales.cancelled_at IS NULL)) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY cancellation_rate DESC NULLS LAST",
+      "compile_seconds": 0.005415472999629856,
+      "query_seconds": 0.008480593000058434
+    },
+    {
+      "id": "holdout/x12",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT inventory_history.warehouse_id AS warehouse, SUM(inventory_history.lost_sales_units) AS lost_sales_units\nFROM inventory_history\nGROUP BY 1\nORDER BY lost_sales_units DESC NULLS LAST",
+      "compile_seconds": 0.002565484999649925,
+      "query_seconds": 0.0066131439998571295
+    },
+    {
+      "id": "holdout/x13",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', sales.placed_at) AS month, (COUNT(DISTINCT CASE WHEN sales.is_first_order THEN sales.order_id END)) / NULLIF(COUNT(DISTINCT sales.order_id), 0) AS new_customer_order_share\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.0040861279994715005,
+      "query_seconds": 0.013058508000540314
+    },
+    {
+      "id": "holdout/x14",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.position AS list_position, (COUNT(*) FILTER(WHERE impressions.clicked)) / NULLIF(COUNT(*), 0) AS ctr\nFROM impressions\nWHERE impressions.surface = 'home_recs' AND impressions.position <= 5.0\nGROUP BY 1\nORDER BY ctr DESC NULLS LAST",
+      "compile_seconds": 0.004738804000226082,
+      "query_seconds": 0.16216762699968967
+    },
+    {
+      "id": "holdout/y01",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.quantity ELSE 0 END) AS units_sold\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY units_sold DESC NULLS LAST",
+      "compile_seconds": 0.003279829999883077,
+      "query_seconds": 0.03556689300057769
+    },
+    {
+      "id": "holdout/y02",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.courier AS courier, (SUM(DATE_DIFF('HOUR', sales.placed_at, sales.delivered_at)) / 24.0) / NULLIF(COUNT(sales.delivered_at), 0) AS avg_delivery_days\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY avg_delivery_days DESC NULLS LAST",
+      "compile_seconds": 0.005022696000196447,
+      "query_seconds": 0.006945893000192882
+    },
+    {
+      "id": "holdout/y03",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('quarter', sales.placed_at) AS quarter, SUM(sales.gross_amount) AS gross_sales\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY quarter",
+      "compile_seconds": 0.003714720999596466,
+      "query_seconds": 0.00634054600050149
+    },
+    {
+      "id": "holdout/y04",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.gender AS product_gender, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.gender IN ('Women', 'Men')\nGROUP BY 1\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.007441092999215471,
+      "query_seconds": 0.014117280999926152
+    },
+    {
+      "id": "holdout/y05",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT clickstream.traffic_source AS traffic_source, COUNT(DISTINCT clickstream.session_id) AS sessions\nFROM clickstream\nWHERE clickstream.event_at >= TIMESTAMP '2026-10-01' AND clickstream.event_at < TIMESTAMP '2026-11-01'\nGROUP BY 1\nORDER BY sessions DESC NULLS LAST",
+      "compile_seconds": 0.0037408270000014454,
+      "query_seconds": 0.03238033999969048
+    },
+    {
+      "id": "holdout/y06",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel_group AS channel_group, (SUM(marketing_spend.platform_revenue) FILTER(WHERE campaigns.channel_group <> 'CRM')) / NULLIF(SUM(marketing_spend.spend) FILTER(WHERE campaigns.channel_group <> 'CRM'), 0) AS platform_roas\nFROM marketing_spend\nLEFT JOIN campaigns ON marketing_spend.campaign_id = campaigns.campaign_id\nWHERE campaigns.channel_group NOT IN ('CRM')\nGROUP BY 1\nORDER BY platform_roas DESC NULLS LAST",
+      "compile_seconds": 0.006819060999987414,
+      "query_seconds": 0.10358492200066394
+    },
+    {
+      "id": "holdout/y07",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', tickets.opened_at) AS month, COUNT(*) AS support_tickets\nFROM ((SELECT ticket_id, MIN(contact_at) AS opened_at,\n        arg_min(channel, contact_at) AS channel, arg_min(issue_category, contact_at) AS issue_category,\n        arg_max(resolution_status, contact_at) AS resolution_status, COUNT(*) AS contacts\n FROM support_contacts GROUP BY ticket_id)) AS tickets\nWHERE tickets.opened_at >= TIMESTAMP '2026-01-01' AND tickets.opened_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.005624680999972043,
+      "query_seconds": 0.006610518000343291
+    },
+    {
+      "id": "holdout/y08",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT support_contacts.channel AS support_channel, (SUM(support_contacts.first_response_minutes)) / NULLIF(COUNT(support_contacts.first_response_minutes), 0) AS avg_first_response_minutes\nFROM support_contacts\nGROUP BY 1\nORDER BY avg_first_response_minutes DESC NULLS LAST",
+      "compile_seconds": 0.0029977800004417077,
+      "query_seconds": 0.0037932800005364697
+    },
+    {
+      "id": "holdout/y09",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.usage AS usage, (SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee - sales.unit_cost * sales.quantity END)) / NULLIF(SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee END), 0) AS gross_margin_pct\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY gross_margin_pct DESC NULLS LAST",
+      "compile_seconds": 0.009989807999772893,
+      "query_seconds": 0.012046261999785202
+    },
+    {
+      "id": "holdout/y10",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customer_addresses.city_tier AS city_tier, (COUNT(*) FILTER(WHERE NOT sales.rto_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.shipped_at IS NULL), 0) AS rto_rate\nFROM sales\nLEFT JOIN customer_addresses ON sales.address_id = customer_addresses.address_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY rto_rate DESC NULLS LAST",
+      "compile_seconds": 0.005931601000156661,
+      "query_seconds": 0.020746915000017907
+    },
+    {
+      "id": "holdout/y11",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.signup_channel AS traffic_source, COUNT(*) AS customers\nFROM customers\nWHERE customers.signup_at >= TIMESTAMP '2026-01-01' AND customers.signup_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY customers DESC NULLS LAST",
+      "compile_seconds": 0.0017248759995709406,
+      "query_seconds": 0.0038807219998489018
+    },
+    {
+      "id": "holdout/y12",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.brand_name AS brand, (SUM((sales.mrp - sales.unit_price) * sales.quantity)) / NULLIF(SUM(sales.mrp * sales.quantity), 0) AS avg_discount_pct, SUM(sales.quantity) AS units\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Footwear'\nGROUP BY 1\nORDER BY units DESC NULLS LAST\nLIMIT 5",
+      "compile_seconds": 0.006205633999343263,
+      "query_seconds": 0.009257341999727942
+    },
+    {
+      "id": "holdout/y13",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.surface AS surface, COUNT(*) AS impressions\nFROM impressions\nGROUP BY 1\nORDER BY impressions DESC NULLS LAST",
+      "compile_seconds": 0.0012023110002701287,
+      "query_seconds": 0.07431141999950341
+    },
+    {
+      "id": "holdout/y14",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.is_prime AS prime, (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nLEFT JOIN customers ON sales.customer_id = customers.customer_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY aov DESC NULLS LAST",
+      "compile_seconds": 0.00747118299932481,
+      "query_seconds": 0.023360750000392727
+    },
+    {
+      "id": "holdout/y15",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT inventory_live.warehouse_id AS warehouse, SUM(inventory_live.on_hand_qty) AS on_hand_units\nFROM inventory_live\nGROUP BY 1\nORDER BY on_hand_units DESC NULLS LAST",
+      "compile_seconds": 0.0012562370002342504,
+      "query_seconds": 0.0025207740000041667
+    },
+    {
+      "id": "holdout/y16",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customer_addresses.region AS region, (COUNT(*) FILTER(WHERE CAST(sales.delivered_at AS DATE) > CAST(sales.promised_delivery_date AS DATE))) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS late_delivery_rate\nFROM sales\nLEFT JOIN customer_addresses ON sales.address_id = customer_addresses.address_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY late_delivery_rate DESC NULLS LAST",
+      "compile_seconds": 0.016718269999728363,
+      "query_seconds": 0.019331675000103132
+    },
+    {
+      "id": "holdout/z01",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2024-12-01' AND sales.placed_at < TIMESTAMP '2025-01-01'",
+      "compile_seconds": 0.003566054999282642,
+      "query_seconds": 0.003721475000020291
+    },
+    {
+      "id": "coverage/c01",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT warehouses.city AS warehouse_city, SUM(inventory_live.on_hand_qty) AS units_on_hand, MAX(warehouses.capacity_units) AS capacity, (SUM(inventory_live.on_hand_qty)) * 1.0 / NULLIF((MAX(warehouses.capacity_units)), 0) AS capacity_used\nFROM inventory_live\nLEFT JOIN warehouses ON inventory_live.warehouse_id = warehouses.warehouse_id\nGROUP BY 1\nORDER BY units_on_hand DESC NULLS LAST",
+      "compile_seconds": 0.001751806000356737,
+      "query_seconds": 0.004225114999826474
+    },
+    {
+      "id": "coverage/c02",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT agents.team AS team, COUNT(*) FILTER (WHERE support_contacts.resolution_status = 'Escalated') * 1.0 / NULLIF(COUNT(*), 0) AS escalated_share\nFROM support_contacts\nLEFT JOIN agents ON support_contacts.agent_id = agents.agent_id\nWHERE support_contacts.contact_at >= TIMESTAMP '2026-01-01' AND support_contacts.contact_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY escalated_share DESC NULLS LAST",
+      "compile_seconds": 0.0022960939995755325,
+      "query_seconds": 0.006456310999965353
+    },
+    {
+      "id": "coverage/c03",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT agents.language AS language, COUNT(*) AS contacts, (SUM(support_contacts.csat)) / NULLIF(COUNT(support_contacts.csat), 0) AS avg_csat\nFROM support_contacts\nLEFT JOIN agents ON support_contacts.agent_id = agents.agent_id\nWHERE support_contacts.contact_at >= TIMESTAMP '2025-01-01' AND support_contacts.contact_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY contacts DESC NULLS LAST",
+      "compile_seconds": 0.004619430000275315,
+      "query_seconds": 0.005456480999782798
+    },
+    {
+      "id": "coverage/c04",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT promotions.eligible_audience AS eligible_audience, COUNT(*) AS coupons, AVG(promotions.min_order_value) AS avg_min_order_value\nFROM promotions\nGROUP BY 1\nORDER BY coupons DESC NULLS LAST",
+      "compile_seconds": 0.0013762799999312847,
+      "query_seconds": 0.0036699470001622103
+    },
+    {
+      "id": "coverage/c05",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel_group AS channel_group, SUM(marketing_plan.planned_spend) AS planned_spend, SUM(marketing_plan.target_revenue) AS target_revenue\nFROM marketing_plan\nLEFT JOIN campaigns ON marketing_plan.campaign_id = campaigns.campaign_id\nWHERE marketing_plan.date >= TIMESTAMP '2025-01-01' AND marketing_plan.date < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY planned_spend DESC NULLS LAST",
+      "compile_seconds": 0.002609494999887829,
+      "query_seconds": 0.005391067999880761
+    },
+    {
+      "id": "coverage/c06",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, COUNT(*) AS clearance_price_changes\nFROM price_history\nLEFT JOIN product_master ON price_history.product_id = product_master.product_id\nWHERE price_history.price_change_reason = 'Clearance' AND price_history.valid_from >= TIMESTAMP '2026-01-01' AND price_history.valid_from < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY clearance_price_changes DESC NULLS LAST",
+      "compile_seconds": 0.0032262390004689223,
+      "query_seconds": 0.009308783000051335
+    },
+    {
+      "id": "coverage/c07",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', auth_events.event_at) AS month, COUNT(*) AS otp_failures\nFROM auth_events\nWHERE auth_events.event_type = 'otp_failed' AND auth_events.event_at >= TIMESTAMP '2026-01-01' AND auth_events.event_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.0016310600003635045,
+      "query_seconds": 0.024451426999803516
+    },
+    {
+      "id": "coverage/c08",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sellers.seller_type AS seller_type, AVG(sellers.rating) AS avg_rating, AVG(sellers.fulfillment_score) AS avg_fulfillment_score\nFROM sellers\nGROUP BY 1\nORDER BY avg_rating DESC NULLS LAST",
+      "compile_seconds": 0.0014133250006125309,
+      "query_seconds": 0.003305535000436066
+    },
+    {
+      "id": "coverage/c09",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sellers.region AS region, (COUNT(*) FILTER(WHERE NOT sales.cancelled_at IS NULL)) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nLEFT JOIN sellers ON sales.seller_id = sellers.seller_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY cancellation_rate DESC NULLS LAST",
+      "compile_seconds": 0.005836110999553057,
+      "query_seconds": 0.009760234000168566
+    },
+    {
+      "id": "coverage/c10",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_skus.size AS size, SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.quantity ELSE 0 END) AS units_sold\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nLEFT JOIN product_skus ON sales.sku_id = product_skus.sku_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Footwear' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY units_sold DESC NULLS LAST",
+      "compile_seconds": 0.004147003000070981,
+      "query_seconds": 0.026617335999617353
+    },
+    {
+      "id": "coverage/c11",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, COUNT(*) AS skus_to_reorder\nFROM inventory_live\nLEFT JOIN product_master ON inventory_live.product_id = product_master.product_id\nWHERE inventory_live.on_hand_qty <= inventory_live.reorder_point\nGROUP BY 1\nORDER BY skus_to_reorder DESC NULLS LAST",
+      "compile_seconds": 0.0018308459993932047,
+      "query_seconds": 0.008472399999845948
+    },
+    {
+      "id": "coverage/c12",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_reviews.aspect AS review_aspect, COUNT(*) FILTER (WHERE product_reviews.moderation_status = 'Rejected') * 1.0 / NULLIF(COUNT(*), 0) AS rejected_share\nFROM product_reviews\nWHERE product_reviews.reviewed_at >= TIMESTAMP '2026-01-01' AND product_reviews.reviewed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY rejected_share DESC NULLS LAST",
+      "compile_seconds": 0.001982310000130383,
+      "query_seconds": 0.005261197999971046
+    },
+    {
+      "id": "coverage/c13",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.gender AS product_gender, (SUM(product_reviews.rating)) / NULLIF(COUNT(product_reviews.rating), 0) AS avg_rating\nFROM product_reviews\nLEFT JOIN product_master ON product_reviews.product_id = product_master.product_id\nWHERE product_reviews.moderation_status = 'Published'\nGROUP BY 1\nORDER BY avg_rating DESC NULLS LAST",
+      "compile_seconds": 0.005021339999984775,
+      "query_seconds": 0.006456965999859676
+    },
+    {
+      "id": "coverage/c14",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.age_bracket AS age_bracket, COUNT(*) AS prime_customers\nFROM customers\nWHERE customers.is_prime = TRUE\nGROUP BY 1\nORDER BY prime_customers DESC NULLS LAST",
+      "compile_seconds": 0.0011144899999635527,
+      "query_seconds": 0.0031961229997250484
+    },
+    {
+      "id": "coverage/c15",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.city_tier AS city_tier, customers.account_status AS account_status, COUNT(*) AS customers\nFROM customers\nGROUP BY 1, 2\nORDER BY customers DESC NULLS LAST",
+      "compile_seconds": 0.0011608370004978497,
+      "query_seconds": 0.003191312000126345
+    },
+    {
+      "id": "coverage/c16",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.cancel_reason AS cancel_reason, sales.cancelled_by AS cancelled_by, COUNT(*) AS cancelled_lines\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.cancelled_at IS NOT NULL AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1, 2\nORDER BY cancelled_lines DESC NULLS LAST",
+      "compile_seconds": 0.0021740410002166755,
+      "query_seconds": 0.006204864999745041
+    },
+    {
+      "id": "coverage/c17",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT q.return_type, q.returns, q.returns * 1.0 / NULLIF(SUM(q.returns) OVER (), 0) AS returns_share\nFROM (SELECT sales.return_type AS return_type, COUNT(*) AS returns\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.return_requested_at IS NOT NULL AND sales.return_requested_at >= TIMESTAMP '2025-01-01' AND sales.return_requested_at < TIMESTAMP '2026-01-01'\nGROUP BY 1) AS q\nORDER BY returns DESC NULLS LAST",
+      "compile_seconds": 0.002371364000282483,
+      "query_seconds": 0.00594429700049659
+    },
+    {
+      "id": "coverage/c18",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT q.size_fit, q.lines, q.lines * 1.0 / NULLIF(SUM(q.lines) OVER (), 0) AS lines_share\nFROM (SELECT sales.size_fit AS size_fit, COUNT(*) AS lines\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Apparel' AND sales.delivered_at IS NOT NULL AND sales.delivered_at >= TIMESTAMP '2026-01-01' AND sales.delivered_at < TIMESTAMP '2027-01-01'\nGROUP BY 1) AS q\nORDER BY lines DESC NULLS LAST",
+      "compile_seconds": 0.003153051000481355,
+      "query_seconds": 0.008831891000227188
+    },
+    {
+      "id": "coverage/c19",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.traffic_source AS traffic_source, (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY aov DESC NULLS LAST",
+      "compile_seconds": 0.008599627999501536,
+      "query_seconds": 0.012252358999830903
+    },
+    {
+      "id": "coverage/c20",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.order_status AS order_status, COUNT(*) AS order_lines\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY order_lines DESC NULLS LAST",
+      "compile_seconds": 0.001436845999705838,
+      "query_seconds": 0.005330437000338861
+    },
+    {
+      "id": "coverage/c21",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(DISTINCT clickstream.session_id) FILTER (WHERE clickstream.event_type = 'pdp_view') AS product_view_sessions, COUNT(DISTINCT clickstream.session_id) FILTER (WHERE clickstream.event_type = 'add_to_cart') AS add_to_cart_sessions, COUNT(DISTINCT clickstream.session_id) FILTER (WHERE clickstream.event_type = 'purchase') AS purchase_sessions\nFROM clickstream\nWHERE clickstream.event_at >= TIMESTAMP '2026-10-01' AND clickstream.event_at < TIMESTAMP '2026-11-01'",
+      "compile_seconds": 0.0023382569997920655,
+      "query_seconds": 0.07014389300002222
+    },
+    {
+      "id": "coverage/c22",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.surface AS surface, COUNT(*) FILTER (WHERE impressions.added_to_cart = TRUE) * 1.0 / NULLIF(COUNT(*), 0) AS add_to_cart_share\nFROM impressions\nWHERE impressions.shown_at >= TIMESTAMP '2026-01-01' AND impressions.shown_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY add_to_cart_share DESC NULLS LAST",
+      "compile_seconds": 0.0015694519997850875,
+      "query_seconds": 0.37732269800017093
+    },
+    {
+      "id": "coverage/c23",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sale_events.event_type AS event_type, COUNT(*) AS events, AVG(sale_events.demand_uplift) AS avg_demand_uplift\nFROM sale_events\nWHERE sale_events.start_date IS NOT NULL AND sale_events.start_date >= TIMESTAMP '2026-01-01' AND sale_events.start_date < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY events DESC NULLS LAST",
+      "compile_seconds": 0.002684365999812144,
+      "query_seconds": 0.009468166999795358
+    },
+    {
+      "id": "coverage/c24",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT marketing_spend.region AS region, SUM(marketing_spend.spend) AS spend, SUM(marketing_spend.clicks) AS clicks, SUM(marketing_spend.impressions) AS impressions, (SUM(marketing_spend.clicks)) * 1.0 / NULLIF((SUM(marketing_spend.impressions)), 0) AS ad_ctr\nFROM marketing_spend\nWHERE marketing_spend.date_hour >= TIMESTAMP '2026-01-01' AND marketing_spend.date_hour < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY spend DESC NULLS LAST",
+      "compile_seconds": 0.035608752999905846,
+      "query_seconds": 0.021066974999484955
+    },
+    {
+      "id": "flow/flow-case",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.brand_name = 'ADIDAS'",
+      "compile_seconds": 0.00480450099985319,
+      "query_seconds": 0.0070745439998063375
+    },
+    {
+      "id": "flow/flow-complete",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST",
+      "compile_seconds": 0.0055350150005324394,
+      "query_seconds": 0.017442719000428042
+    },
+    {
+      "id": "flow/flow-context",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.payment_method AS payment_method, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.ship_city = 'Mumbai'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.002928707999672042,
+      "query_seconds": 0.00838594800006831
+    },
+    {
+      "id": "flow/flow-values",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.ship_city AS city, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.ship_city IN ('Mumbai', 'Pune') AND sales.shipped_at IS NOT NULL\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.006714469000144163,
+      "query_seconds": 0.008125254999868048
+    },
+    {
+      "id": "flow/flow-destinations",
+      "repeat": 0,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.ship_city AS city, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.ship_city IN ('Mumbai', 'Pune')\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.0029328749997148407,
+      "query_seconds": 0.007356461000199488
+    },
+    {
+      "id": "regression/e01",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(*) AS customers\nFROM customers",
+      "compile_seconds": 0.00046221199954743497,
+      "query_seconds": 0.024611699000161025
+    },
+    {
+      "id": "regression/e02",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(*) AS active_products\nFROM product_master\nWHERE product_master.is_active = TRUE",
+      "compile_seconds": 0.001026257000376063,
+      "query_seconds": 0.002876245999686944
+    },
+    {
+      "id": "regression/e03",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale'",
+      "compile_seconds": 0.0035720129999390338,
+      "query_seconds": 0.006418410999685875
+    },
+    {
+      "id": "regression/e04",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.payment_method AS payment_method, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.003256996999880357,
+      "query_seconds": 0.007997258000614238
+    },
+    {
+      "id": "regression/e05",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(*) FILTER (WHERE customers.is_prime = TRUE) * 1.0 / NULLIF(COUNT(*), 0) AS prime_share, COUNT(*) AS customers\nFROM customers",
+      "compile_seconds": 0.0014947540003049653,
+      "query_seconds": 0.002675888999874587
+    },
+    {
+      "id": "regression/e06",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nWHERE sales.line_type = 'Sale'",
+      "compile_seconds": 0.00361442800021905,
+      "query_seconds": 0.007979946999512322
+    },
+    {
+      "id": "regression/m01",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nWHERE sales.line_type = 'Sale'",
+      "compile_seconds": 0.006314057000054163,
+      "query_seconds": 0.009704748999865842
+    },
+    {
+      "id": "regression/m02",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', sales.placed_at) AS month, COUNT(DISTINCT sales.order_id) AS orders, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.005886605999876338,
+      "query_seconds": 0.0429253760003121
+    },
+    {
+      "id": "regression/m03",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST",
+      "compile_seconds": 0.00569697199989605,
+      "query_seconds": 0.046850851999806764
+    },
+    {
+      "id": "regression/m04",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate, COUNT(*) FILTER (WHERE sales.delivered_at IS NOT NULL) AS delivered_lines\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.006467721999797504,
+      "query_seconds": 0.0134402930007127
+    },
+    {
+      "id": "regression/m05",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT q.return_reason, q.returned_lines, q.returned_lines * 1.0 / NULLIF(SUM(q.returned_lines) OVER (), 0) AS returned_lines_share\nFROM (SELECT sales.return_reason AS return_reason, COUNT(*) AS returned_lines\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.return_requested_at IS NOT NULL\nGROUP BY 1) AS q\nORDER BY returned_lines DESC NULLS LAST",
+      "compile_seconds": 0.003173912999955064,
+      "query_seconds": 0.007548309000412701
+    },
+    {
+      "id": "regression/m06",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type, (COUNT(*) FILTER(WHERE NOT sales.rto_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.shipped_at IS NULL), 0) AS rto_rate, COUNT(*) FILTER (WHERE sales.shipped_at IS NOT NULL) AS shipped_lines\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY rto_rate DESC NULLS LAST",
+      "compile_seconds": 0.007351813000241236,
+      "query_seconds": 0.03843106299973442
+    },
+    {
+      "id": "regression/m07",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.position AS list_position, (COUNT(*) FILTER(WHERE impressions.clicked)) / NULLIF(COUNT(*), 0) AS ctr, COUNT(*) AS impressions\nFROM impressions\nWHERE impressions.position <= 10.0\nGROUP BY 1\nORDER BY ctr DESC NULLS LAST",
+      "compile_seconds": 0.0054436270002042875,
+      "query_seconds": 0.39512177600045106
+    },
+    {
+      "id": "regression/m08",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT inventory_live.sku_id AS sku_id, product_master.product_name AS product_name, product_master.category AS category, inventory_live.inbound_qty AS inbound_qty\nFROM inventory_live\nLEFT JOIN product_master ON inventory_live.product_id = product_master.product_id\nWHERE inventory_live.on_hand_qty <= 0.0 AND product_master.is_active = TRUE\nORDER BY 1, 2, 3, 4\nLIMIT 100",
+      "compile_seconds": 0.0004646839997803909,
+      "query_seconds": 0.012635893999686232
+    },
+    {
+      "id": "regression/m09",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel_group AS channel_group, campaigns.channel AS marketing_channel, SUM(marketing_spend.spend) AS spend\nFROM marketing_spend\nLEFT JOIN campaigns ON marketing_spend.campaign_id = campaigns.campaign_id\nGROUP BY 1, 2\nORDER BY spend DESC NULLS LAST",
+      "compile_seconds": 0.002460349000102724,
+      "query_seconds": 0.024519085999600065
+    },
+    {
+      "id": "regression/m10",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, (SUM(product_reviews.rating)) / NULLIF(COUNT(product_reviews.rating), 0) AS avg_rating, (COUNT(*) FILTER(WHERE product_reviews.sentiment = 'Negative')) / NULLIF(COUNT(*), 0) AS negative_share, COUNT(*) AS reviews\nFROM product_reviews\nLEFT JOIN product_master ON product_reviews.product_id = product_master.product_id\nWHERE product_reviews.moderation_status = 'Published'\nGROUP BY 1\nORDER BY avg_rating DESC NULLS LAST",
+      "compile_seconds": 0.007248333999996248,
+      "query_seconds": 0.011600677999922482
+    },
+    {
+      "id": "regression/m11",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT support_contacts.issue_category AS issue, COUNT(DISTINCT support_contacts.ticket_id) AS tickets, (SUM(support_contacts.csat)) / NULLIF(COUNT(support_contacts.csat), 0) AS avg_csat, (SUM(support_contacts.first_response_minutes)) / NULLIF(COUNT(support_contacts.first_response_minutes), 0) AS avg_first_response_minutes\nFROM support_contacts\nGROUP BY 1\nORDER BY tickets DESC NULLS LAST",
+      "compile_seconds": 0.004679081999711343,
+      "query_seconds": 0.006362467000144534
+    },
+    {
+      "id": "regression/m12",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.is_first_order THEN 'New' ELSE 'Repeat' END AS new_or_repeat, COUNT(DISTINCT sales.order_id) AS orders, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.005408727000030922,
+      "query_seconds": 0.0154134909998902
+    },
+    {
+      "id": "regression/h01",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT clickstream.device AS device, (COUNT(DISTINCT CASE WHEN clickstream.event_type = 'purchase' THEN clickstream.session_id END)) / NULLIF(COUNT(DISTINCT clickstream.session_id), 0) AS conversion_rate, COUNT(DISTINCT clickstream.session_id) AS sessions\nFROM clickstream\nGROUP BY 1\nORDER BY conversion_rate DESC NULLS LAST",
+      "compile_seconds": 0.0035012540001844172,
+      "query_seconds": 0.47888414000044577
+    },
+    {
+      "id": "regression/h02",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sale_events.event_id AS event_id, sale_events.name AS sale_event, COUNT(DISTINCT sales.order_id) AS orders, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue, SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END) AS net_sales\nFROM sales\nJOIN sale_events ON sales.placed_at >= sale_events.start_date AND sales.placed_at < sale_events.end_date + INTERVAL 1 DAY\nWHERE sales.line_type = 'Sale' AND sale_events.name IN ('Diwali 2025', 'Diwali 2026')\nGROUP BY 1, 2\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.0065534049999769195,
+      "query_seconds": 0.019392700999560475
+    },
+    {
+      "id": "regression/h03",
+      "repeat": 1,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH daily AS (\n  SELECT CAST(placed_at AS DATE) AS day, SUM(CASE WHEN cancelled_at IS NULL THEN net_amount ELSE 0 END) AS net_sales\n  FROM sales WHERE line_type = 'Sale' GROUP BY 1)\nSELECT e.event_id, e.name, CAST(e.start_date AS DATE) AS start_date, CAST(e.end_date AS DATE) AS end_date,\n       COALESCE(SUM(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date AND e.end_date), 0)\n         / (date_diff('day', e.start_date, e.end_date) + 1) AS event_daily_net_sales,\n       COALESCE(SUM(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date - INTERVAL 14 DAY\n                                            AND e.start_date - INTERVAL 1 DAY), 0) / 14 AS before_daily_net_sales,\n       event_daily_net_sales / NULLIF(before_daily_net_sales, 0) - 1 AS lift\nFROM sale_events e LEFT JOIN daily d ON d.day BETWEEN e.start_date - INTERVAL 14 DAY AND e.end_date\nWHERE e.end_date <= (SELECT MAX(day) FROM daily)\n  AND e.start_date - INTERVAL 14 DAY >= (SELECT MIN(day) FROM daily)\nGROUP BY e.event_id, e.name, e.start_date, e.end_date\nORDER BY lift DESC",
+      "compile_seconds": 5.4556000577576924e-05,
+      "query_seconds": 0.010236523999992642
+    },
+    {
+      "id": "regression/h04",
+      "repeat": 1,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH revenue AS (\n  SELECT c.channel, SUM(a.credit_last_click * a.order_revenue) AS last_click_revenue\n  FROM marketing_attribution a JOIN campaigns c ON c.campaign_id = a.campaign_id GROUP BY 1),\nspend AS (\n  SELECT c.channel, SUM(m.spend) AS spend\n  FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id GROUP BY 1)\nSELECT s.channel, r.last_click_revenue, s.spend, r.last_click_revenue / NULLIF(s.spend, 0) AS roas_last_click\nFROM spend s LEFT JOIN revenue r ON r.channel = s.channel\nORDER BY roas_last_click DESC NULLS LAST",
+      "compile_seconds": 4.645999979402404e-05,
+      "query_seconds": 0.037344838999160856
+    },
+    {
+      "id": "regression/h05",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.campaign_id AS campaign_id, campaigns.campaign_name AS campaign, marketing_attribution.channel_group AS channel_group, SUM(marketing_attribution.credit_last_click * marketing_attribution.order_revenue) AS last_click_revenue\nFROM marketing_attribution\nLEFT JOIN campaigns ON marketing_attribution.campaign_id = campaigns.campaign_id\nWHERE NOT marketing_attribution.campaign_id IS NULL\nGROUP BY 1, 2, 3\nORDER BY last_click_revenue DESC NULLS LAST\nLIMIT 10",
+      "compile_seconds": 0.003203376999408647,
+      "query_seconds": 0.016305760000250302
+    },
+    {
+      "id": "regression/h06",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.courier AS courier, (COUNT(*) FILTER(WHERE CAST(sales.delivered_at AS DATE) > CAST(sales.promised_delivery_date AS DATE))) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS late_delivery_rate, COUNT(*) FILTER (WHERE sales.delivered_at IS NOT NULL) AS delivered_lines\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY late_delivery_rate DESC NULLS LAST",
+      "compile_seconds": 0.0041571820001991,
+      "query_seconds": 0.005819578000227921
+    },
+    {
+      "id": "regression/h07",
+      "repeat": 1,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH platform AS (\n  SELECT c.channel, SUM(m.platform_conversions) AS platform_orders\n  FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id\n  WHERE c.channel_group IN ('Paid Search', 'Paid Social', 'Display') GROUP BY 1),\nshop AS (\n  SELECT c.channel, COUNT(DISTINCT s.order_id) AS recorded_orders\n  FROM sales s JOIN campaigns c ON c.campaign_id = s.campaign_id\n  WHERE s.line_type = 'Sale' GROUP BY 1)\nSELECT p.channel, p.platform_orders, sh.recorded_orders,\n       p.platform_orders * 1.0 / NULLIF(sh.recorded_orders, 0) AS over_reporting\nFROM platform p LEFT JOIN shop sh ON sh.channel = p.channel\nORDER BY over_reporting DESC NULLS LAST",
+      "compile_seconds": 4.7620000259485096e-05,
+      "query_seconds": 0.02914255699943169
+    },
+    {
+      "id": "regression/h08",
+      "repeat": 1,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH firsts AS (\n  SELECT customer_id, MIN(placed_at) AS first_at FROM sales WHERE line_type = 'Sale' GROUP BY 1),\neligible AS (\n  SELECT customer_id, first_at FROM firsts\n  WHERE first_at <= (SELECT MAX(placed_at) FROM sales) - INTERVAL 90 DAY),\nagain AS (\n  SELECT DISTINCT e.customer_id FROM eligible e JOIN sales s ON s.customer_id = e.customer_id\n  WHERE s.line_type = 'Sale' AND s.placed_at > e.first_at AND s.placed_at <= e.first_at + INTERVAL 90 DAY)\nSELECT COUNT(a.customer_id) * 1.0 / NULLIF(COUNT(*), 0) AS repeat_share, COUNT(*) AS buyers\nFROM eligible e LEFT JOIN again a ON a.customer_id = e.customer_id",
+      "compile_seconds": 4.770800023834454e-05,
+      "query_seconds": 0.015363436000370712
+    },
+    {
+      "id": "regression/h09",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, product_skus.size AS size, SUM(inventory_history.lost_sales_units) AS lost_units, SUM(inventory_history.demand_units) AS demand_units, (SUM(inventory_history.lost_sales_units)) * 1.0 / NULLIF((SUM(inventory_history.demand_units)), 0) AS lost_share\nFROM inventory_history\nLEFT JOIN product_master ON inventory_history.product_id = product_master.product_id\nLEFT JOIN product_skus ON inventory_history.sku_id = product_skus.sku_id\nGROUP BY 1, 2\nORDER BY lost_units DESC NULLS LAST\nLIMIT 20",
+      "compile_seconds": 0.0023847840002417797,
+      "query_seconds": 0.043363987000702764
+    },
+    {
+      "id": "regression/h10",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, sales.size_fit AS size_fit, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate, COUNT(*) AS delivered_lines\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND sales.delivered_at IS NOT NULL AND product_master.category IN ('Footwear', 'Apparel')\nGROUP BY 1, 2\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.004433541999787849,
+      "query_seconds": 0.00812782100001641
+    },
+    {
+      "id": "regression/n01",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.event_id IS NULL THEN 'Normal day' ELSE 'Sale-event day' END AS day_type, (SUM((sales.mrp - sales.unit_price) * sales.quantity)) / NULLIF(SUM(sales.mrp * sales.quantity), 0) AS avg_discount_pct\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY avg_discount_pct DESC NULLS LAST",
+      "compile_seconds": 0.0036578259996531415,
+      "query_seconds": 0.0050583219999680296
+    },
+    {
+      "id": "regression/n02",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.region AS region, COUNT(*) AS customers\nFROM customers\nGROUP BY 1\nORDER BY customers DESC NULLS LAST",
+      "compile_seconds": 0.0007144470000639558,
+      "query_seconds": 0.003812012999333092
+    },
+    {
+      "id": "regression/n03",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT (COUNT(*) FILTER(WHERE tickets.resolution_status = 'Resolved')) / NULLIF(COUNT(*), 0) AS ticket_resolution_rate\nFROM ((SELECT ticket_id, MIN(contact_at) AS opened_at,\n        arg_min(channel, contact_at) AS channel, arg_min(issue_category, contact_at) AS issue_category,\n        arg_max(resolution_status, contact_at) AS resolution_status, COUNT(*) AS contacts\n FROM support_contacts GROUP BY ticket_id)) AS tickets",
+      "compile_seconds": 0.003182548000040697,
+      "query_seconds": 0.0046037130005061044
+    },
+    {
+      "id": "regression/n04",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', marketing_spend.date_hour) AS month, SUM(marketing_spend.spend) AS spend\nFROM marketing_spend\nWHERE marketing_spend.date_hour >= TIMESTAMP '2026-01-01' AND marketing_spend.date_hour < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.0025719459999891114,
+      "query_seconds": 0.020687507999355148
+    },
+    {
+      "id": "regression/n05",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.ship_city AS city, (COUNT(*) FILTER(WHERE NOT sales.rto_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.shipped_at IS NULL), 0) AS rto_rate\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY rto_rate DESC NULLS LAST\nLIMIT 10",
+      "compile_seconds": 0.002715401000386919,
+      "query_seconds": 0.007308054000532138
+    },
+    {
+      "id": "regression/n06",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sellers.seller_type AS seller_type, (COUNT(*) FILTER(WHERE NOT sales.cancelled_at IS NULL)) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nLEFT JOIN sellers ON sales.seller_id = sellers.seller_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY cancellation_rate DESC NULLS LAST",
+      "compile_seconds": 0.003911735999281518,
+      "query_seconds": 0.007708333000664425
+    },
+    {
+      "id": "regression/n07",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT clickstream.traffic_source AS traffic_source, (COUNT(DISTINCT CASE WHEN clickstream.event_type = 'purchase' THEN clickstream.session_id END)) / NULLIF(COUNT(DISTINCT clickstream.session_id), 0) AS conversion_rate\nFROM clickstream\nGROUP BY 1\nORDER BY conversion_rate DESC NULLS LAST",
+      "compile_seconds": 0.0033939730001293356,
+      "query_seconds": 0.48018760700051644
+    },
+    {
+      "id": "regression/n08",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, (SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee - sales.unit_cost * sales.quantity END)) / NULLIF(SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee END), 0) AS gross_margin_pct\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY gross_margin_pct DESC NULLS LAST",
+      "compile_seconds": 0.02249561000007816,
+      "query_seconds": 0.01420532500014815
+    },
+    {
+      "id": "regression/n09",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT (SUM(product_reviews.rating)) / NULLIF(COUNT(product_reviews.rating), 0) AS avg_rating\nFROM product_reviews\nWHERE product_reviews.moderation_status = 'Published'",
+      "compile_seconds": 0.0019680049999806215,
+      "query_seconds": 0.0024084500000753906
+    },
+    {
+      "id": "regression/n10",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.surface AS surface, (COUNT(*) FILTER(WHERE impressions.clicked)) / NULLIF(COUNT(*), 0) AS ctr\nFROM impressions\nGROUP BY 1\nORDER BY ctr DESC NULLS LAST",
+      "compile_seconds": 0.0020790219996342785,
+      "query_seconds": 0.15649172699977498
+    },
+    {
+      "id": "holdout/x01",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customer_addresses.region AS region, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN customer_addresses ON sales.address_id = customer_addresses.address_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST",
+      "compile_seconds": 0.005863734000740806,
+      "query_seconds": 0.01819201400030579
+    },
+    {
+      "id": "holdout/x02",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.sub_category AS sub_category, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Apparel'\nGROUP BY 1\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.006297951999840734,
+      "query_seconds": 0.01994637500047247
+    },
+    {
+      "id": "holdout/x03",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.is_prime AS prime, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nLEFT JOIN customers ON sales.customer_id = customers.customer_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.004036865999296424,
+      "query_seconds": 0.01780790300017543
+    },
+    {
+      "id": "holdout/x04",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.device AS device, (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY aov DESC NULLS LAST",
+      "compile_seconds": 0.00800911799979076,
+      "query_seconds": 0.028299155000240717
+    },
+    {
+      "id": "holdout/x05",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.warehouse_id AS warehouse, (COUNT(*) FILTER(WHERE CAST(sales.delivered_at AS DATE) > CAST(sales.promised_delivery_date AS DATE))) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS late_delivery_rate\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY late_delivery_rate DESC NULLS LAST",
+      "compile_seconds": 0.005698201000086556,
+      "query_seconds": 0.006936349999705271
+    },
+    {
+      "id": "holdout/x06",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel AS marketing_channel, (SUM(marketing_spend.spend) FILTER(WHERE campaigns.channel_group IN ('Paid Search', 'Paid Social', 'Display'))) / NULLIF(SUM(marketing_spend.clicks) FILTER(WHERE campaigns.channel_group IN ('Paid Search', 'Paid Social', 'Display')), 0) AS cpc\nFROM marketing_spend\nLEFT JOIN campaigns ON marketing_spend.campaign_id = campaigns.campaign_id\nWHERE campaigns.channel_group IN ('Paid Search', 'Paid Social', 'Display') AND marketing_spend.date_hour >= TIMESTAMP '2025-01-01' AND marketing_spend.date_hour < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY cpc DESC NULLS LAST",
+      "compile_seconds": 0.008112743999845407,
+      "query_seconds": 0.0335952030000044
+    },
+    {
+      "id": "holdout/x07",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT support_contacts.channel AS support_channel, (SUM(support_contacts.csat)) / NULLIF(COUNT(support_contacts.csat), 0) AS avg_csat\nFROM support_contacts\nGROUP BY 1\nORDER BY avg_csat DESC NULLS LAST",
+      "compile_seconds": 0.003018172999873059,
+      "query_seconds": 0.0073699299991858425
+    },
+    {
+      "id": "holdout/x08",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_reviews.aspect AS review_aspect, (COUNT(*) FILTER(WHERE product_reviews.sentiment = 'Negative')) / NULLIF(COUNT(*), 0) AS negative_review_share\nFROM product_reviews\nLEFT JOIN product_master ON product_reviews.product_id = product_master.product_id\nWHERE product_reviews.moderation_status = 'Published' AND product_master.category = 'Footwear'\nGROUP BY 1\nORDER BY negative_review_share DESC NULLS LAST",
+      "compile_seconds": 0.003943632000300568,
+      "query_seconds": 0.006711162999636144
+    },
+    {
+      "id": "holdout/x09",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', clickstream.event_at) AS month, (COUNT(DISTINCT CASE WHEN clickstream.event_type = 'purchase' THEN clickstream.session_id END)) / NULLIF(COUNT(DISTINCT clickstream.session_id), 0) AS conversion_rate\nFROM clickstream\nWHERE clickstream.event_at >= TIMESTAMP '2026-01-01' AND clickstream.event_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.03139879599984852,
+      "query_seconds": 0.3400148299997454
+    },
+    {
+      "id": "holdout/x10",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.brand_name AS brand, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST\nLIMIT 5",
+      "compile_seconds": 0.004545190000499133,
+      "query_seconds": 0.009867339999800606
+    },
+    {
+      "id": "holdout/x11",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type, (COUNT(*) FILTER(WHERE NOT sales.cancelled_at IS NULL)) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY cancellation_rate DESC NULLS LAST",
+      "compile_seconds": 0.003357221000442223,
+      "query_seconds": 0.0063339360003737966
+    },
+    {
+      "id": "holdout/x12",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT inventory_history.warehouse_id AS warehouse, SUM(inventory_history.lost_sales_units) AS lost_sales_units\nFROM inventory_history\nGROUP BY 1\nORDER BY lost_sales_units DESC NULLS LAST",
+      "compile_seconds": 0.0016679820000717882,
+      "query_seconds": 0.0061810460001652245
+    },
+    {
+      "id": "holdout/x13",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', sales.placed_at) AS month, (COUNT(DISTINCT CASE WHEN sales.is_first_order THEN sales.order_id END)) / NULLIF(COUNT(DISTINCT sales.order_id), 0) AS new_customer_order_share\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.005165895000573073,
+      "query_seconds": 0.011507715999869106
+    },
+    {
+      "id": "holdout/x14",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.position AS list_position, (COUNT(*) FILTER(WHERE impressions.clicked)) / NULLIF(COUNT(*), 0) AS ctr\nFROM impressions\nWHERE impressions.surface = 'home_recs' AND impressions.position <= 5.0\nGROUP BY 1\nORDER BY ctr DESC NULLS LAST",
+      "compile_seconds": 0.027794266999990214,
+      "query_seconds": 0.15395642700059398
+    },
+    {
+      "id": "holdout/y01",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.quantity ELSE 0 END) AS units_sold\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY units_sold DESC NULLS LAST",
+      "compile_seconds": 0.03131253999981709,
+      "query_seconds": 0.013038937999226619
+    },
+    {
+      "id": "holdout/y02",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.courier AS courier, (SUM(DATE_DIFF('HOUR', sales.placed_at, sales.delivered_at)) / 24.0) / NULLIF(COUNT(sales.delivered_at), 0) AS avg_delivery_days\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY avg_delivery_days DESC NULLS LAST",
+      "compile_seconds": 0.006175159000122221,
+      "query_seconds": 0.005640471000333491
+    },
+    {
+      "id": "holdout/y03",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('quarter', sales.placed_at) AS quarter, SUM(sales.gross_amount) AS gross_sales\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY quarter",
+      "compile_seconds": 0.0029557200005001505,
+      "query_seconds": 0.004887451999820769
+    },
+    {
+      "id": "holdout/y04",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.gender AS product_gender, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.gender IN ('Women', 'Men')\nGROUP BY 1\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.0048348549998991075,
+      "query_seconds": 0.01818467100019916
+    },
+    {
+      "id": "holdout/y05",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT clickstream.traffic_source AS traffic_source, COUNT(DISTINCT clickstream.session_id) AS sessions\nFROM clickstream\nWHERE clickstream.event_at >= TIMESTAMP '2026-10-01' AND clickstream.event_at < TIMESTAMP '2026-11-01'\nGROUP BY 1\nORDER BY sessions DESC NULLS LAST",
+      "compile_seconds": 0.0024563349998061312,
+      "query_seconds": 0.040730165999775636
+    },
+    {
+      "id": "holdout/y06",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel_group AS channel_group, (SUM(marketing_spend.platform_revenue) FILTER(WHERE campaigns.channel_group <> 'CRM')) / NULLIF(SUM(marketing_spend.spend) FILTER(WHERE campaigns.channel_group <> 'CRM'), 0) AS platform_roas\nFROM marketing_spend\nLEFT JOIN campaigns ON marketing_spend.campaign_id = campaigns.campaign_id\nWHERE campaigns.channel_group NOT IN ('CRM')\nGROUP BY 1\nORDER BY platform_roas DESC NULLS LAST",
+      "compile_seconds": 0.00412829899960343,
+      "query_seconds": 0.024172242000531696
+    },
+    {
+      "id": "holdout/y07",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', tickets.opened_at) AS month, COUNT(*) AS support_tickets\nFROM ((SELECT ticket_id, MIN(contact_at) AS opened_at,\n        arg_min(channel, contact_at) AS channel, arg_min(issue_category, contact_at) AS issue_category,\n        arg_max(resolution_status, contact_at) AS resolution_status, COUNT(*) AS contacts\n FROM support_contacts GROUP BY ticket_id)) AS tickets\nWHERE tickets.opened_at >= TIMESTAMP '2026-01-01' AND tickets.opened_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.16794707999997627,
+      "query_seconds": 0.017347062000226288
+    },
+    {
+      "id": "holdout/y08",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT support_contacts.channel AS support_channel, (SUM(support_contacts.first_response_minutes)) / NULLIF(COUNT(support_contacts.first_response_minutes), 0) AS avg_first_response_minutes\nFROM support_contacts\nGROUP BY 1\nORDER BY avg_first_response_minutes DESC NULLS LAST",
+      "compile_seconds": 0.002918502999818884,
+      "query_seconds": 0.005989694000163581
+    },
+    {
+      "id": "holdout/y09",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.usage AS usage, (SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee - sales.unit_cost * sales.quantity END)) / NULLIF(SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee END), 0) AS gross_margin_pct\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY gross_margin_pct DESC NULLS LAST",
+      "compile_seconds": 0.041812856000433385,
+      "query_seconds": 0.015196865000689286
+    },
+    {
+      "id": "holdout/y10",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customer_addresses.city_tier AS city_tier, (COUNT(*) FILTER(WHERE NOT sales.rto_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.shipped_at IS NULL), 0) AS rto_rate\nFROM sales\nLEFT JOIN customer_addresses ON sales.address_id = customer_addresses.address_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY rto_rate DESC NULLS LAST",
+      "compile_seconds": 0.004780983999808086,
+      "query_seconds": 0.06779864600048313
+    },
+    {
+      "id": "holdout/y11",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.signup_channel AS traffic_source, COUNT(*) AS customers\nFROM customers\nWHERE customers.signup_at >= TIMESTAMP '2026-01-01' AND customers.signup_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY customers DESC NULLS LAST",
+      "compile_seconds": 0.001574848999553069,
+      "query_seconds": 0.005818863000058627
+    },
+    {
+      "id": "holdout/y12",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.brand_name AS brand, (SUM((sales.mrp - sales.unit_price) * sales.quantity)) / NULLIF(SUM(sales.mrp * sales.quantity), 0) AS avg_discount_pct, SUM(sales.quantity) AS units\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Footwear'\nGROUP BY 1\nORDER BY units DESC NULLS LAST\nLIMIT 5",
+      "compile_seconds": 0.01096155000050203,
+      "query_seconds": 0.014931192999938503
+    },
+    {
+      "id": "holdout/y13",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.surface AS surface, COUNT(*) AS impressions\nFROM impressions\nGROUP BY 1\nORDER BY impressions DESC NULLS LAST",
+      "compile_seconds": 0.0009387889995196019,
+      "query_seconds": 0.14066566200017405
+    },
+    {
+      "id": "holdout/y14",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.is_prime AS prime, (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nLEFT JOIN customers ON sales.customer_id = customers.customer_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY aov DESC NULLS LAST",
+      "compile_seconds": 0.005419188000814756,
+      "query_seconds": 0.053468856000108644
+    },
+    {
+      "id": "holdout/y15",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT inventory_live.warehouse_id AS warehouse, SUM(inventory_live.on_hand_qty) AS on_hand_units\nFROM inventory_live\nGROUP BY 1\nORDER BY on_hand_units DESC NULLS LAST",
+      "compile_seconds": 0.0011578599996937555,
+      "query_seconds": 0.005065219999778492
+    },
+    {
+      "id": "holdout/y16",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customer_addresses.region AS region, (COUNT(*) FILTER(WHERE CAST(sales.delivered_at AS DATE) > CAST(sales.promised_delivery_date AS DATE))) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS late_delivery_rate\nFROM sales\nLEFT JOIN customer_addresses ON sales.address_id = customer_addresses.address_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY late_delivery_rate DESC NULLS LAST",
+      "compile_seconds": 0.007992400000148336,
+      "query_seconds": 0.020924055999785196
+    },
+    {
+      "id": "holdout/z01",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2024-12-01' AND sales.placed_at < TIMESTAMP '2025-01-01'",
+      "compile_seconds": 0.0032951700004559825,
+      "query_seconds": 0.0037989800002833363
+    },
+    {
+      "id": "coverage/c01",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT warehouses.city AS warehouse_city, SUM(inventory_live.on_hand_qty) AS units_on_hand, MAX(warehouses.capacity_units) AS capacity, (SUM(inventory_live.on_hand_qty)) * 1.0 / NULLIF((MAX(warehouses.capacity_units)), 0) AS capacity_used\nFROM inventory_live\nLEFT JOIN warehouses ON inventory_live.warehouse_id = warehouses.warehouse_id\nGROUP BY 1\nORDER BY units_on_hand DESC NULLS LAST",
+      "compile_seconds": 0.002807193999615265,
+      "query_seconds": 0.00847937200069282
+    },
+    {
+      "id": "coverage/c02",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT agents.team AS team, COUNT(*) FILTER (WHERE support_contacts.resolution_status = 'Escalated') * 1.0 / NULLIF(COUNT(*), 0) AS escalated_share\nFROM support_contacts\nLEFT JOIN agents ON support_contacts.agent_id = agents.agent_id\nWHERE support_contacts.contact_at >= TIMESTAMP '2026-01-01' AND support_contacts.contact_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY escalated_share DESC NULLS LAST",
+      "compile_seconds": 0.003032130999599758,
+      "query_seconds": 0.009344563000013295
+    },
+    {
+      "id": "coverage/c03",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT agents.language AS language, COUNT(*) AS contacts, (SUM(support_contacts.csat)) / NULLIF(COUNT(support_contacts.csat), 0) AS avg_csat\nFROM support_contacts\nLEFT JOIN agents ON support_contacts.agent_id = agents.agent_id\nWHERE support_contacts.contact_at >= TIMESTAMP '2025-01-01' AND support_contacts.contact_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY contacts DESC NULLS LAST",
+      "compile_seconds": 0.005018381000809313,
+      "query_seconds": 0.00602485300078115
+    },
+    {
+      "id": "coverage/c04",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT promotions.eligible_audience AS eligible_audience, COUNT(*) AS coupons, AVG(promotions.min_order_value) AS avg_min_order_value\nFROM promotions\nGROUP BY 1\nORDER BY coupons DESC NULLS LAST",
+      "compile_seconds": 0.0014166219998514862,
+      "query_seconds": 0.007261863000167068
+    },
+    {
+      "id": "coverage/c05",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel_group AS channel_group, SUM(marketing_plan.planned_spend) AS planned_spend, SUM(marketing_plan.target_revenue) AS target_revenue\nFROM marketing_plan\nLEFT JOIN campaigns ON marketing_plan.campaign_id = campaigns.campaign_id\nWHERE marketing_plan.date >= TIMESTAMP '2025-01-01' AND marketing_plan.date < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY planned_spend DESC NULLS LAST",
+      "compile_seconds": 0.0509645800002545,
+      "query_seconds": 0.013210662000346929
+    },
+    {
+      "id": "coverage/c06",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, COUNT(*) AS clearance_price_changes\nFROM price_history\nLEFT JOIN product_master ON price_history.product_id = product_master.product_id\nWHERE price_history.price_change_reason = 'Clearance' AND price_history.valid_from >= TIMESTAMP '2026-01-01' AND price_history.valid_from < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY clearance_price_changes DESC NULLS LAST",
+      "compile_seconds": 0.03639123199991445,
+      "query_seconds": 0.00752899899998738
+    },
+    {
+      "id": "coverage/c07",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', auth_events.event_at) AS month, COUNT(*) AS otp_failures\nFROM auth_events\nWHERE auth_events.event_type = 'otp_failed' AND auth_events.event_at >= TIMESTAMP '2026-01-01' AND auth_events.event_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.0021010380005463958,
+      "query_seconds": 0.012775021000379638
+    },
+    {
+      "id": "coverage/c08",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sellers.seller_type AS seller_type, AVG(sellers.rating) AS avg_rating, AVG(sellers.fulfillment_score) AS avg_fulfillment_score\nFROM sellers\nGROUP BY 1\nORDER BY avg_rating DESC NULLS LAST",
+      "compile_seconds": 0.0017004580004140735,
+      "query_seconds": 0.003912479999598872
+    },
+    {
+      "id": "coverage/c09",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sellers.region AS region, (COUNT(*) FILTER(WHERE NOT sales.cancelled_at IS NULL)) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nLEFT JOIN sellers ON sales.seller_id = sellers.seller_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY cancellation_rate DESC NULLS LAST",
+      "compile_seconds": 0.008668806000059703,
+      "query_seconds": 0.010883611000281235
+    },
+    {
+      "id": "coverage/c10",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_skus.size AS size, SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.quantity ELSE 0 END) AS units_sold\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nLEFT JOIN product_skus ON sales.sku_id = product_skus.sku_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Footwear' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY units_sold DESC NULLS LAST",
+      "compile_seconds": 0.006518666999909328,
+      "query_seconds": 0.013976862000163237
+    },
+    {
+      "id": "coverage/c11",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, COUNT(*) AS skus_to_reorder\nFROM inventory_live\nLEFT JOIN product_master ON inventory_live.product_id = product_master.product_id\nWHERE inventory_live.on_hand_qty <= inventory_live.reorder_point\nGROUP BY 1\nORDER BY skus_to_reorder DESC NULLS LAST",
+      "compile_seconds": 0.0013816159998896183,
+      "query_seconds": 0.02610544300023321
+    },
+    {
+      "id": "coverage/c12",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_reviews.aspect AS review_aspect, COUNT(*) FILTER (WHERE product_reviews.moderation_status = 'Rejected') * 1.0 / NULLIF(COUNT(*), 0) AS rejected_share\nFROM product_reviews\nWHERE product_reviews.reviewed_at >= TIMESTAMP '2026-01-01' AND product_reviews.reviewed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY rejected_share DESC NULLS LAST",
+      "compile_seconds": 0.0027439249997769366,
+      "query_seconds": 0.009304991999670165
+    },
+    {
+      "id": "coverage/c13",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.gender AS product_gender, (SUM(product_reviews.rating)) / NULLIF(COUNT(product_reviews.rating), 0) AS avg_rating\nFROM product_reviews\nLEFT JOIN product_master ON product_reviews.product_id = product_master.product_id\nWHERE product_reviews.moderation_status = 'Published'\nGROUP BY 1\nORDER BY avg_rating DESC NULLS LAST",
+      "compile_seconds": 0.006799117999435111,
+      "query_seconds": 0.031676792000325804
+    },
+    {
+      "id": "coverage/c14",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.age_bracket AS age_bracket, COUNT(*) AS prime_customers\nFROM customers\nWHERE customers.is_prime = TRUE\nGROUP BY 1\nORDER BY prime_customers DESC NULLS LAST",
+      "compile_seconds": 0.001378597999973863,
+      "query_seconds": 0.0071024910002961406
+    },
+    {
+      "id": "coverage/c15",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.city_tier AS city_tier, customers.account_status AS account_status, COUNT(*) AS customers\nFROM customers\nGROUP BY 1, 2\nORDER BY customers DESC NULLS LAST",
+      "compile_seconds": 0.0014282239999374724,
+      "query_seconds": 0.004272655000022496
+    },
+    {
+      "id": "coverage/c16",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.cancel_reason AS cancel_reason, sales.cancelled_by AS cancelled_by, COUNT(*) AS cancelled_lines\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.cancelled_at IS NOT NULL AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1, 2\nORDER BY cancelled_lines DESC NULLS LAST",
+      "compile_seconds": 0.03880610800024442,
+      "query_seconds": 0.015579764999529289
+    },
+    {
+      "id": "coverage/c17",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT q.return_type, q.returns, q.returns * 1.0 / NULLIF(SUM(q.returns) OVER (), 0) AS returns_share\nFROM (SELECT sales.return_type AS return_type, COUNT(*) AS returns\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.return_requested_at IS NOT NULL AND sales.return_requested_at >= TIMESTAMP '2025-01-01' AND sales.return_requested_at < TIMESTAMP '2026-01-01'\nGROUP BY 1) AS q\nORDER BY returns DESC NULLS LAST",
+      "compile_seconds": 0.004057774000102654,
+      "query_seconds": 0.007852413000364322
+    },
+    {
+      "id": "coverage/c18",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT q.size_fit, q.lines, q.lines * 1.0 / NULLIF(SUM(q.lines) OVER (), 0) AS lines_share\nFROM (SELECT sales.size_fit AS size_fit, COUNT(*) AS lines\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Apparel' AND sales.delivered_at IS NOT NULL AND sales.delivered_at >= TIMESTAMP '2026-01-01' AND sales.delivered_at < TIMESTAMP '2027-01-01'\nGROUP BY 1) AS q\nORDER BY lines DESC NULLS LAST",
+      "compile_seconds": 0.004170078000242938,
+      "query_seconds": 0.01494151699989743
+    },
+    {
+      "id": "coverage/c19",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.traffic_source AS traffic_source, (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY aov DESC NULLS LAST",
+      "compile_seconds": 0.00825447700026416,
+      "query_seconds": 0.012967749999916123
+    },
+    {
+      "id": "coverage/c20",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.order_status AS order_status, COUNT(*) AS order_lines\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY order_lines DESC NULLS LAST",
+      "compile_seconds": 0.030958975000430655,
+      "query_seconds": 0.007351531000495015
+    },
+    {
+      "id": "coverage/c21",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(DISTINCT clickstream.session_id) FILTER (WHERE clickstream.event_type = 'pdp_view') AS product_view_sessions, COUNT(DISTINCT clickstream.session_id) FILTER (WHERE clickstream.event_type = 'add_to_cart') AS add_to_cart_sessions, COUNT(DISTINCT clickstream.session_id) FILTER (WHERE clickstream.event_type = 'purchase') AS purchase_sessions\nFROM clickstream\nWHERE clickstream.event_at >= TIMESTAMP '2026-10-01' AND clickstream.event_at < TIMESTAMP '2026-11-01'",
+      "compile_seconds": 0.004602080000040587,
+      "query_seconds": 0.08934327800034225
+    },
+    {
+      "id": "coverage/c22",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.surface AS surface, COUNT(*) FILTER (WHERE impressions.added_to_cart = TRUE) * 1.0 / NULLIF(COUNT(*), 0) AS add_to_cart_share\nFROM impressions\nWHERE impressions.shown_at >= TIMESTAMP '2026-01-01' AND impressions.shown_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY add_to_cart_share DESC NULLS LAST",
+      "compile_seconds": 0.003493717999845103,
+      "query_seconds": 0.2255189990000872
+    },
+    {
+      "id": "coverage/c23",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sale_events.event_type AS event_type, COUNT(*) AS events, AVG(sale_events.demand_uplift) AS avg_demand_uplift\nFROM sale_events\nWHERE sale_events.start_date IS NOT NULL AND sale_events.start_date >= TIMESTAMP '2026-01-01' AND sale_events.start_date < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY events DESC NULLS LAST",
+      "compile_seconds": 0.0016044819994931458,
+      "query_seconds": 0.0041742110006453
+    },
+    {
+      "id": "coverage/c24",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT marketing_spend.region AS region, SUM(marketing_spend.spend) AS spend, SUM(marketing_spend.clicks) AS clicks, SUM(marketing_spend.impressions) AS impressions, (SUM(marketing_spend.clicks)) * 1.0 / NULLIF((SUM(marketing_spend.impressions)), 0) AS ad_ctr\nFROM marketing_spend\nWHERE marketing_spend.date_hour >= TIMESTAMP '2026-01-01' AND marketing_spend.date_hour < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY spend DESC NULLS LAST",
+      "compile_seconds": 0.022456847000285052,
+      "query_seconds": 0.020917657000609324
+    },
+    {
+      "id": "flow/flow-case",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.brand_name = 'ADIDAS'",
+      "compile_seconds": 0.0074740139998539235,
+      "query_seconds": 0.007471711999642139
+    },
+    {
+      "id": "flow/flow-complete",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST",
+      "compile_seconds": 0.017991904999689723,
+      "query_seconds": 0.016363433000151417
+    },
+    {
+      "id": "flow/flow-context",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.payment_method AS payment_method, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.ship_city = 'Mumbai'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.003722911999830103,
+      "query_seconds": 0.00919510200037621
+    },
+    {
+      "id": "flow/flow-values",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.ship_city AS city, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.ship_city IN ('Mumbai', 'Pune') AND sales.shipped_at IS NOT NULL\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.0037592369999401853,
+      "query_seconds": 0.013165719999960857
+    },
+    {
+      "id": "flow/flow-destinations",
+      "repeat": 1,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.ship_city AS city, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.ship_city IN ('Mumbai', 'Pune')\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.005427975000202423,
+      "query_seconds": 0.009457586999815248
+    },
+    {
+      "id": "regression/e01",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(*) AS customers\nFROM customers",
+      "compile_seconds": 0.000860294999256439,
+      "query_seconds": 0.003514957000334107
+    },
+    {
+      "id": "regression/e02",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(*) AS active_products\nFROM product_master\nWHERE product_master.is_active = TRUE",
+      "compile_seconds": 0.0013086090002616402,
+      "query_seconds": 0.0033529150005051633
+    },
+    {
+      "id": "regression/e03",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale'",
+      "compile_seconds": 0.002493345000402769,
+      "query_seconds": 0.008103512000161572
+    },
+    {
+      "id": "regression/e04",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.payment_method AS payment_method, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.0028932579998581787,
+      "query_seconds": 0.01223209100044187
+    },
+    {
+      "id": "regression/e05",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(*) FILTER (WHERE customers.is_prime = TRUE) * 1.0 / NULLIF(COUNT(*), 0) AS prime_share, COUNT(*) AS customers\nFROM customers",
+      "compile_seconds": 0.001589306999449036,
+      "query_seconds": 0.007159150000006775
+    },
+    {
+      "id": "regression/e06",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nWHERE sales.line_type = 'Sale'",
+      "compile_seconds": 0.002727125999626878,
+      "query_seconds": 0.003934909000236075
+    },
+    {
+      "id": "regression/m01",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nWHERE sales.line_type = 'Sale'",
+      "compile_seconds": 0.0039217129997268785,
+      "query_seconds": 0.02891863100012415
+    },
+    {
+      "id": "regression/m02",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', sales.placed_at) AS month, COUNT(DISTINCT sales.order_id) AS orders, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.008316911999827425,
+      "query_seconds": 0.018371973000284925
+    },
+    {
+      "id": "regression/m03",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST",
+      "compile_seconds": 0.005726403000153368,
+      "query_seconds": 0.015444781000041985
+    },
+    {
+      "id": "regression/m04",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate, COUNT(*) FILTER (WHERE sales.delivered_at IS NOT NULL) AS delivered_lines\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.040082063999761885,
+      "query_seconds": 0.011659615999633388
+    },
+    {
+      "id": "regression/m05",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT q.return_reason, q.returned_lines, q.returned_lines * 1.0 / NULLIF(SUM(q.returned_lines) OVER (), 0) AS returned_lines_share\nFROM (SELECT sales.return_reason AS return_reason, COUNT(*) AS returned_lines\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.return_requested_at IS NOT NULL\nGROUP BY 1) AS q\nORDER BY returned_lines DESC NULLS LAST",
+      "compile_seconds": 0.0026194300007773563,
+      "query_seconds": 0.007361623000178952
+    },
+    {
+      "id": "regression/m06",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type, (COUNT(*) FILTER(WHERE NOT sales.rto_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.shipped_at IS NULL), 0) AS rto_rate, COUNT(*) FILTER (WHERE sales.shipped_at IS NOT NULL) AS shipped_lines\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY rto_rate DESC NULLS LAST",
+      "compile_seconds": 0.031735720000142464,
+      "query_seconds": 0.007574125999781245
+    },
+    {
+      "id": "regression/m07",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.position AS list_position, (COUNT(*) FILTER(WHERE impressions.clicked)) / NULLIF(COUNT(*), 0) AS ctr, COUNT(*) AS impressions\nFROM impressions\nWHERE impressions.position <= 10.0\nGROUP BY 1\nORDER BY ctr DESC NULLS LAST",
+      "compile_seconds": 0.003839697999865166,
+      "query_seconds": 0.3681363590003457
+    },
+    {
+      "id": "regression/m08",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT inventory_live.sku_id AS sku_id, product_master.product_name AS product_name, product_master.category AS category, inventory_live.inbound_qty AS inbound_qty\nFROM inventory_live\nLEFT JOIN product_master ON inventory_live.product_id = product_master.product_id\nWHERE inventory_live.on_hand_qty <= 0.0 AND product_master.is_active = TRUE\nORDER BY 1, 2, 3, 4\nLIMIT 100",
+      "compile_seconds": 0.00096545500036882,
+      "query_seconds": 0.012414810999871406
+    },
+    {
+      "id": "regression/m09",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel_group AS channel_group, campaigns.channel AS marketing_channel, SUM(marketing_spend.spend) AS spend\nFROM marketing_spend\nLEFT JOIN campaigns ON marketing_spend.campaign_id = campaigns.campaign_id\nGROUP BY 1, 2\nORDER BY spend DESC NULLS LAST",
+      "compile_seconds": 0.0022518040004797513,
+      "query_seconds": 0.05934200800038525
+    },
+    {
+      "id": "regression/m10",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, (SUM(product_reviews.rating)) / NULLIF(COUNT(product_reviews.rating), 0) AS avg_rating, (COUNT(*) FILTER(WHERE product_reviews.sentiment = 'Negative')) / NULLIF(COUNT(*), 0) AS negative_share, COUNT(*) AS reviews\nFROM product_reviews\nLEFT JOIN product_master ON product_reviews.product_id = product_master.product_id\nWHERE product_reviews.moderation_status = 'Published'\nGROUP BY 1\nORDER BY avg_rating DESC NULLS LAST",
+      "compile_seconds": 0.005840824999722827,
+      "query_seconds": 0.011725327999556612
+    },
+    {
+      "id": "regression/m11",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT support_contacts.issue_category AS issue, COUNT(DISTINCT support_contacts.ticket_id) AS tickets, (SUM(support_contacts.csat)) / NULLIF(COUNT(support_contacts.csat), 0) AS avg_csat, (SUM(support_contacts.first_response_minutes)) / NULLIF(COUNT(support_contacts.first_response_minutes), 0) AS avg_first_response_minutes\nFROM support_contacts\nGROUP BY 1\nORDER BY tickets DESC NULLS LAST",
+      "compile_seconds": 0.005695853999895917,
+      "query_seconds": 0.04908151000017824
+    },
+    {
+      "id": "regression/m12",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.is_first_order THEN 'New' ELSE 'Repeat' END AS new_or_repeat, COUNT(DISTINCT sales.order_id) AS orders, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.014680064000458515,
+      "query_seconds": 0.02240942000025825
+    },
+    {
+      "id": "regression/h01",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT clickstream.device AS device, (COUNT(DISTINCT CASE WHEN clickstream.event_type = 'purchase' THEN clickstream.session_id END)) / NULLIF(COUNT(DISTINCT clickstream.session_id), 0) AS conversion_rate, COUNT(DISTINCT clickstream.session_id) AS sessions\nFROM clickstream\nGROUP BY 1\nORDER BY conversion_rate DESC NULLS LAST",
+      "compile_seconds": 0.006409304999579035,
+      "query_seconds": 0.479030275999321
+    },
+    {
+      "id": "regression/h02",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sale_events.event_id AS event_id, sale_events.name AS sale_event, COUNT(DISTINCT sales.order_id) AS orders, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue, SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END) AS net_sales\nFROM sales\nJOIN sale_events ON sales.placed_at >= sale_events.start_date AND sales.placed_at < sale_events.end_date + INTERVAL 1 DAY\nWHERE sales.line_type = 'Sale' AND sale_events.name IN ('Diwali 2025', 'Diwali 2026')\nGROUP BY 1, 2\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.010030140000708343,
+      "query_seconds": 0.04054368800007069
+    },
+    {
+      "id": "regression/h03",
+      "repeat": 2,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH daily AS (\n  SELECT CAST(placed_at AS DATE) AS day, SUM(CASE WHEN cancelled_at IS NULL THEN net_amount ELSE 0 END) AS net_sales\n  FROM sales WHERE line_type = 'Sale' GROUP BY 1)\nSELECT e.event_id, e.name, CAST(e.start_date AS DATE) AS start_date, CAST(e.end_date AS DATE) AS end_date,\n       COALESCE(SUM(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date AND e.end_date), 0)\n         / (date_diff('day', e.start_date, e.end_date) + 1) AS event_daily_net_sales,\n       COALESCE(SUM(d.net_sales) FILTER (WHERE d.day BETWEEN e.start_date - INTERVAL 14 DAY\n                                            AND e.start_date - INTERVAL 1 DAY), 0) / 14 AS before_daily_net_sales,\n       event_daily_net_sales / NULLIF(before_daily_net_sales, 0) - 1 AS lift\nFROM sale_events e LEFT JOIN daily d ON d.day BETWEEN e.start_date - INTERVAL 14 DAY AND e.end_date\nWHERE e.end_date <= (SELECT MAX(day) FROM daily)\n  AND e.start_date - INTERVAL 14 DAY >= (SELECT MIN(day) FROM daily)\nGROUP BY e.event_id, e.name, e.start_date, e.end_date\nORDER BY lift DESC",
+      "compile_seconds": 6.812800074840197e-05,
+      "query_seconds": 0.01604943100028322
+    },
+    {
+      "id": "regression/h04",
+      "repeat": 2,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH revenue AS (\n  SELECT c.channel, SUM(a.credit_last_click * a.order_revenue) AS last_click_revenue\n  FROM marketing_attribution a JOIN campaigns c ON c.campaign_id = a.campaign_id GROUP BY 1),\nspend AS (\n  SELECT c.channel, SUM(m.spend) AS spend\n  FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id GROUP BY 1)\nSELECT s.channel, r.last_click_revenue, s.spend, r.last_click_revenue / NULLIF(s.spend, 0) AS roas_last_click\nFROM spend s LEFT JOIN revenue r ON r.channel = s.channel\nORDER BY roas_last_click DESC NULLS LAST",
+      "compile_seconds": 0.00011325699961162172,
+      "query_seconds": 0.0829872760004946
+    },
+    {
+      "id": "regression/h05",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.campaign_id AS campaign_id, campaigns.campaign_name AS campaign, marketing_attribution.channel_group AS channel_group, SUM(marketing_attribution.credit_last_click * marketing_attribution.order_revenue) AS last_click_revenue\nFROM marketing_attribution\nLEFT JOIN campaigns ON marketing_attribution.campaign_id = campaigns.campaign_id\nWHERE NOT marketing_attribution.campaign_id IS NULL\nGROUP BY 1, 2, 3\nORDER BY last_click_revenue DESC NULLS LAST\nLIMIT 10",
+      "compile_seconds": 0.004031100999782211,
+      "query_seconds": 0.017707384999994247
+    },
+    {
+      "id": "regression/h06",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.courier AS courier, (COUNT(*) FILTER(WHERE CAST(sales.delivered_at AS DATE) > CAST(sales.promised_delivery_date AS DATE))) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS late_delivery_rate, COUNT(*) FILTER (WHERE sales.delivered_at IS NOT NULL) AS delivered_lines\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY late_delivery_rate DESC NULLS LAST",
+      "compile_seconds": 0.006417183999474219,
+      "query_seconds": 0.008709766999345447
+    },
+    {
+      "id": "regression/h07",
+      "repeat": 2,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH platform AS (\n  SELECT c.channel, SUM(m.platform_conversions) AS platform_orders\n  FROM marketing_spend m JOIN campaigns c ON c.campaign_id = m.campaign_id\n  WHERE c.channel_group IN ('Paid Search', 'Paid Social', 'Display') GROUP BY 1),\nshop AS (\n  SELECT c.channel, COUNT(DISTINCT s.order_id) AS recorded_orders\n  FROM sales s JOIN campaigns c ON c.campaign_id = s.campaign_id\n  WHERE s.line_type = 'Sale' GROUP BY 1)\nSELECT p.channel, p.platform_orders, sh.recorded_orders,\n       p.platform_orders * 1.0 / NULLIF(sh.recorded_orders, 0) AS over_reporting\nFROM platform p LEFT JOIN shop sh ON sh.channel = p.channel\nORDER BY over_reporting DESC NULLS LAST",
+      "compile_seconds": 5.4668999837304e-05,
+      "query_seconds": 0.06349506199967436
+    },
+    {
+      "id": "regression/h08",
+      "repeat": 2,
+      "route": "template",
+      "ok": true,
+      "reason": "match",
+      "sql": "WITH firsts AS (\n  SELECT customer_id, MIN(placed_at) AS first_at FROM sales WHERE line_type = 'Sale' GROUP BY 1),\neligible AS (\n  SELECT customer_id, first_at FROM firsts\n  WHERE first_at <= (SELECT MAX(placed_at) FROM sales) - INTERVAL 90 DAY),\nagain AS (\n  SELECT DISTINCT e.customer_id FROM eligible e JOIN sales s ON s.customer_id = e.customer_id\n  WHERE s.line_type = 'Sale' AND s.placed_at > e.first_at AND s.placed_at <= e.first_at + INTERVAL 90 DAY)\nSELECT COUNT(a.customer_id) * 1.0 / NULLIF(COUNT(*), 0) AS repeat_share, COUNT(*) AS buyers\nFROM eligible e LEFT JOIN again a ON a.customer_id = e.customer_id",
+      "compile_seconds": 0.0001001759992504958,
+      "query_seconds": 0.05239390799943067
+    },
+    {
+      "id": "regression/h09",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, product_skus.size AS size, SUM(inventory_history.lost_sales_units) AS lost_units, SUM(inventory_history.demand_units) AS demand_units, (SUM(inventory_history.lost_sales_units)) * 1.0 / NULLIF((SUM(inventory_history.demand_units)), 0) AS lost_share\nFROM inventory_history\nLEFT JOIN product_master ON inventory_history.product_id = product_master.product_id\nLEFT JOIN product_skus ON inventory_history.sku_id = product_skus.sku_id\nGROUP BY 1, 2\nORDER BY lost_units DESC NULLS LAST\nLIMIT 20",
+      "compile_seconds": 0.0030450920003204374,
+      "query_seconds": 0.14652260599996225
+    },
+    {
+      "id": "regression/h10",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, sales.size_fit AS size_fit, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate, COUNT(*) AS delivered_lines\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND sales.delivered_at IS NOT NULL AND product_master.category IN ('Footwear', 'Apparel')\nGROUP BY 1, 2\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.0068129829996905755,
+      "query_seconds": 0.015866147000451747
+    },
+    {
+      "id": "regression/n01",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.event_id IS NULL THEN 'Normal day' ELSE 'Sale-event day' END AS day_type, (SUM((sales.mrp - sales.unit_price) * sales.quantity)) / NULLIF(SUM(sales.mrp * sales.quantity), 0) AS avg_discount_pct\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY avg_discount_pct DESC NULLS LAST",
+      "compile_seconds": 0.005307557999913115,
+      "query_seconds": 0.0077893520001453
+    },
+    {
+      "id": "regression/n02",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.region AS region, COUNT(*) AS customers\nFROM customers\nGROUP BY 1\nORDER BY customers DESC NULLS LAST",
+      "compile_seconds": 0.0010689769997043186,
+      "query_seconds": 0.0031615739999324433
+    },
+    {
+      "id": "regression/n03",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT (COUNT(*) FILTER(WHERE tickets.resolution_status = 'Resolved')) / NULLIF(COUNT(*), 0) AS ticket_resolution_rate\nFROM ((SELECT ticket_id, MIN(contact_at) AS opened_at,\n        arg_min(channel, contact_at) AS channel, arg_min(issue_category, contact_at) AS issue_category,\n        arg_max(resolution_status, contact_at) AS resolution_status, COUNT(*) AS contacts\n FROM support_contacts GROUP BY ticket_id)) AS tickets",
+      "compile_seconds": 0.004134288000386732,
+      "query_seconds": 0.004246243999659782
+    },
+    {
+      "id": "regression/n04",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', marketing_spend.date_hour) AS month, SUM(marketing_spend.spend) AS spend\nFROM marketing_spend\nWHERE marketing_spend.date_hour >= TIMESTAMP '2026-01-01' AND marketing_spend.date_hour < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.0030841580000924296,
+      "query_seconds": 0.023111090000384138
+    },
+    {
+      "id": "regression/n05",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.ship_city AS city, (COUNT(*) FILTER(WHERE NOT sales.rto_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.shipped_at IS NULL), 0) AS rto_rate\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY rto_rate DESC NULLS LAST\nLIMIT 10",
+      "compile_seconds": 0.005018445000132488,
+      "query_seconds": 0.007745320000140055
+    },
+    {
+      "id": "regression/n06",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sellers.seller_type AS seller_type, (COUNT(*) FILTER(WHERE NOT sales.cancelled_at IS NULL)) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nLEFT JOIN sellers ON sales.seller_id = sellers.seller_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY cancellation_rate DESC NULLS LAST",
+      "compile_seconds": 0.0050368550000712276,
+      "query_seconds": 0.008675661000779655
+    },
+    {
+      "id": "regression/n07",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT clickstream.traffic_source AS traffic_source, (COUNT(DISTINCT CASE WHEN clickstream.event_type = 'purchase' THEN clickstream.session_id END)) / NULLIF(COUNT(DISTINCT clickstream.session_id), 0) AS conversion_rate\nFROM clickstream\nGROUP BY 1\nORDER BY conversion_rate DESC NULLS LAST",
+      "compile_seconds": 0.004641414000616351,
+      "query_seconds": 0.3130838710003445
+    },
+    {
+      "id": "regression/n08",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, (SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee - sales.unit_cost * sales.quantity END)) / NULLIF(SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee END), 0) AS gross_margin_pct\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY gross_margin_pct DESC NULLS LAST",
+      "compile_seconds": 0.010609448000650445,
+      "query_seconds": 0.013603162999970664
+    },
+    {
+      "id": "regression/n09",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT (SUM(product_reviews.rating)) / NULLIF(COUNT(product_reviews.rating), 0) AS avg_rating\nFROM product_reviews\nWHERE product_reviews.moderation_status = 'Published'",
+      "compile_seconds": 0.004588293000779231,
+      "query_seconds": 0.004385799999909068
+    },
+    {
+      "id": "regression/n10",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.surface AS surface, (COUNT(*) FILTER(WHERE impressions.clicked)) / NULLIF(COUNT(*), 0) AS ctr\nFROM impressions\nGROUP BY 1\nORDER BY ctr DESC NULLS LAST",
+      "compile_seconds": 0.002658801000507083,
+      "query_seconds": 0.14525618400057283
+    },
+    {
+      "id": "holdout/x01",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customer_addresses.region AS region, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN customer_addresses ON sales.address_id = customer_addresses.address_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST",
+      "compile_seconds": 0.005342362999726902,
+      "query_seconds": 0.011378445999980613
+    },
+    {
+      "id": "holdout/x02",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.sub_category AS sub_category, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Apparel'\nGROUP BY 1\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.0032624790001136716,
+      "query_seconds": 0.007799370000611816
+    },
+    {
+      "id": "holdout/x03",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.is_prime AS prime, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nLEFT JOIN customers ON sales.customer_id = customers.customer_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.0027733619999708026,
+      "query_seconds": 0.01073085100051685
+    },
+    {
+      "id": "holdout/x04",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.device AS device, (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY aov DESC NULLS LAST",
+      "compile_seconds": 0.00489389399990614,
+      "query_seconds": 0.009816732999752276
+    },
+    {
+      "id": "holdout/x05",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.warehouse_id AS warehouse, (COUNT(*) FILTER(WHERE CAST(sales.delivered_at AS DATE) > CAST(sales.promised_delivery_date AS DATE))) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS late_delivery_rate\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY late_delivery_rate DESC NULLS LAST",
+      "compile_seconds": 0.0037933059993520146,
+      "query_seconds": 0.0060378779999155086
+    },
+    {
+      "id": "holdout/x06",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel AS marketing_channel, (SUM(marketing_spend.spend) FILTER(WHERE campaigns.channel_group IN ('Paid Search', 'Paid Social', 'Display'))) / NULLIF(SUM(marketing_spend.clicks) FILTER(WHERE campaigns.channel_group IN ('Paid Search', 'Paid Social', 'Display')), 0) AS cpc\nFROM marketing_spend\nLEFT JOIN campaigns ON marketing_spend.campaign_id = campaigns.campaign_id\nWHERE campaigns.channel_group IN ('Paid Search', 'Paid Social', 'Display') AND marketing_spend.date_hour >= TIMESTAMP '2025-01-01' AND marketing_spend.date_hour < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY cpc DESC NULLS LAST",
+      "compile_seconds": 0.004409522000059951,
+      "query_seconds": 0.025123252999947
+    },
+    {
+      "id": "holdout/x07",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT support_contacts.channel AS support_channel, (SUM(support_contacts.csat)) / NULLIF(COUNT(support_contacts.csat), 0) AS avg_csat\nFROM support_contacts\nGROUP BY 1\nORDER BY avg_csat DESC NULLS LAST",
+      "compile_seconds": 0.0017635359999985667,
+      "query_seconds": 0.0029842789999747765
+    },
+    {
+      "id": "holdout/x08",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_reviews.aspect AS review_aspect, (COUNT(*) FILTER(WHERE product_reviews.sentiment = 'Negative')) / NULLIF(COUNT(*), 0) AS negative_review_share\nFROM product_reviews\nLEFT JOIN product_master ON product_reviews.product_id = product_master.product_id\nWHERE product_reviews.moderation_status = 'Published' AND product_master.category = 'Footwear'\nGROUP BY 1\nORDER BY negative_review_share DESC NULLS LAST",
+      "compile_seconds": 0.003169280999827606,
+      "query_seconds": 0.0052721069996550796
+    },
+    {
+      "id": "holdout/x09",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', clickstream.event_at) AS month, (COUNT(DISTINCT CASE WHEN clickstream.event_type = 'purchase' THEN clickstream.session_id END)) / NULLIF(COUNT(DISTINCT clickstream.session_id), 0) AS conversion_rate\nFROM clickstream\nWHERE clickstream.event_at >= TIMESTAMP '2026-01-01' AND clickstream.event_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.0038503719997606822,
+      "query_seconds": 0.4042508980001003
+    },
+    {
+      "id": "holdout/x10",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.brand_name AS brand, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST\nLIMIT 5",
+      "compile_seconds": 0.006936294000297494,
+      "query_seconds": 0.03784510300010879
+    },
+    {
+      "id": "holdout/x11",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT CASE WHEN sales.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type, (COUNT(*) FILTER(WHERE NOT sales.cancelled_at IS NULL)) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY cancellation_rate DESC NULLS LAST",
+      "compile_seconds": 0.0037922040000921697,
+      "query_seconds": 0.006241335000595427
+    },
+    {
+      "id": "holdout/x12",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT inventory_history.warehouse_id AS warehouse, SUM(inventory_history.lost_sales_units) AS lost_sales_units\nFROM inventory_history\nGROUP BY 1\nORDER BY lost_sales_units DESC NULLS LAST",
+      "compile_seconds": 0.0023894119995020446,
+      "query_seconds": 0.010232200999780616
+    },
+    {
+      "id": "holdout/x13",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', sales.placed_at) AS month, (COUNT(DISTINCT CASE WHEN sales.is_first_order THEN sales.order_id END)) / NULLIF(COUNT(DISTINCT sales.order_id), 0) AS new_customer_order_share\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.00437220499952673,
+      "query_seconds": 0.010697646000153327
+    },
+    {
+      "id": "holdout/x14",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.position AS list_position, (COUNT(*) FILTER(WHERE impressions.clicked)) / NULLIF(COUNT(*), 0) AS ctr\nFROM impressions\nWHERE impressions.surface = 'home_recs' AND impressions.position <= 5.0\nGROUP BY 1\nORDER BY ctr DESC NULLS LAST",
+      "compile_seconds": 0.003144534999591997,
+      "query_seconds": 0.1452633919998334
+    },
+    {
+      "id": "holdout/y01",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.quantity ELSE 0 END) AS units_sold\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY units_sold DESC NULLS LAST",
+      "compile_seconds": 0.003531593999468896,
+      "query_seconds": 0.008589181000388635
+    },
+    {
+      "id": "holdout/y02",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.courier AS courier, (SUM(DATE_DIFF('HOUR', sales.placed_at, sales.delivered_at)) / 24.0) / NULLIF(COUNT(sales.delivered_at), 0) AS avg_delivery_days\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY avg_delivery_days DESC NULLS LAST",
+      "compile_seconds": 0.006446587000027648,
+      "query_seconds": 0.023243802999786567
+    },
+    {
+      "id": "holdout/y03",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('quarter', sales.placed_at) AS quarter, SUM(sales.gross_amount) AS gross_sales\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY quarter",
+      "compile_seconds": 0.003211461999853782,
+      "query_seconds": 0.00513483700069628
+    },
+    {
+      "id": "holdout/y04",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.gender AS product_gender, (COUNT(*) FILTER(WHERE NOT sales.return_requested_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS return_rate\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.gender IN ('Women', 'Men')\nGROUP BY 1\nORDER BY return_rate DESC NULLS LAST",
+      "compile_seconds": 0.00975094400018861,
+      "query_seconds": 0.009910235999996075
+    },
+    {
+      "id": "holdout/y05",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT clickstream.traffic_source AS traffic_source, COUNT(DISTINCT clickstream.session_id) AS sessions\nFROM clickstream\nWHERE clickstream.event_at >= TIMESTAMP '2026-10-01' AND clickstream.event_at < TIMESTAMP '2026-11-01'\nGROUP BY 1\nORDER BY sessions DESC NULLS LAST",
+      "compile_seconds": 0.0030858439995427034,
+      "query_seconds": 0.03570561699962127
+    },
+    {
+      "id": "holdout/y06",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel_group AS channel_group, (SUM(marketing_spend.platform_revenue) FILTER(WHERE campaigns.channel_group <> 'CRM')) / NULLIF(SUM(marketing_spend.spend) FILTER(WHERE campaigns.channel_group <> 'CRM'), 0) AS platform_roas\nFROM marketing_spend\nLEFT JOIN campaigns ON marketing_spend.campaign_id = campaigns.campaign_id\nWHERE campaigns.channel_group NOT IN ('CRM')\nGROUP BY 1\nORDER BY platform_roas DESC NULLS LAST",
+      "compile_seconds": 0.008456454000224767,
+      "query_seconds": 0.027875460000359453
+    },
+    {
+      "id": "holdout/y07",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', tickets.opened_at) AS month, COUNT(*) AS support_tickets\nFROM ((SELECT ticket_id, MIN(contact_at) AS opened_at,\n        arg_min(channel, contact_at) AS channel, arg_min(issue_category, contact_at) AS issue_category,\n        arg_max(resolution_status, contact_at) AS resolution_status, COUNT(*) AS contacts\n FROM support_contacts GROUP BY ticket_id)) AS tickets\nWHERE tickets.opened_at >= TIMESTAMP '2026-01-01' AND tickets.opened_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.003587738000533136,
+      "query_seconds": 0.004581088999657368
+    },
+    {
+      "id": "holdout/y08",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT support_contacts.channel AS support_channel, (SUM(support_contacts.first_response_minutes)) / NULLIF(COUNT(support_contacts.first_response_minutes), 0) AS avg_first_response_minutes\nFROM support_contacts\nGROUP BY 1\nORDER BY avg_first_response_minutes DESC NULLS LAST",
+      "compile_seconds": 0.001858012999946368,
+      "query_seconds": 0.0030253250006353483
+    },
+    {
+      "id": "holdout/y09",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.usage AS usage, (SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee - sales.unit_cost * sales.quantity END)) / NULLIF(SUM(CASE WHEN NOT sales.delivered_at IS NULL AND sales.refunded_at IS NULL THEN sales.net_amount - sales.tax_amount - sales.shipping_fee END), 0) AS gross_margin_pct\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY gross_margin_pct DESC NULLS LAST",
+      "compile_seconds": 0.08599146199958341,
+      "query_seconds": 0.01436668299993471
+    },
+    {
+      "id": "holdout/y10",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customer_addresses.city_tier AS city_tier, (COUNT(*) FILTER(WHERE NOT sales.rto_at IS NULL)) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.shipped_at IS NULL), 0) AS rto_rate\nFROM sales\nLEFT JOIN customer_addresses ON sales.address_id = customer_addresses.address_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY rto_rate DESC NULLS LAST",
+      "compile_seconds": 0.0034896669994850527,
+      "query_seconds": 0.01542742299989186
+    },
+    {
+      "id": "holdout/y11",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.signup_channel AS traffic_source, COUNT(*) AS customers\nFROM customers\nWHERE customers.signup_at >= TIMESTAMP '2026-01-01' AND customers.signup_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY customers DESC NULLS LAST",
+      "compile_seconds": 0.0016538209993086639,
+      "query_seconds": 0.004277580000234593
+    },
+    {
+      "id": "holdout/y12",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.brand_name AS brand, (SUM((sales.mrp - sales.unit_price) * sales.quantity)) / NULLIF(SUM(sales.mrp * sales.quantity), 0) AS avg_discount_pct, SUM(sales.quantity) AS units\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Footwear'\nGROUP BY 1\nORDER BY units DESC NULLS LAST\nLIMIT 5",
+      "compile_seconds": 0.004159518999585998,
+      "query_seconds": 0.010090375999425305
+    },
+    {
+      "id": "holdout/y13",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.surface AS surface, COUNT(*) AS impressions\nFROM impressions\nGROUP BY 1\nORDER BY impressions DESC NULLS LAST",
+      "compile_seconds": 0.0008123059997160453,
+      "query_seconds": 0.08628833799957647
+    },
+    {
+      "id": "holdout/y14",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.is_prime AS prime, (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nLEFT JOIN customers ON sales.customer_id = customers.customer_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY aov DESC NULLS LAST",
+      "compile_seconds": 0.006249400999877253,
+      "query_seconds": 0.020505038000010245
+    },
+    {
+      "id": "holdout/y15",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT inventory_live.warehouse_id AS warehouse, SUM(inventory_live.on_hand_qty) AS on_hand_units\nFROM inventory_live\nGROUP BY 1\nORDER BY on_hand_units DESC NULLS LAST",
+      "compile_seconds": 0.0008263659992735484,
+      "query_seconds": 0.002809190000334638
+    },
+    {
+      "id": "holdout/y16",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customer_addresses.region AS region, (COUNT(*) FILTER(WHERE CAST(sales.delivered_at AS DATE) > CAST(sales.promised_delivery_date AS DATE))) / NULLIF(COUNT(*) FILTER(WHERE NOT sales.delivered_at IS NULL), 0) AS late_delivery_rate\nFROM sales\nLEFT JOIN customer_addresses ON sales.address_id = customer_addresses.address_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY late_delivery_rate DESC NULLS LAST",
+      "compile_seconds": 0.004202461000204494,
+      "query_seconds": 0.015834118999919156
+    },
+    {
+      "id": "holdout/z01",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2024-12-01' AND sales.placed_at < TIMESTAMP '2025-01-01'",
+      "compile_seconds": 0.002193441000599705,
+      "query_seconds": 0.0026066210002682055
+    },
+    {
+      "id": "coverage/c01",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT warehouses.city AS warehouse_city, SUM(inventory_live.on_hand_qty) AS units_on_hand, MAX(warehouses.capacity_units) AS capacity, (SUM(inventory_live.on_hand_qty)) * 1.0 / NULLIF((MAX(warehouses.capacity_units)), 0) AS capacity_used\nFROM inventory_live\nLEFT JOIN warehouses ON inventory_live.warehouse_id = warehouses.warehouse_id\nGROUP BY 1\nORDER BY units_on_hand DESC NULLS LAST",
+      "compile_seconds": 0.001796595000087109,
+      "query_seconds": 0.005544032000216248
+    },
+    {
+      "id": "coverage/c02",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT agents.team AS team, COUNT(*) FILTER (WHERE support_contacts.resolution_status = 'Escalated') * 1.0 / NULLIF(COUNT(*), 0) AS escalated_share\nFROM support_contacts\nLEFT JOIN agents ON support_contacts.agent_id = agents.agent_id\nWHERE support_contacts.contact_at >= TIMESTAMP '2026-01-01' AND support_contacts.contact_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY escalated_share DESC NULLS LAST",
+      "compile_seconds": 0.0021506000002773362,
+      "query_seconds": 0.005638381000608206
+    },
+    {
+      "id": "coverage/c03",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT agents.language AS language, COUNT(*) AS contacts, (SUM(support_contacts.csat)) / NULLIF(COUNT(support_contacts.csat), 0) AS avg_csat\nFROM support_contacts\nLEFT JOIN agents ON support_contacts.agent_id = agents.agent_id\nWHERE support_contacts.contact_at >= TIMESTAMP '2025-01-01' AND support_contacts.contact_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY contacts DESC NULLS LAST",
+      "compile_seconds": 0.0033518899999762652,
+      "query_seconds": 0.0051399240001046564
+    },
+    {
+      "id": "coverage/c04",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT promotions.eligible_audience AS eligible_audience, COUNT(*) AS coupons, AVG(promotions.min_order_value) AS avg_min_order_value\nFROM promotions\nGROUP BY 1\nORDER BY coupons DESC NULLS LAST",
+      "compile_seconds": 0.0012132259998907102,
+      "query_seconds": 0.003013101999385981
+    },
+    {
+      "id": "coverage/c05",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT campaigns.channel_group AS channel_group, SUM(marketing_plan.planned_spend) AS planned_spend, SUM(marketing_plan.target_revenue) AS target_revenue\nFROM marketing_plan\nLEFT JOIN campaigns ON marketing_plan.campaign_id = campaigns.campaign_id\nWHERE marketing_plan.date >= TIMESTAMP '2025-01-01' AND marketing_plan.date < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY planned_spend DESC NULLS LAST",
+      "compile_seconds": 0.0018410160000712494,
+      "query_seconds": 0.005162510999980441
+    },
+    {
+      "id": "coverage/c06",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, COUNT(*) AS clearance_price_changes\nFROM price_history\nLEFT JOIN product_master ON price_history.product_id = product_master.product_id\nWHERE price_history.price_change_reason = 'Clearance' AND price_history.valid_from >= TIMESTAMP '2026-01-01' AND price_history.valid_from < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY clearance_price_changes DESC NULLS LAST",
+      "compile_seconds": 0.003994497000348929,
+      "query_seconds": 0.008819671999845013
+    },
+    {
+      "id": "coverage/c07",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT date_trunc('month', auth_events.event_at) AS month, COUNT(*) AS otp_failures\nFROM auth_events\nWHERE auth_events.event_type = 'otp_failed' AND auth_events.event_at >= TIMESTAMP '2026-01-01' AND auth_events.event_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY month",
+      "compile_seconds": 0.0015306559998862213,
+      "query_seconds": 0.007799009999871487
+    },
+    {
+      "id": "coverage/c08",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sellers.seller_type AS seller_type, AVG(sellers.rating) AS avg_rating, AVG(sellers.fulfillment_score) AS avg_fulfillment_score\nFROM sellers\nGROUP BY 1\nORDER BY avg_rating DESC NULLS LAST",
+      "compile_seconds": 0.0013893529994675191,
+      "query_seconds": 0.0034029529997496866
+    },
+    {
+      "id": "coverage/c09",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sellers.region AS region, (COUNT(*) FILTER(WHERE NOT sales.cancelled_at IS NULL)) / NULLIF(COUNT(*), 0) AS cancellation_rate\nFROM sales\nLEFT JOIN sellers ON sales.seller_id = sellers.seller_id\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2025-01-01' AND sales.placed_at < TIMESTAMP '2026-01-01'\nGROUP BY 1\nORDER BY cancellation_rate DESC NULLS LAST",
+      "compile_seconds": 0.0036784510002689785,
+      "query_seconds": 0.007050700000036159
+    },
+    {
+      "id": "coverage/c10",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_skus.size AS size, SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.quantity ELSE 0 END) AS units_sold\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nLEFT JOIN product_skus ON sales.sku_id = product_skus.sku_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Footwear' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY units_sold DESC NULLS LAST",
+      "compile_seconds": 0.004136966000260145,
+      "query_seconds": 0.010475877999851946
+    },
+    {
+      "id": "coverage/c11",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, COUNT(*) AS skus_to_reorder\nFROM inventory_live\nLEFT JOIN product_master ON inventory_live.product_id = product_master.product_id\nWHERE inventory_live.on_hand_qty <= inventory_live.reorder_point\nGROUP BY 1\nORDER BY skus_to_reorder DESC NULLS LAST",
+      "compile_seconds": 0.0011380630003259284,
+      "query_seconds": 0.004412690000208386
+    },
+    {
+      "id": "coverage/c12",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_reviews.aspect AS review_aspect, COUNT(*) FILTER (WHERE product_reviews.moderation_status = 'Rejected') * 1.0 / NULLIF(COUNT(*), 0) AS rejected_share\nFROM product_reviews\nWHERE product_reviews.reviewed_at >= TIMESTAMP '2026-01-01' AND product_reviews.reviewed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY rejected_share DESC NULLS LAST",
+      "compile_seconds": 0.0014850520001346013,
+      "query_seconds": 0.00447543000063888
+    },
+    {
+      "id": "coverage/c13",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.gender AS product_gender, (SUM(product_reviews.rating)) / NULLIF(COUNT(product_reviews.rating), 0) AS avg_rating\nFROM product_reviews\nLEFT JOIN product_master ON product_reviews.product_id = product_master.product_id\nWHERE product_reviews.moderation_status = 'Published'\nGROUP BY 1\nORDER BY avg_rating DESC NULLS LAST",
+      "compile_seconds": 0.002634712999679323,
+      "query_seconds": 0.0056696589999774005
+    },
+    {
+      "id": "coverage/c14",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.age_bracket AS age_bracket, COUNT(*) AS prime_customers\nFROM customers\nWHERE customers.is_prime = TRUE\nGROUP BY 1\nORDER BY prime_customers DESC NULLS LAST",
+      "compile_seconds": 0.0011252609992880025,
+      "query_seconds": 0.003017676000126812
+    },
+    {
+      "id": "coverage/c15",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT customers.city_tier AS city_tier, customers.account_status AS account_status, COUNT(*) AS customers\nFROM customers\nGROUP BY 1, 2\nORDER BY customers DESC NULLS LAST",
+      "compile_seconds": 0.0010219240002697916,
+      "query_seconds": 0.003376098000444472
+    },
+    {
+      "id": "coverage/c16",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.cancel_reason AS cancel_reason, sales.cancelled_by AS cancelled_by, COUNT(*) AS cancelled_lines\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.cancelled_at IS NOT NULL AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1, 2\nORDER BY cancelled_lines DESC NULLS LAST",
+      "compile_seconds": 0.0015576440000586445,
+      "query_seconds": 0.006436111999391869
+    },
+    {
+      "id": "coverage/c17",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT q.return_type, q.returns, q.returns * 1.0 / NULLIF(SUM(q.returns) OVER (), 0) AS returns_share\nFROM (SELECT sales.return_type AS return_type, COUNT(*) AS returns\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.return_requested_at IS NOT NULL AND sales.return_requested_at >= TIMESTAMP '2025-01-01' AND sales.return_requested_at < TIMESTAMP '2026-01-01'\nGROUP BY 1) AS q\nORDER BY returns DESC NULLS LAST",
+      "compile_seconds": 0.002373831999648246,
+      "query_seconds": 0.005087997000373434
+    },
+    {
+      "id": "coverage/c18",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT q.size_fit, q.lines, q.lines * 1.0 / NULLIF(SUM(q.lines) OVER (), 0) AS lines_share\nFROM (SELECT sales.size_fit AS size_fit, COUNT(*) AS lines\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.category = 'Apparel' AND sales.delivered_at IS NOT NULL AND sales.delivered_at >= TIMESTAMP '2026-01-01' AND sales.delivered_at < TIMESTAMP '2027-01-01'\nGROUP BY 1) AS q\nORDER BY lines DESC NULLS LAST",
+      "compile_seconds": 0.0069070499994268175,
+      "query_seconds": 0.011813092000011238
+    },
+    {
+      "id": "coverage/c19",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.traffic_source AS traffic_source, (SUM(CASE WHEN sales.cancelled_at IS NULL THEN sales.net_amount ELSE 0 END)) / NULLIF(COUNT(DISTINCT CASE WHEN sales.cancelled_at IS NULL THEN sales.order_id END), 0) AS aov\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.placed_at >= TIMESTAMP '2026-01-01' AND sales.placed_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY aov DESC NULLS LAST",
+      "compile_seconds": 0.0056138850004572305,
+      "query_seconds": 0.00969394299954729
+    },
+    {
+      "id": "coverage/c20",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.order_status AS order_status, COUNT(*) AS order_lines\nFROM sales\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY order_lines DESC NULLS LAST",
+      "compile_seconds": 0.0008394850001423038,
+      "query_seconds": 0.004527419000623922
+    },
+    {
+      "id": "coverage/c21",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT COUNT(DISTINCT clickstream.session_id) FILTER (WHERE clickstream.event_type = 'pdp_view') AS product_view_sessions, COUNT(DISTINCT clickstream.session_id) FILTER (WHERE clickstream.event_type = 'add_to_cart') AS add_to_cart_sessions, COUNT(DISTINCT clickstream.session_id) FILTER (WHERE clickstream.event_type = 'purchase') AS purchase_sessions\nFROM clickstream\nWHERE clickstream.event_at >= TIMESTAMP '2026-10-01' AND clickstream.event_at < TIMESTAMP '2026-11-01'",
+      "compile_seconds": 0.0016756619997977396,
+      "query_seconds": 0.0644305349997012
+    },
+    {
+      "id": "coverage/c22",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT impressions.surface AS surface, COUNT(*) FILTER (WHERE impressions.added_to_cart = TRUE) * 1.0 / NULLIF(COUNT(*), 0) AS add_to_cart_share\nFROM impressions\nWHERE impressions.shown_at >= TIMESTAMP '2026-01-01' AND impressions.shown_at < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY add_to_cart_share DESC NULLS LAST",
+      "compile_seconds": 0.0015952010007822537,
+      "query_seconds": 0.21296298100060085
+    },
+    {
+      "id": "coverage/c23",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sale_events.event_type AS event_type, COUNT(*) AS events, AVG(sale_events.demand_uplift) AS avg_demand_uplift\nFROM sale_events\nWHERE sale_events.start_date IS NOT NULL AND sale_events.start_date >= TIMESTAMP '2026-01-01' AND sale_events.start_date < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY events DESC NULLS LAST",
+      "compile_seconds": 0.0028335779998087673,
+      "query_seconds": 0.017476969999734138
+    },
+    {
+      "id": "coverage/c24",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT marketing_spend.region AS region, SUM(marketing_spend.spend) AS spend, SUM(marketing_spend.clicks) AS clicks, SUM(marketing_spend.impressions) AS impressions, (SUM(marketing_spend.clicks)) * 1.0 / NULLIF((SUM(marketing_spend.impressions)), 0) AS ad_ctr\nFROM marketing_spend\nWHERE marketing_spend.date_hour >= TIMESTAMP '2026-01-01' AND marketing_spend.date_hour < TIMESTAMP '2027-01-01'\nGROUP BY 1\nORDER BY spend DESC NULLS LAST",
+      "compile_seconds": 0.00473912500001461,
+      "query_seconds": 0.03928501700011111
+    },
+    {
+      "id": "flow/flow-case",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale' AND product_master.brand_name = 'ADIDAS'",
+      "compile_seconds": 0.008171071999640844,
+      "query_seconds": 0.00880251299986412
+    },
+    {
+      "id": "flow/flow-complete",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT product_master.category AS category, SUM(CASE WHEN NOT sales.delivered_at IS NULL THEN sales.net_amount - COALESCE(sales.refund_amount, 0) ELSE 0 END) AS realized_revenue\nFROM sales\nLEFT JOIN product_master ON sales.product_id = product_master.product_id\nWHERE sales.line_type = 'Sale'\nGROUP BY 1\nORDER BY realized_revenue DESC NULLS LAST",
+      "compile_seconds": 0.00559041700034868,
+      "query_seconds": 0.04073371300000872
+    },
+    {
+      "id": "flow/flow-context",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.payment_method AS payment_method, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.ship_city = 'Mumbai'\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.0029130140001143445,
+      "query_seconds": 0.006389045000105398
+    },
+    {
+      "id": "flow/flow-values",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.ship_city AS city, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.ship_city IN ('Mumbai', 'Pune') AND sales.shipped_at IS NOT NULL\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.03789173099994514,
+      "query_seconds": 0.007823513000403182
+    },
+    {
+      "id": "flow/flow-destinations",
+      "repeat": 2,
+      "route": "compiled",
+      "ok": true,
+      "reason": "match",
+      "sql": "SELECT sales.ship_city AS city, COUNT(DISTINCT sales.order_id) AS orders\nFROM sales\nWHERE sales.line_type = 'Sale' AND sales.ship_city IN ('Mumbai', 'Pune')\nGROUP BY 1\nORDER BY orders DESC NULLS LAST",
+      "compile_seconds": 0.003990061999502359,
+      "query_seconds": 0.007564866000393522
+    }
+  ]
+}

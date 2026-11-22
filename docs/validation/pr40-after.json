@@ -1,0 +1,552 @@
+{
+  "source_sha256": "44281364f408f30bf6a5173e4c7f58823d6634e02f01c47bd2ea452f50133182",
+  "kind": "local_no_model",
+  "python": "3.12.14",
+  "data": {
+    "size": "small",
+    "seed": 42,
+    "first_day": "2025-01-01",
+    "last_day": "2026-11-22",
+    "package_version": "1.0.0",
+    "n_products": 1500,
+    "n_sellers": 80,
+    "traffic_scale": 0.17,
+    "daily_new_visitors": 30.0
+  },
+  "cold_definition": "fresh Agent; Python imports and OS caches may be warm",
+  "agent_initialization": {
+    "n": 3,
+    "p50": 0.05322578100003739,
+    "p95": 0.5505370664996008
+  },
+  "first_pass": {
+    "n": 5,
+    "p50": 0.09356673100046464,
+    "p95": 0.22922500720014793
+  },
+  "warm_total": {
+    "n": 20,
+    "p50": 0.05930250200026421,
+    "p95": 0.07221116780006014
+  },
+  "interpretation": {
+    "n": 25,
+    "p50": 0.02079180000055203,
+    "p95": 0.027859013999659496
+  },
+  "post_confirmation": {
+    "n": 25,
+    "p50": 0.039553199000692985,
+    "p95": 0.12307436680021037
+  },
+  "revision": {
+    "n": 5,
+    "p50": 0.022991699999693083,
+    "p95": 0.029826754600617275
+  },
+  "rows": [
+    {
+      "question": "What was yesterday's GMV?",
+      "repeat": 0,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.05732640399946831,
+      "post_confirmation": 0.03494617599972116,
+      "total": 0.09227257999918947,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 2.4e-05,
+        "context": 0.03359,
+        "execute": 0.01736,
+        "analyse": 0.002705,
+        "chart": 0.001059,
+        "remember": 0.001619
+      }
+    },
+    {
+      "question": "What is the monthly return rate?",
+      "repeat": 0,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.021411609000097087,
+      "post_confirmation": 0.2259139759999016,
+      "total": 0.24732558499999868,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.8e-05,
+        "context": 0.003819,
+        "execute": 0.011499,
+        "analyse": 0.011336,
+        "chart": 0.189768,
+        "remember": 0.002554
+      }
+    },
+    {
+      "question": "Show revenue by category.",
+      "repeat": 0,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.022318481000183965,
+      "post_confirmation": 0.07124825000028068,
+      "total": 0.09356673100046464,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 2.4e-05,
+        "context": 0.002792,
+        "execute": 0.028825,
+        "analyse": 0.007252,
+        "chart": 0.021795,
+        "remember": 0.001198
+      }
+    },
+    {
+      "question": "Which brands generated the highest sales?",
+      "repeat": 0,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.02079180000055203,
+      "post_confirmation": 0.13603089600019302,
+      "total": 0.15682269600074505,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 2.7e-05,
+        "context": 0.002994,
+        "execute": 0.012481,
+        "analyse": 0.009941,
+        "chart": 0.098537,
+        "remember": 0.003524
+      }
+    },
+    {
+      "question": "Show sales for the last seven days.",
+      "repeat": 0,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.020539675999316387,
+      "post_confirmation": 0.021528333999413007,
+      "total": 0.042068009998729394,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 2.7e-05,
+        "context": 0.003329,
+        "execute": 0.006687,
+        "analyse": 0.001548,
+        "chart": 0.000722,
+        "remember": 0.002823
+      }
+    },
+    {
+      "question": "What was yesterday's GMV?",
+      "repeat": 1,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.01603767200049333,
+      "post_confirmation": 0.016380838999793923,
+      "total": 0.03241851100028725,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.7e-05,
+        "context": 0.00201,
+        "execute": 0.0021,
+        "analyse": 0.00148,
+        "chart": 0.000916,
+        "remember": 0.001655
+      }
+    },
+    {
+      "question": "What is the monthly return rate?",
+      "repeat": 1,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.023235152999404818,
+      "post_confirmation": 0.04889978700066422,
+      "total": 0.07213494000006904,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.7e-05,
+        "context": 0.002873,
+        "execute": 0.003089,
+        "analyse": 0.009251,
+        "chart": 0.022935,
+        "remember": 0.00107
+      }
+    },
+    {
+      "question": "Show revenue by category.",
+      "repeat": 1,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.017593221999959496,
+      "post_confirmation": 0.04038836800009449,
+      "total": 0.057981590000053984,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 2.2e-05,
+        "context": 0.002001,
+        "execute": 0.002307,
+        "analyse": 0.004659,
+        "chart": 0.021402,
+        "remember": 0.000962
+      }
+    },
+    {
+      "question": "Which brands generated the highest sales?",
+      "repeat": 1,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.019995912999547727,
+      "post_confirmation": 0.039356638000754174,
+      "total": 0.0593525510003019,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.9e-05,
+        "context": 0.002062,
+        "execute": 0.002382,
+        "analyse": 0.008075,
+        "chart": 0.017669,
+        "remember": 0.000987
+      }
+    },
+    {
+      "question": "Show sales for the last seven days.",
+      "repeat": 1,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.022993592000602803,
+      "post_confirmation": 0.01470421899921348,
+      "total": 0.037697810999816284,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 2e-05,
+        "context": 0.002907,
+        "execute": 0.00172,
+        "analyse": 0.001365,
+        "chart": 0.000872,
+        "remember": 0.001248
+      }
+    },
+    {
+      "question": "What was yesterday's GMV?",
+      "repeat": 2,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.013981540999338904,
+      "post_confirmation": 0.01929761200062785,
+      "total": 0.033279152999966755,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.6e-05,
+        "context": 0.001361,
+        "execute": 0.00215,
+        "analyse": 0.00126,
+        "chart": 0.002991,
+        "remember": 0.001986
+      }
+    },
+    {
+      "question": "What is the monthly return rate?",
+      "repeat": 2,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.018808469999385125,
+      "post_confirmation": 0.041932978000659205,
+      "total": 0.06074144800004433,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 2.1e-05,
+        "context": 0.002322,
+        "execute": 0.002428,
+        "analyse": 0.008587,
+        "chart": 0.019247,
+        "remember": 0.001048
+      }
+    },
+    {
+      "question": "Show revenue by category.",
+      "repeat": 2,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.02894805199957773,
+      "post_confirmation": 0.0400324409993118,
+      "total": 0.06898049299888953,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.8e-05,
+        "context": 0.002287,
+        "execute": 0.004093,
+        "analyse": 0.005077,
+        "chart": 0.01765,
+        "remember": 0.001189
+      }
+    },
+    {
+      "question": "Which brands generated the highest sales?",
+      "repeat": 2,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.01972070800002257,
+      "post_confirmation": 0.050227864999214944,
+      "total": 0.06994857299923751,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.9e-05,
+        "context": 0.002382,
+        "execute": 0.002151,
+        "analyse": 0.009725,
+        "chart": 0.024996,
+        "remember": 0.000999
+      }
+    },
+    {
+      "question": "Show sales for the last seven days.",
+      "repeat": 2,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.02229048600020178,
+      "post_confirmation": 0.02130505999957677,
+      "total": 0.04359554599977855,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 2.4e-05,
+        "context": 0.003699,
+        "execute": 0.001947,
+        "analyse": 0.001959,
+        "chart": 0.000991,
+        "remember": 0.001212
+      }
+    },
+    {
+      "question": "What was yesterday's GMV?",
+      "repeat": 3,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.015456594999704976,
+      "post_confirmation": 0.014654430000518914,
+      "total": 0.03011102500022389,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.6e-05,
+        "context": 0.001581,
+        "execute": 0.001727,
+        "analyse": 0.001189,
+        "chart": 0.000687,
+        "remember": 0.00133
+      }
+    },
+    {
+      "question": "What is the monthly return rate?",
+      "repeat": 3,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.023007802999927662,
+      "post_confirmation": 0.050651692999963416,
+      "total": 0.07365949599989108,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 3.9e-05,
+        "context": 0.0026,
+        "execute": 0.002364,
+        "analyse": 0.011948,
+        "chart": 0.022616,
+        "remember": 0.001034
+      }
+    },
+    {
+      "question": "Show revenue by category.",
+      "repeat": 3,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.01969925399953354,
+      "post_confirmation": 0.039553199000692985,
+      "total": 0.059252453000226524,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.9e-05,
+        "context": 0.002054,
+        "execute": 0.002289,
+        "analyse": 0.00556,
+        "chart": 0.018606,
+        "remember": 0.001384
+      }
+    },
+    {
+      "question": "Which brands generated the highest sales?",
+      "repeat": 3,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.019419133000155853,
+      "post_confirmation": 0.040059379000012996,
+      "total": 0.05947851200016885,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.8e-05,
+        "context": 0.002171,
+        "execute": 0.001872,
+        "analyse": 0.007259,
+        "chart": 0.018256,
+        "remember": 0.001827
+      }
+    },
+    {
+      "question": "Show sales for the last seven days.",
+      "repeat": 3,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.02286273100071412,
+      "post_confirmation": 0.015625820999957796,
+      "total": 0.038488552000671916,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.9e-05,
+        "context": 0.003093,
+        "execute": 0.002309,
+        "analyse": 0.001056,
+        "chart": 0.000602,
+        "remember": 0.001352
+      }
+    },
+    {
+      "question": "What was yesterday's GMV?",
+      "repeat": 4,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.019034435000321537,
+      "post_confirmation": 0.01567659900047147,
+      "total": 0.034711034000793006,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 3.7e-05,
+        "context": 0.001781,
+        "execute": 0.0015,
+        "analyse": 0.001164,
+        "chart": 0.000684,
+        "remember": 0.001261
+      }
+    },
+    {
+      "question": "What is the monthly return rate?",
+      "repeat": 4,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.021332532999622345,
+      "post_confirmation": 0.041625048000241804,
+      "total": 0.06295758099986415,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.7e-05,
+        "context": 0.002705,
+        "execute": 0.002269,
+        "analyse": 0.008356,
+        "chart": 0.018951,
+        "remember": 0.001099
+      }
+    },
+    {
+      "question": "Show revenue by category.",
+      "repeat": 4,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.023502861999986635,
+      "post_confirmation": 0.03829400800077565,
+      "total": 0.06179687000076228,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.6e-05,
+        "context": 0.002943,
+        "execute": 0.001867,
+        "analyse": 0.004459,
+        "chart": 0.019133,
+        "remember": 0.00108
+      }
+    },
+    {
+      "question": "Which brands generated the highest sales?",
+      "repeat": 4,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.01963089799937734,
+      "post_confirmation": 0.04406591299994034,
+      "total": 0.06369681099931768,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 0.000109,
+        "context": 0.002297,
+        "execute": 0.001878,
+        "analyse": 0.008933,
+        "chart": 0.019819,
+        "remember": 0.001429
+      }
+    },
+    {
+      "question": "Show sales for the last seven days.",
+      "repeat": 4,
+      "correct": true,
+      "confirmation": true,
+      "interpretation": 0.02111703700029466,
+      "post_confirmation": 0.01455859399993642,
+      "total": 0.03567563100023108,
+      "model_calls": 0,
+      "tokens": 0,
+      "usd": 0,
+      "stages": {
+        "check_input": 1.9e-05,
+        "context": 0.002834,
+        "execute": 0.002068,
+        "analyse": 0.001133,
+        "chart": 0.000768,
+        "remember": 0.001091
+      }
+    }
+  ],
+  "cloud_run": null,
+  "gcs": null,
+  "live_model_accuracy": null
+}

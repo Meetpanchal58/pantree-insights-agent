@@ -52,8 +52,10 @@ def main():
         for repeat in range(3):
             for i, (question, reference) in enumerate(CASES):
                 started = time.perf_counter()
-                _, stream = agent.start(question, memory=Memory(Path(tmp) / f'{repeat}-{i}', agent.data['size']))
+                run_id, stream = agent.start(question, memory=Memory(Path(tmp) / f'{repeat}-{i}', agent.data['size']))
                 events = list(stream)
+                if events[-1].get("kind") == "confirm":
+                    events += list(agent.resume(run_id, "Go ahead", events[-1]["plan_version"]))
                 elapsed = time.perf_counter() - started
                 final = events[-1]
                 assert final['status'] == 'done' and final['grounded']

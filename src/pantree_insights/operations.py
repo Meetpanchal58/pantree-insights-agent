@@ -14,14 +14,19 @@ from .spec import Catalog, QuerySpec, SpecError, compile_spec
 
 def compile_operation(spec: QuerySpec, cat: Catalog) -> str:
     op = spec.operation
-    if spec.columns or spec.limit or spec.shares or spec.ranking or not spec.measures:
-        raise SpecError("analytical operations require measures without lists, shares or early ranking")
+    if spec.columns or spec.limit or spec.ranking or not spec.measures:
+        raise SpecError("analytical operations require measures without lists or early ranking")
     if not spec.time or not spec.time.start or not spec.time.end:
         raise SpecError("analytical operations need explicit start and end dates")
     if (spec.time.end - spec.time.start).days > 366:
         raise SpecError("analytical operations are bounded to 367 output days")
-    base = spec.model_copy(update={"operation": None})
+    base = spec.model_copy(update={"operation": None, "shares": []})
     names = [m.name for m in spec.measures]
+    for name in spec.shares:
+        m = next((m for m in spec.measures if m.name == name), None)
+        if (op.kind != "period_compare" or m is None or not m.metric
+                or cat.metrics.metrics[m.metric].time_aggregation != "additive"):
+            raise SpecError("contributions require a named additive metric in a period comparison")
 
     def query(s):
         tree = sqlglot.parse_one(compile_spec(s, cat), read="duckdb")
@@ -34,6 +39,7 @@ def compile_operation(spec: QuerySpec, cat: Catalog) -> str:
         raise SpecError("analytical output columns must have unique names")
     suffixes = ("previous", "delta", "change_ratio") if op.kind == "period_compare" else (op.kind,)
     generated = {f"{n}_{suffix}" for n in names for suffix in suffixes}
+    generated.update(f"{n}_contribution" for n in spec.shares)
     if generated & (set(names) | set(keys)):
         raise SpecError("measure name collides with an analytical output")
     if op.kind == "period_compare":
@@ -50,6 +56,10 @@ def compile_operation(spec: QuerySpec, cat: Catalog) -> str:
             columns += [f'c."{n}"', f'p."{n}" AS "{n}_previous"',
                         f'c."{n}" - p."{n}" AS "{n}_delta"',
                         f'c."{n}" / NULLIF(p."{n}", 0) - 1 AS "{n}_change_ratio"']
+            if n in spec.shares:
+                delta = f'(c."{n}" - p."{n}")'
+                columns.append(f'CASE WHEN COUNT(*) FILTER (WHERE {delta} IS NULL) OVER () = 0 '
+                               f'THEN {delta} / NULLIF(SUM({delta}) OVER (), 0) END AS "{n}_contribution"')
         on = " AND ".join(f'c."{k}" IS NOT DISTINCT FROM p."{k}"' for k in keys) or "TRUE"
         return (f"WITH current_period AS ({tree.sql(dialect='duckdb')}), "
                 f"previous_period AS ({previous.sql(dialect='duckdb')}) "

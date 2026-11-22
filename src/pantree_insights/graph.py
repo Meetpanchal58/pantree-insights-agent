@@ -10,6 +10,7 @@ or the read-back and resumes with Agent.resume(). See docs/ARCHITECTURE.md.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import logging
 import re
@@ -75,13 +76,21 @@ class State(TypedDict, total=False):
     chat_id: str | None
     question: str
     history: str
+    relationship: str
+    objective: str
     previous_spec: dict | None
-    use_defaults: bool
+    plan_version: int
+    plan_digest: str
+    confirmed_digest: str | None
+    prepared: list[dict]
+    revision: str
+    investigation: dict
+    results: list[dict]
+    analyses: list[dict]
     answers: dict[str, str]
     choices: dict[str, str]
     open_points: list[dict]
     clarify_rounds: int
-    confirmed: bool
     fast_path: bool
     readings: list[dict]                       # different readings offered to the user
     spec: dict | None                          # the confirmed QuerySpec
@@ -129,6 +138,7 @@ def drop_unverified(analysis: agents.Analysis, problems: list[str]) -> agents.An
     return analysis.model_copy(update={
         "headline": headline, "claims": claims,
         "findings": [t for t in analysis.findings if clean(t)],
+        "hypotheses": [t for t in analysis.hypotheses if clean(t)],
         "recommendations": [t for t in analysis.recommendations if clean(t)],
         "caveats": [t for t in analysis.caveats if clean(t)],
         "chart_title": analysis.chart_title if clean(analysis.chart_title) else "Verified result",
@@ -162,6 +172,10 @@ def step(name: str):
             return update
         return node
     return wrap
+
+
+def plan_digest(prepared: list[dict], version: int, snapshot: str | None) -> str:
+    return hashlib.sha256(json.dumps([prepared, version, snapshot], sort_keys=True).encode()).hexdigest()
 
 
 class Agent:
@@ -278,17 +292,51 @@ class Agent:
         background = state.get("memory")
         previous = QuerySpec.model_validate(state["previous_spec"]) if state.get("previous_spec") else None
         context_started = time.perf_counter()
+        reviewed = fast_spec(state["question"], self.catalog, self.data["last_day"]) or followup(
+            state["question"], previous, self.catalog, self.data["last_day"])
         if background is None:
             scope = self.mem(state)
             constraints = scope.constraints() if hasattr(scope, "constraints") else None
-            direct = fast_spec(state["question"], self.catalog, self.data["last_day"]) or followup(
-                state["question"], previous, self.catalog, self.data["last_day"])
-            skip_context = constraints == "" and direct is not None and not answers and independent_history(
+            skip_context = constraints == "" and reviewed is not None and not answers and independent_history(
                 state.get("history", ""), self.catalog, self.data["last_day"])
             background = "" if skip_context else scope.context(state["question"], as_of=self.data["last_day"])
+        needs_evidence = not (background == "" and reviewed is not None and independent_history(
+            state.get("history", ""), self.catalog, self.data["last_day"]))
+        if needs_evidence and state.get("investigation") and "## Investigation" not in background:
+            background += "\n## Investigation (verified historical evidence; recheck against current data)\n" + \
+                json.dumps(state["investigation"], default=str)
         _emit("context", "done", seconds=round(time.perf_counter() - context_started, 6))
         pick = choices.pop("reading", None)
-        if pick is not None and state.get("readings"):           # the user chose one of the readings
+        revision = state.get("revision")
+        revised_items = None
+        if revision and (state.get("spec") or state.get("template")):
+            from .interpret import revise, revise_template
+            items = state.get("prepared") or [{"spec": state.get("spec"), "template": state.get("template"),
+                                                 "purpose": state.get("restated", "Analysis")}]
+            target = re.fullmatch(r"step ([1-4])[: ,]+(.+)", revision, re.I)
+            if len(items) > 1 and (not target or int(target[1]) > len(items)):
+                decision = Decision("clarify", required=True, questions=[agents.ClarifyingQuestion(
+                    question="Which part should change? Say 'step 1: ...' and describe the correction.",
+                    options=[], default="", why="The other approved requirements will be preserved")])
+            else:
+                index, correction = (int(target[1]) - 1, target[2]) if target else (0, revision)
+                try:
+                    if items[index].get("spec"):
+                        decision = revise(self.llm(state), self.catalog, QuerySpec.model_validate(items[index]["spec"]),
+                                          correction, self.data)
+                    else:
+                        decision = revise_template(self.llm(state), self.catalog,
+                            TemplateCall.model_validate(items[index]["template"]), correction, self.data)
+                    if (decision.spec or decision.template) and len(items) > 1:
+                        revised_items = [dict(item) for item in items]
+                        revised_items[index] = {**items[index],
+                            "spec": decision.spec.model_dump(mode="json") if decision.spec else None,
+                            "template": decision.template.model_dump(mode="json") if decision.template else None}
+                except (SpecError, TemplateError, ValueError) as error:
+                    decision = Decision("clarify", required=True, questions=[agents.ClarifyingQuestion(
+                        question=f"I couldn't preserve that scope: {error}. What should I change?",
+                        options=[], default="", why="The existing plan remains unexecuted")])
+        elif pick is not None and state.get("readings"):           # the user chose one of the readings
             spec = QuerySpec.model_validate(state["readings"][int(pick)])
             decision = Decision("spec", spec=spec, restated=state.get("restated", state["question"]))
         else:
@@ -318,16 +366,20 @@ class Agent:
                                             required=decision.required))
             done = {a.strip().lower() for a in answers}
             pending = [p for p in points if p.question.strip().lower() not in done]
-            if state.get("use_defaults") and pending and not any(p.required for p in pending):
-                answers.update({p.question: p.default for p in pending})
-                return {"answers": answers, "clarify_rounds": rounds + 1, "route": "interpret",
-                        "_detail": {**detail, "defaults": [p.question for p in pending]}}
             return {"open_points": [p.__dict__ for p in pending], "route": "clarify", "_status": "needs_input",
+                    "confirmed_digest": None,
                     "memory": background,
                     "readings": [r.model_dump(mode="json") for r in decision.readings],
                     "restated": decision.restated,
                     "_detail": {**detail, "round": rounds + 1, "questions": [p.question for p in pending]}}
-        if decision.kind == "template":
+        if decision.kind == "investigation":
+            items = [step.model_dump(mode="json") for step in decision.steps]
+            summary = "\n\n".join(f"{i + 1}. {item['purpose']}\n" + (
+                readback(QuerySpec.model_validate(item["spec"]), self.catalog) if item.get("spec") else
+                build_template(item["template"]["name"], TemplateCall.model_validate(item["template"]).params)[1])
+                for i, item in enumerate(items))
+            out = {"spec": items[0].get("spec"), "template": items[0].get("template"), "prepared": items}
+        elif decision.kind == "template":
             _, summary = build_template(decision.template.name, decision.template.params)
             summary = f"**Analysis:** {summary}" + (f"\n**Assumed:** {'; '.join(decision.assumptions)}"
                                                      if decision.assumptions else "")
@@ -335,84 +387,173 @@ class Agent:
         else:
             summary = readback(decision.spec, self.catalog, decision.assumptions)
             out = {"spec": decision.spec.model_dump(mode="json"), "template": None}
-        out.update({"readback": summary, "restated": decision.restated, "notes": decision.assumptions,
+        if revised_items:
+            summary = "\n\n".join(f"{i + 1}. {item['purpose']}\n" + (
+                readback(QuerySpec.model_validate(item["spec"]), self.catalog) if item.get("spec") else
+                build_template(item["template"]["name"], TemplateCall.model_validate(item["template"]).params)[1])
+                for i, item in enumerate(revised_items))
+            out = {"spec": revised_items[0].get("spec"), "template": revised_items[0].get("template"),
+                   "prepared": revised_items}
+        relationship = decision.detail.get("relationship", "refinement" if revision else
+            "drilldown" if previous and followup(state["question"], previous, self.catalog, self.data["last_day"])
+            else "new")
+        objective = ((state.get("investigation") or {}).get("objective") if relationship != "new" else None)
+        out.update({"relationship": relationship, "objective": objective or state["question"], "readback": summary,
+                    "restated": decision.restated, "notes": decision.assumptions,
                     "trust": None, "open_points": [], "answers": answers, "choices": choices,
-                    "memory": background, "fast_path": bool(decision.detail.get("fast_path")),
+                    "memory": background, "revision": "", "fast_path": bool(decision.detail.get("fast_path")),
                     "_detail": {**detail, "readback": summary}})
-        if not out["fast_path"] and not state.get("use_defaults") and not state.get("confirmed"):
-            point = OpenPoint("confirm", CONFIRM_QUESTION, [CONFIRM_YES, CONFIRM_NO], CONFIRM_YES,
-                              "nothing is computed until you confirm", {CONFIRM_YES: "yes"})
-            return {**out, "open_points": [point.__dict__], "route": "clarify", "_status": "needs_input"}
-        return {**out, "route": "execute"}
-
-    def clarify(self, state: State) -> dict:
-        """Pause for the user's answers (or confirmation), then go back to interpret or on to execute."""
-        points = [OpenPoint(**p) for p in state.get("open_points") or []]
-        questions = [p.public() for p in points]
-        rounds = state.get("clarify_rounds", 0) + 1
-        confirming = any(p.key == "confirm" for p in points)
-        payload = {"type": "clarify", "kind": "confirm" if confirming else "clarify", "questions": questions,
-                   "round": rounds}
-        if confirming:
-            payload.update(readback=state.get("readback", ""), spec=state.get("spec"), template=state.get("template"))
-        given = interrupt(payload)                                          # pauses the run here
-        if not isinstance(given, dict) or not given:                        # "just use defaults"
-            given = {q["question"]: q["default"] for q in questions}
-        if confirming:
-            answer = (given.get(CONFIRM_QUESTION) or CONFIRM_YES).strip()
-            if answer == CONFIRM_YES:
-                return {"confirmed": True, "clarify_rounds": rounds, "open_points": [], "route": "execute"}
-            correction = "The user wants something changed but did not say what: ask what to change" \
-                if answer == CONFIRM_NO else answer
-            return {"answers": {**(state.get("answers") or {}), CORRECTION: correction}, "confirmed": False,
-                    "clarify_rounds": rounds, "open_points": [], "spec": None, "template": None, "route": "interpret"}
-        answers, choices = {**(state.get("answers") or {}), **given}, dict(state.get("choices") or {})
-        for p in points:
-            answer = given.get(p.question, p.default)
-            if p.meaning and answer in p.meaning:
-                choices[p.key] = p.meaning[answer]
-        return {"answers": answers, "choices": choices, "clarify_rounds": rounds, "open_points": [],
-                "confirmed": False, "route": "interpret"}
-
-    @step("execute")
-    def execute(self, state: State) -> dict:
-        """Compile the confirmed spec (or build the template) and run it. No model writes this SQL."""
         try:
-            if state.get("template"):
-                call = TemplateCall.model_validate(state["template"])
-                sql, _ = build_template(call.name, call.params)
-                metrics: list[str] = []
-            else:
-                spec = QuerySpec.model_validate(state["spec"])
+            prepared = self.prepare(out)
+        except (SpecError, TemplateError) as error:
+            point = OpenPoint("scope", "I need to adjust the scope: " + str(error) + ". What would you like to change?",
+                              [], "", "The unavailable part cannot be treated as zero", required=True)
+            return {**out, "open_points": [point.__dict__], "prepared": out.get("prepared", []),
+                    "confirmed_digest": None,
+                    "route": "clarify", "_status": "needs_input"}
+        version = state.get("plan_version", 0) + 1
+        point = OpenPoint("confirm", CONFIRM_QUESTION, [], "", "Please confirm or tell me what to change")
+        return {**out, "plan_version": version, "prepared": prepared,
+                "plan_digest": plan_digest(prepared, version, self.snapshot), "confirmed_digest": None,
+                "open_points": [point.__dict__], "route": "clarify", "_status": "needs_input"}
+
+    def prepare(self, state: State) -> list[dict]:
+        """Compile and check scope before confirmation; never execute analytical SQL here."""
+        from .interpret import coverage_problems
+        items = state.get("prepared") or [{"spec": state.get("spec"), "template": state.get("template"),
+                                            "purpose": state.get("restated", "Requested analysis")}]
+        prepared = []
+        for item in items:
+            spec = QuerySpec.model_validate(item["spec"]) if item.get("spec") else None
+            call = TemplateCall.model_validate(item["template"]) if item.get("template") else None
+            problems = coverage_problems(spec, call, self.data)
+            if problems:
+                raise SpecError("; ".join(problems))
+            if spec:
                 problems = validate(spec, self.catalog)
                 if problems:
                     raise SpecError("; ".join(problems))
                 sql = compile_spec(spec, self.catalog)
-                metrics = [m.metric for m in spec.measures if m.metric]
-            if not check_sql(sql).ok:                                       # defence in depth: same safety rules
-                raise SpecError("the verified query failed the safety checks")
-            started = time.perf_counter()
-            frame, truncated = self.query(sql)
-            if self.snapshot and snapshot_signature() != self.snapshot:
-                raise SpecError("the data changed during execution; please ask again")
+            elif call:
+                sql, _ = build_template(call.name, call.params)
+            else:
+                raise SpecError("No analytical plan was supplied")
+            safe = check_sql(sql)
+            if not safe.ok:
+                raise SpecError("the proposed analysis failed SQL safety checks")
+            prepared.append({"purpose": item.get("purpose", "Requested analysis"),
+                             "spec": spec.model_dump(mode="json") if spec else None,
+                             "template": call.model_dump(mode="json") if call else None, "sql": safe.sql})
+        if not 1 <= len(prepared) <= 4:
+            raise SpecError("An investigation must contain one to four queries")
+        return prepared
+
+    def clarify(self, state: State) -> dict:
+        """A conversational interrupt: only a positive reply to this exact plan can approve execution."""
+        from .interpret import is_confirmation
+        points = [OpenPoint(**p) for p in state.get("open_points") or []]
+        confirming = bool(state.get("prepared")) and any(p.key == "confirm" for p in points)
+        version = state.get("plan_version", 0)
+        text = ("I understand you want to " + (state.get("restated") or state["question"]).rstrip(".?") +
+                ".\n\n" + state.get("readback", "") +
+                "\n\nDoes this match your objective? Say ‘go ahead’ to run this plan, or tell me what to change.") \
+            if confirming else "\n\n".join(p.question + (" Possible meanings: " + "; ".join(p.options)
+                                                          if p.options else "") for p in points)
+        payload = {"type": "clarify", "kind": "confirm" if confirming else "clarify", "message": text,
+                   "questions": [p.public() for p in points], "plan_version": version,
+                   "readback": state.get("readback"), "spec": state.get("spec"),
+                   "template": state.get("template"), "plan": state.get("prepared", [])}
+        given = interrupt(payload)
+        message = str(given.get("message", "")).strip() if isinstance(given, dict) else ""
+        if re.fullmatch(r"(?:please )?(?:cancel|stop|never mind|nevermind)(?: (?:it|this|the analysis))?[.!]?",
+                        message, re.I):
+            return {"status": "cancelled", "message": "Cancelled. I haven't run this pending plan.",
+                    "confirmed_digest": None, "route": "finish"}
+        verdict = check_question(message)
+        if not verdict.ok:
+            return {"status": "declined", "message": verdict.reason, "confirmed_digest": None, "route": "finish"}
+        if not message or given.get("plan_version") != version:
+            return {"route": "clarify", "confirmed_digest": None}
+        if confirming and is_confirmation(message):
+            return {"confirmed_digest": state["plan_digest"], "open_points": [], "route": "execute"}
+        if is_confirmation(message):
+            return {"route": "clarify", "confirmed_digest": None}  # an unanswered question is not a plan
+        if state.get("clarify_rounds", 0) >= MAX_CLARIFY_ROUNDS:
+            return {"status": "declined", "message": "Let's restart with a concise objective and scope.",
+                    "route": "finish"}
+        if confirming:
+            return {"revision": message, "confirmed_digest": None, "route": "interpret",
+                    "clarify_rounds": state.get("clarify_rounds", 0) + 1}
+        if len(points) == 1 and points[0].key == "reading":
+            point = points[0]
+            selected = next((value for option, value in point.meaning.items()
+                             if message.casefold() == option.casefold()), None)
+            if selected is None and re.fullmatch(r"(?:option )?[1-3]", message, re.I):
+                index = int(message.split()[-1]) - 1
+                selected = str(index) if index < len(point.options) else None
+            if selected is not None:
+                return {"choices": {"reading": selected}, "revision": "", "confirmed_digest": None,
+                        "route": "interpret", "clarify_rounds": state.get("clarify_rounds", 0) + 1}
+        answers = dict(state.get("answers") or {})
+        if len(points) == 1:
+            answers[points[0].question] = message
+        else:
+            answers[CORRECTION] = message
+        return {"answers": answers, "revision": message if state.get("spec") or state.get("template") else "",
+                "confirmed_digest": None, "route": "interpret",
+                "clarify_rounds": state.get("clarify_rounds", 0) + 1}
+
+    @step("execute")
+    def execute(self, state: State) -> dict:
+        """Compile the confirmed spec (or build the template) and run it. No model writes this SQL."""
+        prepared = state.get("prepared") or []
+        digest = plan_digest(prepared, state.get("plan_version", 0), self.snapshot)
+        if (not prepared or state.get("confirmed_digest") != digest or state.get("plan_digest") != digest
+                or (self.snapshot and snapshot_signature() != self.snapshot)):
+            return {"status": "failed", "route": "finish",
+                    "message": "This exact plan needs explicit confirmation before execution."}
+        started = time.perf_counter()
+        results = []
+        verification = {"status": "verified", "how": "executed the exact confirmed compiled plan",
+                        "scope": "query and numeric evidence; descriptive results do not establish causes"}
+        try:
+            for i, item in enumerate(prepared):
+                if self.snapshot and snapshot_signature() != self.snapshot:
+                    raise SpecError("the data changed during execution; please ask again")
+                frame, truncated = self.query(item["sql"])
+                if self.snapshot and snapshot_signature() != self.snapshot:
+                    raise SpecError("the data changed during execution; please ask again")
+                result = _result(frame, truncated)
+                results.append({**item, "result": result, "metric_names": [m["metric"] for m in
+                    (item.get("spec") or {}).get("measures", []) if m.get("metric")]})
+                with contextlib.suppress(RuntimeError):
+                    get_stream_writer()({"type": "result", "run_id": state["run_id"], "query_index": i,
+                        "purpose": item["purpose"], "result": result, "sql": item["sql"],
+                        "readback": state.get("readback"), "trust": "verified", "verification": verification,
+                        "data_as_of": self.data["last_day"], "data_size": self.data["size"],
+                        "warnings": state.get("notes", [])})
         except (SpecError, TemplateError) as error:
-            return {"status": "failed", "route": "finish", "message": f"The verified query could not be built: {error}"}
-        result = _result(frame, truncated)
-        verification = {"status": "verified", "how": "compiled from governed definitions; SQL safety checked",
-                        "scope": "query and numeric evidence; not a proof of natural-language interpretation"}
-        with contextlib.suppress(RuntimeError):
-            get_stream_writer()({"type": "result", "run_id": state["run_id"], "result": result,
-                                 "sql": sql, "readback": state.get("readback"), "trust": "verified",
-                                 "verification": verification, "data_as_of": self.data["last_day"],
-                                 "data_size": self.data["size"], "warnings": state.get("notes", [])})
-        return {"sql": sql, "metric_names": metrics, "result": result, "trust": "verified",
-                "verification": verification,
-                "route": "analyse",
-                "_detail": {"sql": sql, "rows": len(frame), "columns": list(frame.columns), "truncated": truncated,
-                            "query_seconds": round(time.perf_counter() - started, 2)}}
+            return {"status": "failed", "route": "finish", "results": results,
+                    "message": f"The investigation stopped: {error}. Earlier streamed tables are partial evidence."}
+        first = results[0]
+        return {"sql": first["sql"], "metric_names": first["metric_names"], "result": first["result"],
+                "results": results, "trust": "verified", "verification": verification, "route": "analyse",
+                "_detail": {"queries": len(results), "query_seconds": round(time.perf_counter() - started, 6)}}
 
     @step("analyse")
     def analyse(self, state: State) -> dict:
+        analyses = []
+        for item in state.get("results") or [{"spec": state.get("spec"), "template": state.get("template"),
+                                             "sql": state["sql"], "result": state["result"],
+                                             "metric_names": state.get("metric_names", [])}]:
+            answer = self._analyse_one({**state, **item})
+            analyses.append({**item, "analysis": answer["analysis"], "grounded": answer["grounded"],
+                             "warnings": answer["warnings"]})
+        return {"analyses": analyses, "analysis": analyses[0]["analysis"],
+                "grounded": all(a["grounded"] for a in analyses),
+                "warnings": list(dict.fromkeys(w for a in analyses for w in a["warnings"])), "route": "chart"}
+
+    def _analyse_one(self, state: State) -> dict:
         frame = _frame(state["result"])
         notes = "\n".join(f"- {n}: {self.metrics.metrics[n].notes}" for n in state.get("metric_names") or []
                           if self.metrics.metrics[n].notes)
@@ -432,14 +573,17 @@ class Agent:
                     units[m.name] = "multiple" if money_ratio else "ratio"
                 elif m.agg in ("count", "count_distinct"):
                     units[m.name] = "count"
+            if not spec.operation:
+                units.update({f"{name}_share": "ratio" for name in spec.shares})
             operation = spec.operation
             if operation:
                 for name, unit in list(units.items()):
                     if operation.kind == "period_compare":
-                        units.update({f"{name}_previous": unit, f"{name}_delta":
+                        units.update({f"{name}_contribution": "ratio", f"{name}_previous": unit, f"{name}_delta":
                                       "pct_points" if unit == "ratio" else unit, f"{name}_change_ratio": "ratio"})
                     else:
                         units[f"{name}_{operation.kind}"] = unit
+        units = {name: unit for name, unit in units.items() if name in frame.columns}
         notes += "\nResult units: " + ", ".join(f"{c}={u}" for c, u in units.items())
         args = (self.llm(state), state["question"], state.get("readback", ""), state["sql"], frame,
                 state.get("memory", ""), notes, self.data)
@@ -475,10 +619,12 @@ class Agent:
 
     @step("chart")
     def chart(self, state: State) -> dict:
-        a = state["analysis"]
-        chart = build_chart(_frame(state["result"]), a.get("chart_title") or a["headline"],
-                            a.get("chart_subtitle", ""), a.get("chart_metric"))
-        return {"chart": chart, "_detail": {"kind": (chart or {}).get("kind")}}
+        items = state.get("analyses") or [{"analysis": state["analysis"], "result": state["result"]}]
+        for item in items:
+            a = item["analysis"]
+            item["chart"] = build_chart(_frame(item["result"]), a.get("chart_title") or a["headline"],
+                                        a.get("chart_subtitle", ""), a.get("chart_metric"))
+        return {"analyses": items, "chart": items[0]["chart"], "_detail": {"charts": len(items)}}
 
     @step("remember")
     def remember(self, state: State) -> dict:
@@ -486,7 +632,8 @@ class Agent:
         if self.snapshot and snapshot_signature() != self.snapshot:
             return {"insight_id": None, "status": "failed",
                     "message": "The data changed during analysis. Please ask again; no insight was saved."}
-        if state.get("grounded") is not True or (state.get("result") or {}).get("truncated"):
+        if state.get("grounded") is not True or any(
+                item["result"].get("truncated") for item in state.get("results", [])):
             return {"insight_id": None, "status": "done", "_status": "skipped",
                     "_detail": {"saved": False, "reason": "not saved: the summary or result is incomplete"}}
         memory = self.mem(state)
@@ -510,7 +657,7 @@ class Agent:
         g.add_edge(START, "check_input")
         g.add_conditional_edges("check_input", route, ["interpret", "finish"])
         g.add_conditional_edges("interpret", route, ["clarify", "execute", "interpret", "finish"])
-        g.add_conditional_edges("clarify", route, ["interpret", "execute"])
+        g.add_conditional_edges("clarify", route, ["interpret", "execute", "clarify", "finish"])
         g.add_conditional_edges("execute", route, ["analyse", "finish"])
         g.add_edge("analyse", "chart")
         g.add_edge("chart", "remember")
@@ -521,17 +668,23 @@ class Agent:
     # ------------------------------------------------------------------ running
     def start(self, question: str, chat_id: str | None = None, history: str = "", use_defaults: bool = False,
               memory: Any = None, run_id: str | None = None,
-              previous_spec: dict | None = None) -> tuple[str, Iterator[dict]]:
+              previous_spec: dict | None = None, investigation: dict | None = None) -> tuple[str, Iterator[dict]]:
         """memory: a scope with context(), save_insight() and close_gaps(); defaults to the file memory."""
         run_id = run_id or uuid.uuid4().hex[:12]
         if memory is not None:
             self._memories[run_id] = memory
         state = {"run_id": run_id, "chat_id": chat_id, "question": question, "history": history,
-                 "use_defaults": use_defaults, "previous_spec": previous_spec}
+                 "previous_spec": previous_spec, "plan_version": 0, "investigation": investigation or {}}
         return run_id, self._stream(run_id, state)
 
-    def resume(self, run_id: str, answers: dict[str, str] | None) -> Iterator[dict]:
-        return self._stream(run_id, Command(resume=answers or {}))
+    def resume(self, run_id: str, message: str | dict | None, plan_version: int | None = None) -> Iterator[dict]:
+        pending = self.graph.get_state({"configurable": {"thread_id": run_id}})
+        if not pending.next:
+            raise ValueError("This run has no pending proposal; it cannot execute again")
+        # Older callers may supply an explicit answer map; empty maps never imply approval.
+        if isinstance(message, dict):
+            message = " ".join(str(v) for v in message.values())
+        return self._stream(run_id, Command(resume={"message": message or "", "plan_version": plan_version}))
 
     def _stream(self, run_id: str, payload: Any) -> Iterator[dict]:
         config = {"configurable": {"thread_id": run_id}, "recursion_limit": 100}
@@ -560,7 +713,14 @@ class Agent:
         result = {"type": "final", "run_id": run_id, "status": state.get("status"), "message": state.get("message"),
                 "question": state.get("question"), "restated": state.get("restated"),
                 "readback": state.get("readback"), "spec": state.get("spec"),
-                "template": state.get("template"), "trust": state.get("trust"), "sql": state.get("sql"),
+                "confirmed_plan": state.get("prepared") if state.get("confirmed_digest") else None,
+                "objective": state.get("objective") or state.get("question"),
+                "relationship": state.get("relationship", "new"),
+                "metric_definitions": {n: self.metrics.metrics[n].model_dump(mode="json")
+                                       for n in {name for item in state.get("results", [])
+                                                 for name in item.get("metric_names", [])}},
+                "analyses": state.get("analyses", []), "template": state.get("template"),
+                "trust": state.get("trust"), "sql": state.get("sql"),
                 "result": state.get("result"), "analysis": state.get("analysis"), "chart": state.get("chart"),
                 "warnings": state.get("warnings", []), "insight_id": state.get("insight_id"),
                 "grounded": state.get("grounded"), "verification": state.get("verification"),
@@ -599,17 +759,16 @@ def deterministic_analysis(frame: pd.DataFrame, units: dict[str, str]) -> agents
 
 # ----------------------------------------------------------------------------- command line
 def main() -> None:
-    """pantree-ask [--defaults] "question": ask the agent from the terminal."""
+    """Ask and confirm an analytical plan from the terminal."""
     import argparse
 
     parser = argparse.ArgumentParser(prog="pantree-ask")
     parser.add_argument("question", nargs="+")
-    parser.add_argument("--defaults", action="store_true", help="answer questions with their defaults")
     args = parser.parse_args()
     question = " ".join(args.question)
     agent = Agent()
     print(f"\n{question}\n")
-    run_id, events = agent.start(question, use_defaults=args.defaults)
+    run_id, events = agent.start(question)
     while True:
         final = None
         for event in events:
@@ -618,13 +777,8 @@ def main() -> None:
             if event["type"] in ("clarify", "final"):
                 final = event
         if final and final["type"] == "clarify":
-            if final.get("readback"):
-                print("\nHere's what I'll compute:\n  " + final["readback"].replace("**", "").replace("\n", "\n  "))
-            answers = {}
-            for q in final["questions"]:
-                answer = input(f"  {q['question']} [{' / '.join(q['options'])}] (default: {q['default']}): ").strip()
-                answers[q["question"]] = answer or q["default"]
-            events = agent.resume(run_id, answers)
+            print("\n" + final["message"])
+            events = agent.resume(run_id, input("You: ").strip(), final["plan_version"])
             continue
         break
     if final["status"] != "done":

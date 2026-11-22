@@ -35,6 +35,7 @@ class MemoryNote(BaseModel):
 class Analysis(BaseModel):
     headline: str = Field(description="Prose with {c1}-style placeholders for every number")
     findings: list[str]
+    hypotheses: list[str] = Field(default_factory=list, description="Possible explanations, explicitly unproven")
     recommendations: list[str] = Field(default_factory=list)
     caveats: list[str] = Field(default_factory=list)
     follow_up_questions: list[str] = Field(default_factory=list)
@@ -47,7 +48,7 @@ class Analysis(BaseModel):
 
     def texts(self) -> dict[str, str | list[str]]:
         return {"headline": self.headline, "findings": self.findings, "recommendations": self.recommendations,
-                "caveats": self.caveats, "memory": [m.statement for m in self.memory],
+                "hypotheses": self.hypotheses, "caveats": self.caveats, "memory": [m.statement for m in self.memory],
                 "chart_title": self.chart_title, "chart_subtitle": self.chart_subtitle,
                 "follow_up_questions": self.follow_up_questions}
 
@@ -56,6 +57,7 @@ class Analysis(BaseModel):
         r = lambda t: render(t, self.claims)                                       # noqa: E731
         return self.model_copy(update={
             "headline": r(self.headline), "findings": [r(t) for t in self.findings],
+            "hypotheses": [r(t) for t in self.hypotheses],
             "recommendations": [r(t) for t in self.recommendations], "caveats": [r(t) for t in self.caveats],
             "memory": [m.model_copy(update={"statement": r(m.statement)}) for m in self.memory],
             "follow_up_questions": [r(t) for t in self.follow_up_questions],

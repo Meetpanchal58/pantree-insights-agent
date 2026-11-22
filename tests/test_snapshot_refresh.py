@@ -35,11 +35,13 @@ def test_runner_rebuilds_agent_on_data_refresh(monkeypatch):
 
 def test_paused_run_resumes_with_its_own_agent(monkeypatch):
     resumed = []
-    old = SimpleNamespace(resume=lambda run_id, answers: resumed.append(run_id) or iter([]))
+    old = SimpleNamespace(resume=lambda run_id, message, version: resumed.append(run_id) or iter([]))
     runner = web.Runner(lambda: SimpleNamespace())
     monkeypatch.setattr(runner, "_consume", lambda *a: None)
     run = web.Run("paused", {}, {}, "q", agent=old)
-    runner.answer(None, run, {"Period?": "2026"})
+    run.paused = True
+    run.events = [{"type": "clarify", "plan_version": 0}]
+    runner.answer(None, run, "2026", 0)
     assert resumed == ["paused"]
 
 

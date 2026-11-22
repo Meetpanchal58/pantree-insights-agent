@@ -1,7 +1,8 @@
 > Evaluation now defaults to `--mode autonomous`: gold judges but never corrects the answer. Use
-> `--mode assisted` for a separate stakeholder-guided run. Pauses are incomplete autonomous answers; mixed-mode
+> `--mode assisted` for a separate stakeholder-guided run. Confirmation plans receive blind scripted “Go ahead” replies;
+> unresolved clarification is incomplete. Mixed-mode
 > reports are rejected. Numerical/lexical checks do not establish general narrative faithfulness.
-> See [current validation](../docs/post38-validation.md) for local evidence and unavailable live measurements.
+> See [current validation](../docs/pr40-validation.md) for local evidence and unavailable live measurements.
 
 # Evaluation
 

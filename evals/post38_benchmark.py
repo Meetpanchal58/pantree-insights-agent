@@ -12,6 +12,7 @@ import platform
 import tempfile
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import duckdb
@@ -39,9 +40,12 @@ def timed(fn, n=20):
     return latency(samples)
 
 
-def completed_without_model(stream):
+def completed_without_model(agent, run_id, stream):
     try:
-        return list(stream)[-1]['status'] == 'done'
+        final = list(stream)[-1]
+        if final.get('kind') == 'confirm':
+            final = list(agent.resume(run_id, 'Go ahead', final['plan_version']))[-1]
+        return final.get('status') == 'done'
     except RuntimeError as error:
         if str(error).startswith('model required;'):
             return False
@@ -69,8 +73,10 @@ def main():
         for repeat in range(5):
             for i, (question, reference) in enumerate(CASES):
                 start = time.perf_counter()
-                _, stream = agent.start(question, memory=Memory(Path(tmp) / f'{repeat}-{i}', 'small'))
+                run_id, stream = agent.start(question, memory=Memory(Path(tmp) / f'{repeat}-{i}', 'small'))
                 events = list(stream)
+                if events[-1].get("kind") == "confirm":
+                    events += list(agent.resume(run_id, "Go ahead", events[-1]["plan_version"]))
                 elapsed = time.perf_counter() - start
                 final = events[-1]
                 assert final['status'] == 'done' and final['grounded'] and final['cost']['calls'] == 0
@@ -86,14 +92,15 @@ def main():
         history = 'User: Show orders\nAnalyst: A prior answer'
         for i, (question, _) in enumerate(CASES):
             memory = Memory(Path(tmp) / f'conversation-{i}', 'small')
-            _, stream = agent.start(question, history=history, memory=memory)
-            routes.append({'question': question, 'completed_without_model': completed_without_model(stream)})
+            run_id, stream = agent.start(question, history=history, memory=memory)
+            routes.append({'question': question,
+                           'completed_without_model': completed_without_model(agent, run_id, stream)})
         memory = Memory(Path(tmp) / 'repeated', 'small')
         question = CASES[0][0]
         for repeat in range(2):
-            _, stream = agent.start(question, memory=memory)
+            run_id, stream = agent.start(question, memory=memory)
             routes.append({'question': question, 'shared_memory_repeat': repeat,
-                           'completed_without_model': completed_without_model(stream)})
+                           'completed_without_model': completed_without_model(agent, run_id, stream)})
     report.update(rows=rows, routes=routes, first_pass=latency([r['seconds'] for r in rows if r['repeat'] == 0]),
                   warm=latency([r['seconds'] for r in rows if r['repeat'] > 0]))
     agent.close()
@@ -113,6 +120,16 @@ def main():
                          'local_parquet': timed(lambda: parquet.execute(sql).fetchall()),
                          'materialized_duckdb': timed(lambda: materialized.execute(sql).fetchall()),
                          'scope': 'sales fact, three columns; OS caches uncontrolled; excludes agent result cache'}
+    source = parquet.execute("SELECT sql FROM duckdb_views() WHERE view_name='sales'").fetchone()[0]
+    report['resource_sweep'] = []
+    for threads in (1, 4):
+        for memory in ('128MB', '512MB'):
+            db = duckdb.connect(config={'threads': threads, 'memory_limit': memory})
+            db.execute(source)
+            assert sorted(db.execute(sql).fetchall()) == expected
+            report['resource_sweep'].append({'threads': threads, 'memory_limit': memory,
+                'query': timed(lambda db=db: db.execute(sql).fetchall())})
+            db.close()
     parquet.close()
     materialized.close()
     if os.getenv('PANTREE_TEST_POSTGRES_DSN'):
@@ -125,7 +142,8 @@ def postgres_benchmark():
     from langgraph.checkpoint.base import empty_checkpoint
     from psycopg import sql
     from psycopg.conninfo import conninfo_to_dict
-    from sqlalchemy import URL, insert
+    from sqlalchemy import URL, create_engine, insert
+    from sqlalchemy.pool import NullPool
 
     from pantree_insights.store import Store, messages
     dsn = os.environ['PANTREE_TEST_POSTGRES_DSN']
@@ -147,6 +165,24 @@ def postgres_benchmark():
                 c.execute(insert(messages), [{'id': uuid.uuid4().hex[:16], 'chat_id': chat['id'], 'role': 'user',
                           'content': 'Show orders ' + 'x' * 500} for _ in range(2000)])
             result = {'history_2000_messages': timed(lambda: store.history(chat['id']))}
+            original_engine = store.engine
+            result['connection_sweep'] = []
+            for pooled in (False, True):
+                engine = create_engine(url, **({'pool_size': 4, 'max_overflow': 0} if pooled else
+                                              {'poolclass': NullPool}))
+                store.engine = engine
+                for workers in (1, 4):
+                    def read(_):
+                        start = time.perf_counter()
+                        store.conversation(chat['id'])
+                        return time.perf_counter() - start
+                    start = time.perf_counter()
+                    with ThreadPoolExecutor(max_workers=workers) as pool:
+                        samples = list(pool.map(read, range(40)))
+                    result['connection_sweep'].append({'pooled': pooled, 'workers': workers,
+                        'wall_seconds': time.perf_counter() - start, 'requests': latency(samples)})
+                engine.dispose()
+            store.engine = original_engine
             settings.database_url, settings.checkpoint_backend = url, 'postgres'
             start = time.perf_counter()
             agent = Agent(llm_factory=lambda: FakeLLM(no_model))

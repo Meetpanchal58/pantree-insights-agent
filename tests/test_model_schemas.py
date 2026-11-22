@@ -7,7 +7,7 @@ import pytest
 from openai.lib._pydantic import to_strict_json_schema
 
 from pantree_insights.agents import Analysis
-from pantree_insights.interpret import Alternatives, Interpretation, TemplateCall
+from pantree_insights.interpret import Alternatives, Interpretation, SpecPatch, TemplateCall
 from pantree_insights.templates import TEMPLATES
 
 
@@ -29,7 +29,7 @@ def _problems(node, path="$") -> list[str]:
     return out
 
 
-@pytest.mark.parametrize("model", [Interpretation, Alternatives, Analysis], ids=lambda m: m.__name__)
+@pytest.mark.parametrize("model", [Interpretation, Alternatives, Analysis, SpecPatch], ids=lambda m: m.__name__)
 def test_output_format_is_valid_for_strict_structured_output(model):
     assert not _problems(to_strict_json_schema(model))
 

@@ -71,7 +71,7 @@ def test_repeated_wrong_confirmations_are_bounded():
         def start(self, *args, **kwargs):
             return "run", iter([{"type": "clarify", "kind": "confirm"}])
 
-        def resume(self, *args):
+        def resume(self, *args, **kwargs):
             return iter([{"type": "clarify", "kind": "confirm"}])
 
     class User:
@@ -155,12 +155,14 @@ def test_autonomous_evaluation_never_receives_gold_corrections():
     class Agent:
         def start(self, *args, **kwargs):
             return "run", iter([{"type": "clarify", "kind": "confirm", "spec": {"table": "sales"}}])
-        def resume(self, *args):
-            raise AssertionError("autonomous evaluation must not resume using gold")
+        def resume(self, *args, **kwargs):
+            assert args[1] == "Go ahead"
+            return iter([{"type": "final", "status": "done"}])
     class Judge:
         def matches(self, event):
             return False
         def answer(self, event):
             raise AssertionError("gold may judge, never steer an autonomous answer")
     events, turns = run_eval.ask(Agent(), {"set": "answer", "question": "q"}, Judge())
-    assert len(events) == 1 and not turns["first_turn_correct"] and turns["interactions"] == 0
+    assert len(events) == 2 and not turns["first_turn_correct"] and turns["confirmations"] == 1
+    assert turns["first_turn_plan_ready"] and turns["confirmation_compliant"]

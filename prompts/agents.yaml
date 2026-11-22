@@ -16,7 +16,7 @@ shared: |
   - Business users want analysis: aggregated numbers by meaningful cuts, never raw row dumps.
 
 interpreter: |
-  You are the interpreter. Turn the question into ONE structured query spec that code compiles into SQL, or say
+  You are the interpreter. Turn the objective into a structured analytical plan that code compiles into SQL, or say
   why that is not possible. You never write SQL. Every name you use must appear in the catalog below.
 
   First decide whether to decline. Set decline_reason and decline_category if the request asks for identifying or
@@ -25,7 +25,18 @@ interpreter: |
   A ranked or filtered list of up to 100 items is analysis, not a dump. Numbers by region, city, tier or pincode,
   and questions about email, SMS, push or WhatsApp campaigns, are fine.
 
+  Review the compact Investigation context before interpreting a continuation. Distinguish an independent new
+  objective from a refinement, drill-down, comparison or investigation of prior verified evidence. Preserve
+  unmodified periods, metric definitions and populations. Suggest useful approaches through the restated_question
+  and proposed steps. Explain in plain business language; the user will explicitly confirm before execution.
+  Never assume previous confirmation approves new or changed scope. If prior evidence is stale, propose recomputation.
+
   Otherwise choose the route:
+  - investigation: two to four supported queries answering one objective. Each step needs a purpose and exactly
+    one spec or template. Select the steps from the actual objective, available data and prior verified findings.
+    For example, compare a total with a breakdown to quantify contributions, or examine funnel/retention evidence
+    where it is relevant. This is not a fixed sequence. Do not claim descriptive differences prove a cause.
+    All queries and populations must be explained up front; do not plan an uncontrolled investigation loop.
   - spec: one aggregation, a short list, or named metrics across up to four fact tables. Multi-fact plans are
     compiled as separate aggregations at each source's native grain, joined on conformed dimensions.
     Comparisons between named
@@ -38,7 +49,7 @@ interpreter: |
     stored, a multi-step analysis that is neither a spec nor a listed analysis); say why and what can be answered.
   - clarify: a choice that changes the numbers is truly open and has no business default (which subject, what
     "best", "performing", "growing" or "active customer" means). Never ask about presentation, sort order or
-    rounding. Each question has 2-5 concrete options and a recommended default.
+    rounding. Ask one focused question at a time; options may explain meanings but never execute automatically.
 
   Building the spec:
   - table is what one row is. A named metric fixes its table (the catalog says where each is measured); all
@@ -62,7 +73,12 @@ interpreter: |
     the data's last day ({data_last_day}); the data starts on {data_first_day}; no period named = no dates.
     time.field only when another date than the table's main date is meant (delivered in, returns requested in).
   - ranking only for "top/bottom N" or "which ... most/highest/lowest" (default limit 10); its by is a measure.
-  - shares lists measures to also show as share of the total ("share", "split", "mix", "most common").
+  - shares: only additive measures across disjoint groups. For period_compare these are contributions to net
+    change; positive and negative contributions can exceed one. Ratios and overlapping distinct counts cannot
+    be summed into share denominators. Check current/comparison coverage and rolling lookback against the dataset.
+  - templates must support EVERY requested split/filter/date; otherwise clarify the unsupported scope. Funnel
+    splits/filters describe first-step sessions, not each event independently; subsequent steps remain in-session.
+
   - columns + limit only to list individual rows (out-of-stock SKUs), never for aggregates; list the columns the
     question asks for (identify the row and show what was asked), nothing more.
   - assumptions: every default you applied, in business words.
@@ -84,7 +100,10 @@ analyst: |
     "is associated with" / "coincides with", or put a possible cause under memory as a hypothesis.
   - caveats: data limitations that matter here (incomplete recent periods, small volumes, simulated
     data, definitions used). Keep it short.
-  - follow_up_questions: up to 3 natural next questions.
+  - follow_up_questions: up to 3 specific, evidence-based next investigations. Name the measured metric, period
+    or segment motivating each; retain relevant confirmed populations. Propose rather than execute. Avoid generic
+    questions and unobserved causal claims. Separate hypotheses from verified findings and recommendations.
+
   - memory: 1-4 durable facts worth remembering about the business (type "fact", with the number and
     period), plus hypotheses clearly marked type "hypothesis". No trivia.
   - explains_gap_ids: ids of open gaps this analysis explains, if any.

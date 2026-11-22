@@ -187,6 +187,25 @@ def qualitative_problems(text: str, claims: list[Claim], frame: pd.DataFrame, tr
     by_id = {c.id: c for c in claims}
     for sentence in re.split(r"[.!?;]\s+", text):
         evidence = [by_id[i] for i in re.findall(r"\{(c\d+)\}", sentence) if i in by_id]
+        for c in evidence:
+            for key in [*c.row, *(c.against or [])]:
+                if key.column not in frame or pd.api.types.is_numeric_dtype(frame[key.column]):
+                    continue
+                allowed = {k.value.casefold() for claim in evidence for k in [*claim.row, *(claim.against or [])]
+                           if k.column == key.column}
+                mentioned = {str(v).casefold() for v in frame[key.column].dropna().unique() if len(str(v)) >= 3
+                             and re.search(rf"(?<!\w){re.escape(str(v))}(?!\w)", sentence, re.I)}
+                if mentioned - allowed:
+                    problems.append("the named entity or period does not match this claim's evidence row")
+                # Bind each placeholder locally as well: two correct values must not swap their named rows.
+                own = {k.value.casefold() for k in [*c.row, *(c.against or [])] if k.column == key.column}
+                positions = [(match.start(), value) for value in mentioned for match in
+                             re.finditer(rf"(?<!\w){re.escape(value)}(?!\w)", sentence, re.I)]
+                for placeholder in re.finditer(re.escape("{" + c.id + "}"), sentence):
+                    preceding = [(pos, value) for pos, value in positions if pos < placeholder.start()]
+                    nearest = max(preceding, default=None) if preceding else min(positions, default=None)
+                    if nearest and nearest[1] not in own:
+                        problems.append("the entity nearest this claim differs from its evidence row")
         up = bool(re.search(r"\b(increased?|grew|rose|higher than)\b", sentence, re.I))
         down = bool(re.search(r"\b(decreased?|fell|declined?|lower than)\b", sentence, re.I))
         if up or down:

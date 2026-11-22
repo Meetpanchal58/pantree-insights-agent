@@ -13,7 +13,8 @@ input safety -> standing constraints -> intent
     material ambiguity -> clarification checkpoint
     valid spec -> conditional semantic contrast (no speculative SQL) -> read-back confirmation
     valid template -> parameter and supported-scope checks -> read-back confirmation
-  -> single-source or grain-aware multi-fact compiler -> SQL safety -> execution
+  -> compile 1–4 proposals -> scope/coverage + SQL safety -> versioned conversational approval
+  -> exact approved SQL (digest + version + snapshot checked at execution boundary)
   -> snapshot check -> immediate result event
   -> deterministic KPI summary or analyst -> numeric/unit/prose checks -> at most one rewrite
   -> remove unsupported claims or use deterministic fallback -> recompute values -> chart -> scoped memory
@@ -22,8 +23,11 @@ input safety -> standing constraints -> intent
 A grammar match consumes the whole question, including explicit uniquely resolved `where city/brand/category/channel
 is ...` filters. Prior self-contained questions and old numeric observations do not block it. Explicit `And by
 brand?` or `same for yesterday` edits preserve the previous successful plan. Unknown modifiers, arbitrary prior
-instructions, user/project preferences and business profiles still require interpretation. Chat context uses the
-last four turns; durable standing instructions belong in user/project preferences. Historical insights are fetched
+instructions, user/project preferences and business profiles still require interpretation. Recent prose uses the last four turns. A separate per-chat investigation record retains the objective, origin
+plan, current plan, metric definitions, and the last eight verified evidence summaries (six explicitly marked
+example rows per query). It survives that prose window and PostgreSQL restarts; complete runs remain in chat
+history. Independent objectives start a new context; refinements, drill-downs and comparisons preserve it.
+Standing instructions belong in user/project preferences. Historical insights are fetched
 only when needed. Relative dates follow the snapshot's last day and are disclosed. A known
 ambiguous phrase is checked before either path. Unresolved interpretations stop after six clarification rounds.
 No metric is invented for an unsupported concept such as an undefined NMV.
@@ -87,9 +91,31 @@ The app still uses one instance; active job leases and distributed event streami
 `tests/reference_sql.py` and the gold SQL suites independently check the compiler. New adversarial fixtures
 exercise duplicate facts, NULL and absent groups, date boundaries, numerator/denominator behavior, concurrency,
 and grounding. `evals/fastpath_baseline.py` checks the five reviewed question examples without a model.
-`evals/context_retrieval.py` measures offline metric recall only. Paid evaluation defaults to `--mode autonomous`: no gold-guided answers, and pauses count as incomplete.
+`evals/context_retrieval.py` measures offline metric recall only. Paid evaluation defaults to `--mode autonomous`: blind scripted confirmation of proposed plans, without gold-guided corrections. Actual unresolved
+clarification remains incomplete. Confirmation compliance is reported separately from interpretation accuracy.
 `--mode assisted` is an explicitly separate run. Reports refuse mixed modes and separate intended plans, gold
 result matches and checked evidence from unmeasured human narrative faithfulness. `evals/post38_benchmark.py`
 measures local startup, warm queries, PostgreSQL history/checkpoints and Parquet versus materialized DuckDB.
 
-See [post-PR #38 validation](post38-validation.md) for current evidence and pending external measurements.
+See [PR #40 validation](pr40-validation.md) for current evidence and pending external measurements.
+
+
+## Conversation protocol
+
+`POST /api/chats/{id}/ask` accepts both new questions and replies. A reply carries `pending_run_id`,
+`plan_version`, a natural-language `question`, and an optional unique `idempotency_key`. The existing
+`/api/runs/{id}/answer` endpoint accepts `message`, `plan_version`, and that same retry key. A stale version
+returns 409. Only a positive full-message confirmation approves execution; corrections, blanks and unresolved
+questions do not. “Cancel” ends a pending plan without running it. Legacy Python `use_defaults` arguments are
+ignored; the UI and CLI have no automatic approval controls.
+
+The plan stores compiled, safety-checked SQL with its exact specs/templates before approval. After approval,
+execution checks its digest and data snapshot, streams each verified table, then grounds each explanation and
+builds its chart. The result panel switches between every approved query, including its exports. Changes to a
+multi-query plan explicitly target a numbered step, preserving other steps; no dynamic query expansion runs
+without a fresh proposal. Revision patches use the same interpreter and complete semantic catalog.
+
+Proposals and replies are durable messages. One admission lock serializes web replies; the database also allows
+only one paused-to-running transition. Duplicate reply keys replay events, including after process state is
+lost. Running work interrupted by a process failure is marked interrupted rather than automatically rerun.
+Paused PostgreSQL checkpoints can resume; in-memory checkpoints cannot survive a process restart.

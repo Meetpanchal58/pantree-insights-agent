@@ -13,6 +13,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from .spec import Filter, _literal
+
 PAID = "('Paid Search', 'Paid Social', 'Display')"
 RESULT_UNITS = {
     "event_daily_net_sales": "inr", "before_daily_net_sales": "inr", "lift": "ratio",
@@ -65,6 +67,8 @@ Event = Literal["session_start", "home_view", "plp_view", "search", "pdp_view", 
 
 class Funnel(Dated):
     steps: list[Event] = Field(min_length=2, max_length=6)
+    by: Literal["device", "traffic_source"] | None = None
+    filters: list[Filter] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _unique(self):
@@ -76,19 +80,36 @@ class Funnel(Dated):
 class Segments(Dated):
     min_orders: int = Field(2, ge=2, le=100)
     recency_days: int = Field(30, ge=1, le=365)
+    filters: list[Filter] = Field(default_factory=list)
 
 
-def _orders() -> str:
+def population(filters: list[Filter], fields: dict[str, str]) -> str:
+    """Small governed template scope; unsupported fields/operators are never dropped."""
+    clauses = []
+    for f in filters:
+        if f.field not in fields or f.op not in ("eq", "in", "not_in") or not f.values:
+            raise TemplateError(f"This analysis cannot apply {f.field} {f.op}; use a supported scope")
+        clauses.append(f"{fields[f.field]} {'NOT IN' if f.op == 'not_in' else 'IN'} "
+                       f"({', '.join(_literal(v) for v in f.values)})")
+    return " AND ".join(clauses) or "TRUE"
+
+
+def _orders(filters: list[Filter] | None = None) -> str:
     """One row per order before customer-level stages; the same governed revenue definition as specs."""
     from .semantic import load_metrics
     revenue = load_metrics().metrics["realized_revenue"].expression()
+    condition = population(filters or [], {"city": "s.ship_city", "payment_type":
+        "CASE WHEN s.payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END", "brand": "p.brand_name",
+        "category": "p.category"})
+    join = " LEFT JOIN product_master p ON p.product_id = s.product_id" if "p." in condition else ""
     return (f"SELECT s.customer_id, s.order_id, MIN(s.placed_at) AS placed_at, {revenue} AS realized_revenue "
-            "FROM sales s WHERE s.line_type = 'Sale' GROUP BY s.customer_id, s.order_id")
+            f"FROM sales s{join} WHERE s.line_type = 'Sale' AND {condition} GROUP BY s.customer_id, s.order_id")
 
 
 def _cohort(p: Cohort) -> str:
     return f"""WITH order_rows AS ({_orders()}), firsts AS (
-  SELECT customer_id, MIN(placed_at) AS first_at FROM order_rows GROUP BY 1), eligible AS (
+  SELECT customer_id, MIN(placed_at) AS first_at FROM sales
+  WHERE line_type = 'Sale' AND is_first_order GROUP BY 1), eligible AS (
   SELECT customer_id, first_at FROM firsts WHERE CAST(first_at AS DATE) BETWEEN DATE '{p.start}' AND DATE '{p.end}'
     AND first_at + INTERVAL {p.days} DAY < DATE '{p.as_of}' + INTERVAL 1 DAY), buyers AS (
   SELECT e.customer_id, e.first_at, COUNT(o.order_id) > 0 AS repeated
@@ -102,7 +123,7 @@ FROM buyers GROUP BY 1 ORDER BY 1"""
 
 
 def _segments(p: Segments) -> str:
-    return f"""WITH order_rows AS ({_orders()}), customers AS (
+    return f"""WITH order_rows AS ({_orders(p.filters)}), customers AS (
   SELECT customer_id, COUNT(*) AS orders, MAX(placed_at) AS last_at, SUM(realized_revenue) AS realized_revenue
   FROM order_rows WHERE CAST(placed_at AS DATE) BETWEEN DATE '{p.start}' AND DATE '{p.end}' GROUP BY 1), segments AS (
   SELECT customer_id, orders, realized_revenue, CASE
@@ -113,14 +134,27 @@ FROM segments GROUP BY 1 ORDER BY 1"""
 
 
 def _funnel(p: Funnel) -> str:
-    ctes = [f"events AS (SELECT session_id, event_at, event_type FROM clickstream WHERE "
+    condition = population(p.filters, {"device": "device", "traffic_source": "traffic_source"})
+    fields = sorted({f.field for f in p.filters} | ({p.by} if p.by else set()))
+    extra = ", " + ", ".join(fields) if fields else ""
+    group = f", arg_min({p.by}, event_at) AS segment" if p.by else ""
+    ctes = [f"events AS (SELECT session_id, event_at, event_type{extra} FROM clickstream WHERE "
             f"CAST(event_at AS DATE) BETWEEN DATE '{p.start}' AND DATE '{p.end}')",
-            f"step_0 AS (SELECT session_id, MIN(event_at) AS reached_at FROM events "
-            f"WHERE event_type = '{p.steps[0]}' GROUP BY 1)"]
+            f"step_0 AS (SELECT session_id, MIN(event_at) AS reached_at{group} FROM events "
+            f"WHERE event_type = '{p.steps[0]}' AND {condition} GROUP BY 1)"]
     for i, event in enumerate(p.steps[1:], 1):
-        ctes.append(f"step_{i} AS (SELECT p.session_id, MIN(e.event_at) AS reached_at FROM step_{i-1} p "
+        dim = ", p.segment" if p.by else ""
+        ctes.append(f"step_{i} AS (SELECT p.session_id, MIN(e.event_at) AS reached_at{dim} FROM step_{i-1} p "
                     f"JOIN events e ON e.session_id = p.session_id AND e.event_at > p.reached_at "
-                    f"WHERE e.event_type = '{event}' GROUP BY 1)")
+                    f"WHERE e.event_type = '{event}' GROUP BY p.session_id{dim})")
+    if p.by:
+        ctes += [f"counts_{i} AS (SELECT segment, COUNT(*) AS sessions FROM step_{i} GROUP BY segment)"
+                 for i in range(len(p.steps))]
+        rows = [f"SELECT '{event}' AS step, {i + 1} AS step_order, b.segment AS {p.by}, "
+                "COALESCE(s.sessions,0) AS sessions, COALESCE(s.sessions,0) * 1.0 / NULLIF(b.sessions,0) AS conversion "
+                f"FROM counts_0 b LEFT JOIN counts_{i} s ON b.segment IS NOT DISTINCT FROM s.segment"
+                for i, event in enumerate(p.steps)]
+        return "WITH " + ", ".join(ctes) + " " + " UNION ALL ".join(rows) + f" ORDER BY {p.by}, step_order"
     rows = [f"SELECT '{event}' AS step, {i + 1} AS step_order, COUNT(*) AS sessions, "
             f"COUNT(*) * 1.0 / NULLIF((SELECT COUNT(*) FROM step_0), 0) AS conversion FROM step_{i}"
             for i, event in enumerate(p.steps)]
@@ -184,7 +218,7 @@ eligible AS (
 again AS (
   SELECT DISTINCT e.customer_id FROM eligible e JOIN sales s ON s.customer_id = e.customer_id
   WHERE s.line_type = 'Sale' AND s.placed_at > e.first_at AND s.placed_at <= e.first_at + INTERVAL {d} DAY)
-SELECT COUNT(a.customer_id) * 1.0 / COUNT(*) AS repeat_share, COUNT(*) AS buyers
+SELECT COUNT(a.customer_id) * 1.0 / NULLIF(COUNT(*), 0) AS repeat_share, COUNT(*) AS buyers
 FROM eligible e LEFT JOIN again a ON a.customer_id = e.customer_id"""
 
 
@@ -199,7 +233,8 @@ class Template:
 TEMPLATES: dict[str, Template] = {
     "cohort_retention": Template(
         "Repeat purchase within N days, grouped by first-ever order cohort; only mature buyers", Cohort, _cohort,
-        lambda p: f"First-order {p.grain} cohorts from {p.start} to {p.end}; later order within {p.days} days, "
+        lambda p: f"Recorded first-ever-order {p.grain} cohorts from {p.start} to {p.end}; "
+                  f"later order within {p.days} days, "
                   f"observed through {p.as_of}; immature buyers excluded; all placed orders including cancellations"),
     "session_funnel": Template(
         "Strictly time-ordered events in the same session within the requested dates", Funnel, _funnel,
@@ -246,7 +281,14 @@ def build(name: str, params: dict | None) -> tuple[str, str]:
         p = t.params.model_validate(params or {})
     except ValidationError as error:
         raise TemplateError(f"{name}: {error.errors()[0]['msg']}") from error
-    return t.build(p), t.readback(p)
+    scope = ""
+    if getattr(p, "filters", None):
+        scope = "; population: " + "; ".join(f"{f.field} {f.op} {f.values}" for f in p.filters)
+    if isinstance(p, Segments) and p.filters:
+        scope += "; orders containing matching lines; revenue includes only those matching lines"
+    if isinstance(p, Funnel):
+        scope += (f"; split by {p.by} at the first step" if p.by else "") + "; filters apply at funnel entry"
+    return t.build(p), t.readback(p) + scope
 
 
 def describe() -> str:

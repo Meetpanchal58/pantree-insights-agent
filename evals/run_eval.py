@@ -8,7 +8,7 @@
 Suites: regression (evals/regression.yaml + questions.yaml), holdout (holdout.yaml + behaviour.yaml + an
 over-asking pass), coverage (coverage.yaml), flow (flow_regression.yaml; follow-ups with chat history).
 
-Autonomous mode is the default: gold only judges the initial response; pauses count as incomplete answers.
+Autonomous mode is the default: gold judges but does not steer. A scripted stakeholder blindly confirms plans.
 Use --mode assisted for a separate run in which a simulated stakeholder supplies gold-guided corrections.
 Never mix those modes in one accuracy report. Numerical checks are not a human narrative-faithfulness score.
 
@@ -153,8 +153,7 @@ def _overlap(a: str, b: str) -> float:
 def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None,
         mode: str = "autonomous") -> tuple[list[dict], dict]:
     """Gold judges the initial response; only explicitly assisted runs receive corrections."""
-    defaults = item["set"] in ("decline", "adversarial", "false_decline")
-    run_id, stream = agent.start(item["question"], use_defaults=defaults, history=item.get("history", ""),
+    run_id, stream = agent.start(item["question"], history=item.get("history", ""),
                                  memory=memory)
     events = list(stream)
     turns = {"questions": 0, "corrections": 0, "first_reading": None, "interactions": 0}
@@ -163,19 +162,30 @@ def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None,
     turns["first_turn_correct"] = (stakeholder.matches(first) if stakeholder is not None
                                    and (first.get("spec") or first.get("template")) else False)
     turns["first_turn_answered"] = first.get("status") == "done"
-    if first.get("status") == "done" and stakeholder is not None:
+    if (first.get("status") == "done" or first.get("kind") == "confirm") and stakeholder is not None:
         turns["first_reading"] = turns["first_turn_correct"]
-    while events[-1]["type"] == "clarify" and stakeholder is not None and mode == "assisted" \
-            and turns["interactions"] < MAX_TURNS:
+    turns["first_turn_plan_ready"] = first.get("kind") == "confirm"
+    turns["confirmation_compliant"] = not any(e["type"] == "result" for e in events)
+    turns["confirmations"] = 0
+    while events[-1]["type"] == "clarify" and turns["interactions"] < MAX_TURNS:
         event = events[-1]
-        turns["interactions"] += 1
         if event.get("kind") == "confirm":
-            ok = stakeholder.matches(event)
-            turns["first_reading"] = ok if turns["first_reading"] is None else turns["first_reading"]
-            turns["corrections"] += not ok
-        else:
+            turns["confirmations"] += 1
+            if mode == "autonomous":
+                reply = "Go ahead"  # deliberately no gold-guided corrections
+            elif stakeholder is not None:
+                ok = stakeholder.matches(event)
+                turns["corrections"] += not ok
+                reply = stakeholder.answer(event)
+            else:
+                reply = "Go ahead"
+        elif mode == "assisted" and stakeholder is not None:
             turns["questions"] += 1
-        events += list(agent.resume(run_id, stakeholder.answer(event)))
+            reply = stakeholder.answer(event)
+        else:
+            break
+        turns["interactions"] += 1
+        events += list(agent.resume(run_id, reply, plan_version=event.get("plan_version")))
     return events, turns
 
 
@@ -308,7 +318,8 @@ def summary(rows: list[dict]) -> str:
            f"Model {rows[0]['model'] if rows else '-'} · data {get_settings().data_size} · code "
            f"{rows[0]['code_revision'][:7] if rows else '-'}", "",
            "Format: mean [95% bootstrap CI over questions; Wilson at all-pass/all-fail boundaries] (n). "
-           f"Evaluation mode: {next(iter(modes), 'no rows')}. Autonomous pauses count as incomplete answers.", ""]
+           f"Evaluation mode: {next(iter(modes), 'no rows')}. "
+           "Autonomous confirmation is blind; unresolved ambiguities count as incomplete.", ""]
     for suite in ("holdout", "regression", "coverage", "flow"):
         part = [r for r in rows if r["suite"] == suite]
         if not part:
@@ -329,7 +340,8 @@ def summary(rows: list[dict]) -> str:
              _rate([{**r, "f": bool(r["first_reading"])} for r in confirmed], "f")),
             ("First-turn intended plan (all answer questions, before stakeholder assistance)",
              _rate([{**r, "f": bool(r.get('first_turn_correct'))} for r in answer], "f")),
-            ("First-turn completed answer", _rate(answer, "first_turn_answered")),
+            ("First-turn plan ready for confirmation", _rate(answer, "first_turn_plan_ready")),
+            ("No result before confirmation", _rate(answer, "confirmation_compliant")),
             ("Exact intended plan + gold table + checked evidence (not full narrative review)",
              _rate(answer, "plan_sql_evidence_correct")),
             ("Independent narrative faithfulness", "not measured"),
@@ -428,7 +440,7 @@ def passes_gate(rows: list[dict], expected: int) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["autonomous", "assisted"], default="autonomous",
-                        help="autonomous never receives gold-guided answers; pauses count as incomplete")
+                        help="autonomous confirms proposed plans without gold-guided corrections")
     parser.add_argument("--suite", choices=["holdout", "regression", "coverage", "flow", "all"], default="all")
     parser.add_argument("--sets", help="only these sets, e.g. answer,overask")
     parser.add_argument("--ids", help="comma-separated ids")

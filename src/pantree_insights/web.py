@@ -60,12 +60,15 @@ class ChatPatch(BaseModel):
 
 class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=500)
-    use_defaults: bool = False
+    plan_version: int | None = Field(None, ge=0)
+    pending_run_id: str | None = Field(None, max_length=32)
     idempotency_key: str | None = Field(None, min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class AnswerIn(BaseModel):
-    answers: dict[str, str] = {}
+    message: str = Field(min_length=1, max_length=2000)
+    plan_version: int = Field(ge=0)
+    idempotency_key: str | None = Field(None, min_length=8, max_length=128)
 
 
 class FeedbackIn(BaseModel):
@@ -141,12 +144,15 @@ class Runner:
                     old.close()
             return self._agent
 
-    def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool,
+    def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool = False,
               run_id: str | None = None) -> Run:
         """Return at once: the agent (built on the first question after a restart, which can take a while on a
         cold instance) is prepared in the run's own thread, shown as a step, never inside the HTTP request.
         A failure while preparing ends the run with a saved failure, so the question always gets a reply."""
         history, previous = store.conversation(chat["id"])
+        investigation = store.investigation(user["id"], chat["id"])
+        if not previous and investigation.get("current_plan"):
+            previous = investigation["current_plan"][0].get("spec")
         store.add_message(chat["id"], "user", question)
         if chat["title"] == "New chat":
             store.update_chat(user["id"], chat["id"], title=question[:80])
@@ -173,7 +179,8 @@ class Runner:
                 yield {"type": "step", "step": "prepare", "status": "done", "t": time.time(),
                        "detail": {"seconds": round(time.time() - started, 2)}}
             _, stream = agent.start(question, chat_id=chat["id"], history=history, use_defaults=use_defaults,
-                                    memory=scope, run_id=run.id, **({"previous_spec": previous} if previous else {}))
+                                    memory=scope, run_id=run.id, investigation=investigation,
+                                    **({"previous_spec": previous} if previous else {}))
             yield from stream
         self._consume(store, run, events())
         return run
@@ -207,13 +214,28 @@ class Runner:
         self.runs[run_id] = run
         return run
 
-    def answer(self, store: Store, run: Run, answers: dict[str, str]) -> None:
+    def answer(self, store: Store, run: Run, message: str, plan_version: int,
+               response_id: str | None = None) -> int:
+        # admission_lock serializes retries and different replies within this single-instance application.
+        if response_id:
+            for i, event in enumerate(run.events):
+                if event.get("response_id") == response_id:
+                    if event.get("message") != message or event.get("plan_version") != plan_version:
+                        raise HTTPException(409, "This reply key was already used for a different message.")
+                    return i
+        latest = next((e for e in reversed(run.events) if e["type"] == "clarify"), {})
+        if not run.paused or plan_version != latest.get("plan_version"):
+            raise HTTPException(409, "The pending plan changed. Reopen the chat and reply to the latest plan.")
+        since = len(run.events)
+        event = {"type": "answered", "message": message, "plan_version": plan_version,
+                 "response_id": response_id, "t": time.time()}
+        if store is not None:
+            store.save_reply(run.id, run.chat["id"], [*run.events, event], message)
         run.paused = False
         run.segment_done.clear()
-        run.events.append({"type": "answered", "answers": answers, "t": time.time()})
-        if store is not None:
-            store.save_run(run.id, "running", run.events)
-        self._consume(store, run, (run.agent or self.agent).resume(run.id, answers))
+        run.events.append(event)
+        self._consume(store, run, (run.agent or self.agent).resume(run.id, message, plan_version))
+        return since
 
     def _consume(self, store: Store, run: Run, events) -> None:
         def work():
@@ -234,7 +256,7 @@ class Runner:
                 for event in events:
                     event = {**event, "t": event.get("t", time.time())}
                     if event["type"] == "clarify":
-                        store.save_run(run.id, "paused", [*run.events, event])
+                        store.save_pause(run.id, run.chat["id"], [*run.events, event], event)
                         run.paused = True
                     elif event["type"] == "final":
                         self._save(store, run, event)
@@ -391,7 +413,9 @@ def create_app() -> FastAPI:
         if pending and not resumable:
             store.save_run(pending["id"], "interrupted", pending.get("events") or [],
                            {"reason": "The service restarted while a model call was active"})
-        return to_json({**chat, "messages": store.messages(chat_id),
+        saved_events = (active.events if active else pending.get("events", [])) if pending else []
+        since = max((i for i, e in enumerate(saved_events) if e["type"] in ("clarify", "answered")), default=0)
+        return to_json({**chat, "messages": store.messages(chat_id), "pending_since": since,
                         "pending_run": pending["id"] if resumable else None,
                         "interrupted_run": bool(pending and not resumable)})
 
@@ -418,12 +442,32 @@ def create_app() -> FastAPI:
         with runner.admission_lock:
             run_id = hashlib.sha256(f"{user['id']}:{chat_id}:{body.idempotency_key}".encode()).hexdigest()[:32] \
                 if body.idempotency_key else None
-            saved = store.run_record(user["id"], run_id) if run_id else None
+            saved = store.run_record(user["id"], run_id) if run_id and not body.pending_run_id else None
             if saved:
-                if (saved["question"] != body.question.strip()
-                        or (saved.get("summary") or {}).get("use_defaults", False) != body.use_defaults):
+                if saved["question"] != body.question.strip():
                     raise HTTPException(409, "This idempotency key was used for a different request.")
                 return {"run_id": run_id}
+            if body.pending_run_id:
+                prior = store.run_record(user["id"], body.pending_run_id)
+                if not prior or prior["chat_id"] != chat_id:
+                    raise HTTPException(404, "Pending analysis not found in this chat")
+                for i, event in enumerate(prior.get("events") or []):
+                    if body.idempotency_key and event.get("response_id") == body.idempotency_key:
+                        if (event.get("message") != body.question.strip()
+                                or event.get("plan_version") != body.plan_version):
+                            raise HTTPException(409, "This reply key was used for a different message.")
+                        return {"run_id": prior["id"], "since": i}
+            pending = store.pending_run(user["id"], chat_id)
+            if pending:
+                if body.pending_run_id != pending["id"]:
+                    raise HTTPException(409, "Reply to the current pending analysis before starting another.")
+                run = runner.restore(store, user, pending["id"])
+                if not run:
+                    raise HTTPException(409, "This analysis was interrupted. Reopen the chat before starting again.")
+                since = runner.answer(store, run, body.question.strip(), body.plan_version, body.idempotency_key)
+                return {"run_id": run.id, "since": since}
+            if body.pending_run_id or body.plan_version is not None:
+                raise HTTPException(409, "This analysis is no longer waiting for a reply.")
             runner.prune()
             if sum(not r.finished for r in runner.runs.values()) >= settings.max_pending_runs:
                 raise HTTPException(429, "The analysis queue is full. Please retry later.")
@@ -432,7 +476,7 @@ def create_app() -> FastAPI:
             if not store.reserve_question(user["id"], None if user["is_admin"] else settings.daily_question_limit):
                 raise HTTPException(429, f"You have used today's {settings.daily_question_limit} live questions. "
                                          "Demo replays are still available.")
-            run = runner.start(store, user, chat, body.question.strip(), body.use_defaults, run_id=run_id)
+            run = runner.start(store, user, chat, body.question.strip(), run_id=run_id)
             return {"run_id": run.id}
 
     @app.post("/api/runs/{run_id}/answer")
@@ -441,10 +485,8 @@ def create_app() -> FastAPI:
             run = runner.restore(store, user, run_id)
             if not run or run.user["id"] != user["id"]:
                 raise HTTPException(404, "Run not found")
-            if not run.paused:
-                raise HTTPException(409, "This run is not waiting for answers.")
-            runner.answer(store, run, body.answers)
-            return {"ok": True}
+            since = runner.answer(store, run, body.message.strip(), body.plan_version, body.idempotency_key)
+            return {"ok": True, "run_id": run.id, "since": since}
 
     @app.get("/api/runs/{run_id}/stream")
     async def stream(run_id: str, request: Request, since: int = Query(0, ge=0),
