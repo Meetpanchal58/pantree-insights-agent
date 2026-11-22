@@ -1,8 +1,15 @@
-/* Dataset and account views share the existing app/session; opening a workbook never tears down a chat. */
-const W = { metadata: null, previews: new Map(), sheet: 'Overview', epoch: 0, focus: null, ai: null, models: [], loading: null, active: null };
-const money = n => n == null ? 'Unknown' : `$${Number(n).toFixed(4)}`;
+/* workspace: explicit ES module dependencies; no build step. */
+import { $, S, esc } from './state.js';
+import { showSignin } from './session.js';
+import { api } from './api.js';
+import { toast } from './render.js';
+import { closeDialog, dialog } from './dialogs.js';
 
-async function openDataset() {
+export const W = { metadata: null, previews: new Map(), sheet: 'Overview', epoch: 0, focus: null, ai: null, models: [], loading: null, active: null };
+
+export const money = n => n == null ? 'Unknown' : `$${Number(n).toFixed(4)}`;
+
+export async function openDataset() {
   if (!S.me?.user) return showSignin();
   W.focus = document.activeElement; const epoch = ++W.epoch;
   $('#app').hidden = true; $('#dataset-explorer').hidden = false;
@@ -16,15 +23,18 @@ async function openDataset() {
     $('#sheet-search').value = ''; renderSheets(); renderOverview();
   } catch (e) { if (epoch === W.epoch) $('#dataset-content').textContent = e.message; }
 }
-function backToChat() { ++W.epoch; $('#dataset-explorer').hidden = true; $('#app').hidden = false; W.focus?.focus(); }
-function renderSheets() {
+
+export function backToChat() { ++W.epoch; $('#dataset-explorer').hidden = true; $('#app').hidden = false; W.focus?.focus(); }
+
+export function renderSheets() {
   const query = $('#sheet-search').value.toLowerCase();
   $('#dataset-tabs').innerHTML = `<button class="sheet-tab ${W.sheet === 'Overview' ? 'selected' : ''}" data-sheet="Overview">◫ Overview</button>` +
     W.metadata.tables.filter(t => `${t.name} ${t.description}`.toLowerCase().includes(query)).map(t =>
       `<button class="sheet-tab ${W.sheet === t.name ? 'selected' : ''}" data-sheet="${esc(t.name)}">▦ ${esc(t.name)}</button>`).join('');
   $('#dataset-tabs').querySelectorAll('[data-sheet]').forEach(b => b.onclick = () => selectSheet(b.dataset.sheet));
 }
-async function tablePreview(name) {
+
+export async function tablePreview(name) {
   const identity = `${W.metadata.version}:${name}`;
   if (!W.previews.has(identity)) {
     const value = await api(`/api/dataset/${encodeURIComponent(name)}?version=${encodeURIComponent(W.metadata.version)}`);
@@ -32,7 +42,8 @@ async function tablePreview(name) {
   }
   return W.previews.get(identity);
 }
-async function selectSheet(name) {
+
+export async function selectSheet(name) {
   W.sheet = name; renderSheets(); const epoch = ++W.epoch;
   if (name === 'Overview') return renderOverview();
   const table = W.metadata.tables.find(t => t.name === name);
@@ -48,7 +59,8 @@ async function selectSheet(name) {
     $('#dataset-status').textContent = `Read-only · ${table.grain} · Up to 30 rows · No analytical allowance used`;
   } catch (e) { if (epoch === W.epoch) $('#dataset-content').textContent = e.message; }
 }
-function renderOverview() {
+
+export function renderOverview() {
   const m = W.metadata;
   $('#dataset-content').innerHTML = `<div class="overview-heading"><span class="eyebrow">KNOW YOUR DATA</span><h1>One workbook. The whole business.</h1>
     <p class="dataset-intro">Explore the data behind your answers. Start with a table below, open its sample rows, then check what each column means and how tables connect.</p>
@@ -67,7 +79,8 @@ function renderOverview() {
   $('#dataset-status').textContent = 'Read-only · Overview from governed schema and verified join metadata';
   loadDictionary();
 }
-function relationships(name) {
+
+export function relationships(name) {
   const links = W.metadata.relationships.filter(r => [r.left, r.right].some(v => v.split('.')[0] === name));
   const neighbors = [...new Set(links.flatMap(r => [r.left.split('.')[0], r.right.split('.')[0]]))].filter(n => n !== name);
   const shown = neighbors.slice(0, 6), width = Math.max(600, shown.length * 190), center = width / 2;
@@ -76,8 +89,10 @@ function relationships(name) {
     ${neighbors.length > 6 ? '<p class="muted">First six neighbors shown; all joins are listed below.</p>' : ''}
     <div class="join-list">${links.map(r => `<div><code>${esc(r.condition)}</code> <span class="tag">${esc(r.cardinality)}${r.measured ? ' · measured' : ''}</span><p>${esc(r.precaution)}</p></div>`).join('') || '<p>No approved relationships declared.</p>'}</div>`;
 }
-let dictionaryData = null;
-async function loadDictionary() {
+
+export let dictionaryData = null;
+
+export async function loadDictionary() {
   const name = $('#dictionary-table')?.value, epoch = W.epoch; if (!name) return;
   dictionaryData = null; relationships(name);
   $('#dictionary-rows').textContent = 'Reading a bounded dictionary sample…';
@@ -87,7 +102,8 @@ async function loadDictionary() {
     dictionaryData = data; renderDictionary();
   } catch (e) { if (epoch === W.epoch && $('#dictionary-rows')) $('#dictionary-rows').textContent = e.message; }
 }
-function renderDictionary() {
+
+export function renderDictionary() {
   if (!dictionaryData || !$('#dictionary-search')) return;
   const query = $('#dictionary-search').value.toLowerCase();
   $('#dictionary-rows').innerHTML = `<p class="muted">${dictionaryData.row_count.toLocaleString()} rows · ${dictionaryData.sampled_rows} inspected for values. Ranges say whether they cover the table or this sample.</p>
@@ -96,11 +112,12 @@ function renderDictionary() {
       <td><span class="tag">${esc(c.value_kind)}</span><p>${c.masked ? '•••' : c.values.map(v => esc(String(v))).join(' · ') || 'No observed non-null values'}${c.more_values ? ' · … more may exist' : ''}</p>
       ${c.range ? `<p class="muted">${esc(c.range_scope)} range: ${esc(c.range[0])} → ${esc(c.range[1])}</p>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
 }
+
 $('#sheet-search').oninput = () => W.metadata && renderSheets();
 
-/* Account settings and model selection are server-backed; no credentials enter local/session storage. */
-function clearAI() { W.generation=(W.generation||0)+1; W.loading=null; W.ai=null; W.models=[]; W.active=null; W.owner=null; $("#model-control").hidden=true; }
-async function refreshAI(force = false) {
+export function clearAI() { W.generation=(W.generation||0)+1; W.loading=null; W.ai=null; W.models=[]; W.active=null; W.owner=null; $("#model-control").hidden=true; }
+
+export async function refreshAI(force = false) {
   if (!S.me?.user) { $('#model-control').hidden = true; return; }
   const owner = S.me.user.id || S.me.user.email;
   if (W.owner && W.owner !== owner) clearAI();
@@ -123,7 +140,8 @@ async function refreshAI(force = false) {
   })();
   return W.loading;
 }
-function renderModelSelector() {
+
+export function renderModelSelector() {
   if (!W.ai || !S.me?.user) return;
   $('#model-control').hidden = false;
   const models = W.models.length ? W.models : [{id:W.ai.model,name:W.ai.model}];
@@ -133,12 +151,14 @@ function renderModelSelector() {
   const u = W.ai.usage;
   if (u) $('#limit-info').textContent = W.ai.exempt ? `${W.ai.mode === 'personal' ? 'Personal provider billing' : 'Admin · no user quota'} · ${u.requests} requests today` : `${money(u.remaining)} shared allowance remaining · ${u.requests} requests today`;
 }
-function displayActiveModel(active) {
+
+export function displayActiveModel(active) {
   W.active = active;
   if (!W.ai) return;
   $('#model-provider').textContent = active ? `Active: ${active.provider} · ${active.model}` : `${W.ai.provider} · ${W.ai.mode === 'personal' ? 'personal key' : 'Pantree API'}`;
   $('#chat-model').title = active ? 'Selection applies to subsequent requests. This active run keeps its original model.' : 'Model for subsequent requests';
 }
+
 $('#chat-model').onchange = async () => {
   const model = $('#chat-model').value;
   try {
@@ -146,7 +166,8 @@ $('#chat-model').onchange = async () => {
     renderModelSelector(); toast(W.active ? 'Model saved for the next request. Active run unchanged.' : 'Model selected');
   } catch (e) { toast(e.message,5000); renderModelSelector(); }
 };
-function usageMarkup(ai) {
+
+export function usageMarkup(ai) {
   const u = ai.usage, groups = u.groups || [];
   const sum = field => groups.reduce((v,g)=>v+(g[field]||0),0);
   return `<div class="usage-grid"><div><span>Daily allowance</span><strong>${ai.exempt ? 'Exempt' : money(u.daily_limit)}</strong></div>
@@ -156,7 +177,8 @@ function usageMarkup(ai) {
     <p>${money(sum('usd'))} known estimated API cost · ${sum('uncertain_calls')} calls with pending or unknown cost. Day resets at midnight ${esc(u.timezone)}.</p>
     <p class="muted">Personal keys bill your provider account. Shared service budget and application resource controls still apply where relevant. Unknown outcomes retain conservative reservations.</p>`;
 }
-async function aiDialog() {
+
+export async function aiDialog() {
   if (!S.me?.user) return showSignin();
   await refreshAI(true); if (!W.ai) return toast('AI settings are unavailable. Try again.',5000);
   let ai = W.ai;
@@ -206,7 +228,8 @@ async function aiDialog() {
   if(q('#admin-usage')) q('#admin-usage').onclick=()=>adminUsage(q('#admin-usage-body'));
   load();
 }
-async function adminUsage(target) {
+
+export async function adminUsage(target) {
   target.textContent='Loading usage…';
   try {
     const data=await api('/api/admin/usage');
@@ -218,9 +241,9 @@ async function adminUsage(target) {
   } catch(e){target.textContent=e.message;}
 }
 
-// Keep startup CPU allocated during an actual request, without blocking chat navigation or charging a question.
-let preparingAnalyst = null, preparedAt = 0;
-async function warmAnalyst() {
+export let preparingAnalyst = null, preparedAt = 0;
+
+export async function warmAnalyst() {
   if (!S.me?.user || preparingAnalyst || Date.now()-preparedAt < 300000) return;
   const owner=S.me.user.id || S.me.user.email, status=$('#analyst-readiness');
   status.textContent='Preparing the analyst… You can browse data while it loads.';
@@ -231,4 +254,5 @@ async function warmAnalyst() {
   }).catch(()=>{if(S.me?.user)status.textContent='Preparation is taking longer. Your question will show its progress.';})
     .finally(()=>{preparingAnalyst=null;});
 }
+
 window.addEventListener('focus',()=>warmAnalyst());

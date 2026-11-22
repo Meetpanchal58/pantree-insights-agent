@@ -288,7 +288,7 @@ def test_hierarchical_ranking_still_requires_explicit_confirmation(analyst, monk
         ranking=Ranking(by="revenue", limit=2, partition_by=["brand"]),
     )
     monkeypatch.setattr(
-        "pantree_insights.graph.decide",
+        "pantree_insights.graph.nodes_interpret.decide",
         lambda *a, **kw: Decision(
             "spec", spec=spec, restated="Top two products by revenue within each brand", detail={"fast_path": True}
         ),

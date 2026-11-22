@@ -35,7 +35,8 @@ const fs=require('node:fs');const path=require('node:path');
    if(u.pathname==='/api/admin/usage/ordinary'){writes.push(req.postDataJSON());data={};}
    await route.fulfill({json:data});
   });
-  await page.goto('https://app.test/');await page.waitForSelector('#chat-model option[value="gpt-other"]', {state:'attached'});
+  await page.goto('https://app.test/');
+    await page.evaluate(async()=>Object.assign(window, await import('/static/app.js')));await page.waitForSelector('#chat-model option[value="gpt-other"]', {state:'attached'});
   for(const width of [1440,390]) for(const theme of ['light','dark']) {
    await page.setViewportSize({width,height:900});await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;S.chatId='chat';S.run={steps:[],question:'Orders'};S.pending={run_id:'pending',plan_version:7};$('#messages').innerHTML='<div id="preserved">Existing result and confirmation</div>';},theme);
    await page.locator('[data-action="dataset"]:visible').last().click();
