@@ -174,7 +174,8 @@ class Runner:
         cold instance) is prepared in the run's own thread, shown as a step, never inside the HTTP request.
         A failure while preparing ends the run with a saved failure, so the question always gets a reply."""
         history, previous = store.conversation(chat["id"])
-        investigation = store.investigation(user["id"], chat["id"])
+        investigation = {**store.investigation(user["id"], chat["id"]),
+                         **store.recall(user["id"], chat["id"], question, snapshot_signature())}
         if not previous and investigation.get("current_plan"):
             previous = investigation["current_plan"][0].get("spec")
         store.add_message(chat["id"], "user", question)

@@ -3,7 +3,7 @@
 
 const STEP_LABELS = {
   queue: "Waiting for a free slot", prepare: "Preparing the data (first question after a restart)", check_input: "Checking the question", interpret: "Understanding the question",
-  execute: "Running the verified query", analyse: "Explaining the result", chart: "Building the chart",
+  execute: "Running the verified query", analyse: "Explaining the result", reflect: "Choosing the next investigation step", chart: "Building the chart",
   context: "Checking relevant context", remember: "Saving to memory",
   retrieve: "Finding relevant data", understand: "Understanding the question", plan: "Planning the analysis",
   write_sql: "Writing SQL", check_sql: "Safety checks", run_query: "Running the query", validate: "Reviewing the query",
@@ -597,7 +597,7 @@ function showResult(run, selected = 0) {
   if (run.analyses?.length) run = { ...run, ...run.analyses[selected] };
   const box = $("#result"); if (!box) return;
   S.run.final = run;
-  if (run.status !== "done") { box.innerHTML = `<div class="result"><h3>${esc(run.status)}</h3><p>${esc(run.message || "")}</p></div>`; return; }
+  if (run.status !== "done" && !whole.analyses?.length) { box.innerHTML = `<div class="result"><h3>${esc(run.status)}</h3><p>${esc(run.message || "")}</p></div>`; return; }
   const a = run.analysis || {};
   const list = (title, items) => items && items.length ? `<h4>${title}</h4><ul>${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
   const res = run.result || { columns: [], data: [] };
@@ -614,6 +614,9 @@ function showResult(run, selected = 0) {
     </div>
     ${list("Findings", a.findings)}${list("Hypotheses (unproven)", a.hypotheses)}${list("Recommendations", a.recommendations)}${list("Caveats", a.caveats)}
     ${(run.warnings || []).map((w) => `<div class="warning-box">⚠ ${esc(w)}</div>`).join("")}
+    ${whole.status !== "done" ? `<div class="warning-box">${esc(whole.message || "Investigation stopped. Completed evidence is shown below.")}</div>` : ""}
+    ${whole.context_sources?.length ? `<details><summary>Earlier analyses retrieved as context</summary><ul>${whole.context_sources.map(s => `<li>${esc(s.question)} · ${esc(s.run_id)}${s.stale ? " · older dataset; recomputation required" : ""}</li>`).join("")}</ul></details>` : ""}
+    ${whole.investigation_stop ? `<div class="warning-box">${esc(whole.investigation_stop)}</div>` : ""}
     ${list("Follow-up questions", a.follow_up_questions)}
     <h4>Result (${res.data.length} rows${res.truncated ? ", truncated" : ""})</h4>
     <div class="table-wrap"><table><thead><tr>${res.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>

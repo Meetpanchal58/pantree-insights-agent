@@ -239,6 +239,20 @@ const path = require('node:path');
     assert.equal(await page.locator('#result th').innerText(),'revenue');
     assert.equal(await page.locator('[data-kind="csv"]').count(),1);
 
+    // Cancelling an adaptive next step keeps completed evidence and its historical provenance inspectable.
+    await page.evaluate(()=>showResult({status:'cancelled',message:'Cancelled the pending probe.',
+      context_sources:[{run_id:'abcdef123456',question:'Earlier footwear refunds',stale:true}],
+      investigation_stop:'No additional query executed.',analyses:[
+        {purpose:'Completed revenue query',analysis:{headline:'Observed revenue'},sql:'SELECT 2',
+         result:{columns:['revenue'],data:[[2]]}}
+      ]}));
+    assert.equal(await page.locator('#result h3').innerText(),'Observed revenue');
+    assert.match(await page.locator('#result').innerText(),/Cancelled the pending probe/);
+    await page.locator('#result details summary').click();
+    assert.match(await page.locator('#result details').innerText(),/Earlier footwear refunds/);
+    assert.match(await page.locator('#result details').innerText(),/recomputation required/);
+    assert.equal(await page.locator('#result th').innerText(),'revenue');
+
     // Offline demos appear before the account API responds, and a late failure cannot replace one.
     let releaseStartup;
     await page.route('**/api/me',async route=>{
