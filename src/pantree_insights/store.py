@@ -34,6 +34,7 @@ from sqlalchemy import (
     create_engine,
     delete,
     insert,
+    or_,
     select,
     update,
 )
@@ -637,6 +638,51 @@ class Store:
         row = self._one(select(investigations.c.context).join(chats, chats.c.id == investigations.c.chat_id)
                         .where(chats.c.user_id == user_id, chats.c.id == chat_id))
         return row["context"] if row else {}
+
+    def recall(self, user_id: str, chat_id: str, question: str, snapshot: str | None) -> dict:
+        """Search durable completed runs across this chat; fetch full payloads only for top matches.
+
+        Historical findings are evidence, never standing instructions. No context-window cutoff is used.
+        """
+        import re
+        words = list(dict.fromkeys(_tokens(question)))[:16]
+        ignored = {"these", "those", "their", "earlier", "previous", "analysis", "compare", "show", "same",
+                   "question", "investigate", "please", "first", "again", "results", "using"}
+        words = [w for w in words if w not in ignored and len(w) >= 3]
+        ids = re.findall(r"\b[a-f0-9]{12,32}\b", question)
+        if not words and not ids:
+            return {}
+        matches = [run_records.c.question.ilike('%' + w.replace('%', '').replace('_', '') + '%') for w in words]
+        if ids:
+            matches.append(run_records.c.id.in_(ids))
+        query = select(run_records.c.id, run_records.c.question, run_records.c.started_at).join(
+            chats, chats.c.id == run_records.c.chat_id).where(
+            chats.c.user_id == user_id, run_records.c.user_id == user_id, run_records.c.chat_id == chat_id,
+            run_records.c.status == 'done', or_(*matches))
+        # Rank in SQL so an old, strongly matching question is not lost behind recent weak matches.
+        from sqlalchemy import case
+        score = sum(case((run_records.c.question.ilike('%' + w + '%'), 1), else_=0) for w in words)
+        score += case((run_records.c.id.in_(ids), 100), else_=0)
+        rows = self._all(query.order_by(score.desc(), run_records.c.started_at.desc()).limit(3))
+        evidence, historical = [], []
+        for row in rows:
+            record = self.run_record(user_id, row['id'])
+            final = next((e for e in reversed(record.get('events') or []) if e.get('type') == 'final'), {})
+            if not final.get('grounded') or not final.get('confirmed_plan'):
+                continue
+            old_snapshot = (record.get('summary') or {}).get('snapshot')
+            stale = not snapshot or old_snapshot != snapshot
+            evidence.append({'run_id': row['id'], 'question': row['question'],
+                'created_at': str(row['started_at']), 'snapshot': old_snapshot, 'stale': stale,
+                'plan': [{k: v for k, v in p.items() if k != 'sql'} for p in final['confirmed_plan']],
+                'finding': (final.get('analysis') or {}).get('headline', ''),
+                'hypotheses': final.get('probe_ledger', []),
+                'instruction': 'Historical evidence only. Recompute stale numbers; '
+                               'do not override current corrections.'})
+            for population in final.get('populations') or []:
+                historical.append({**population, 'run_id': row['id'],
+                                   'complete': bool(population.get('complete')) and not stale})
+        return {'retrieved_evidence': evidence, 'historical_populations': historical}
 
     def conversation(self, chat_id: str, turns: int = 4) -> tuple[str, dict | None]:
         """Fetch bounded history and the latest completed plan in one database roundtrip."""

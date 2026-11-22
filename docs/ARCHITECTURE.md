@@ -40,6 +40,19 @@ An established ranked measure resolves generic performance questions about those
 repair ends with an explicit failure, not an empty clarification or a demand to rephrase. Real unresolved
 business choices (including a user-specified group absent from the snapshot) still require clarification.
 
+## Adaptive investigation and durable retrieval
+
+Investigations may add an evidence-review node after verified results. It proposes at most two governed
+queries with explicit cell citations and competing, unproven explanations. Each batch needs fresh approval.
+Three rounds/eight queries, repeated-query detection and pre-review spend/call gates bound the loop.
+Completed evidence and the probe ledger survive checkpoint restarts and failed/cancelled next steps.
+
+Relevant older completed runs are retrieved from durable storage using owner-and-chat-scoped lexical search,
+with explicit run IDs taking precedence. At most three older analyses enter the prompt. Historical result
+references include run IDs; stale populations cannot silently bind to a current snapshot. Retrieval supplements
+the recent conversation and eight-summary working context without loading the entire history.
+See [the implementation and validation limits](pr43-validation.md).
+
 ## Query planning
 
 `spec.py` retains QuerySpec and compiles each named metric from `semantic/metrics.yaml`. A multi-fact spec may

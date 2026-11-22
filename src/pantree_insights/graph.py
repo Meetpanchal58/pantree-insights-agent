@@ -87,6 +87,12 @@ class State(TypedDict, total=False):
     revision: str
     investigation: dict
     results: list[dict]
+    adaptive: bool
+    investigation_round: int
+    completed_results: list[dict]
+    completed_analyses: list[dict]
+    probe_ledger: list[dict]
+    investigation_stop: str
     analyses: list[dict]
     answers: dict[str, str]
     choices: dict[str, str]
@@ -305,7 +311,8 @@ class Agent:
             state.get("history", ""), self.catalog, self.data["last_day"]))
         if needs_evidence and state.get("investigation") and "## Investigation" not in background:
             background += "\n## Investigation (verified historical evidence; recheck against current data)\n" + \
-                json.dumps({k: v for k, v in state["investigation"].items() if k != "populations"}, default=str)
+                json.dumps({k: v for k, v in state["investigation"].items()
+                            if k not in ("populations", "historical_populations")}, default=str)
         _emit("context", "done", seconds=round(time.perf_counter() - context_started, 6))
         pick = choices.pop("reading", None)
         revision = state.get("revision")
@@ -410,8 +417,13 @@ class Agent:
         out.update({"relationship": relationship, "objective": objective or state["question"], "readback": summary,
                     "restated": decision.restated, "notes": decision.assumptions,
                     "trust": None, "open_points": [], "answers": answers, "choices": choices,
-                    "memory": background, "revision": "", "fast_path": bool(decision.detail.get("fast_path")),
+                    "memory": background, "revision": "",
+                    "adaptive": state.get("adaptive", False) or bool(decision.detail.get("adaptive")),
+                    "fast_path": bool(decision.detail.get("fast_path")),
                     "_detail": {**detail, "readback": summary}})
+        if out.get("adaptive"):
+            out["readback"] += ("\n\n**Investigation:** After these results I may propose further checks. "
+                                "Each needs your approval. This request stops after three rounds or eight queries.")
         try:
             prepared = self.prepare(out)
         except (SpecError, TemplateError) as error:
@@ -525,6 +537,13 @@ class Agent:
                 or (self.snapshot and snapshot_signature() != self.snapshot)):
             return {"status": "failed", "route": "finish",
                     "message": "This exact plan needs explicit confirmation before execution."}
+        if state.get("adaptive") and state.get("completed_results"):
+            from .investigate import MAX_QUERIES
+            completed = state["completed_results"]
+            if len(completed) + len(prepared) > MAX_QUERIES or any(
+                    p["sql"] == old["sql"] for p in prepared for old in completed):
+                return {"status": "failed", "route": "finish",
+                        "message": "The revised probe repeats evidence or exceeds the investigation query budget."}
         started = time.perf_counter()
         results = []
         verification = {"status": "verified", "how": "executed the exact confirmed compiled plan",
@@ -565,6 +584,69 @@ class Agent:
         return {"analyses": analyses, "analysis": analyses[0]["analysis"],
                 "grounded": all(a["grounded"] for a in analyses),
                 "warnings": list(dict.fromkeys(w for a in analyses for w in a["warnings"])), "route": "chart"}
+
+    @step("reflect")
+    def reflect(self, state: State) -> dict:
+        from .investigate import MAX_CALLS, MAX_QUERIES, MAX_ROUNDS, MAX_USD, resolve_probe, retain_scope, review
+        if not state.get("adaptive"):
+            return {"route": "chart"}
+        results = [*state.get("completed_results", []), *state.get("results", [])]
+        analyses = [*state.get("completed_analyses", []), *state.get("analyses", [])]
+        round_number = state.get("investigation_round", 0) + 1
+        ledger = list(state.get("probe_ledger", []))
+        base = {"completed_results": results, "completed_analyses": analyses,
+                "investigation_round": round_number, "probe_ledger": ledger}
+
+        def stop(reason):
+            summary = dict(analyses[0]["analysis"])
+            if len(analyses) > 1:
+                summary.update(headline=f"Investigation completed with {len(analyses)} approved queries.",
+                    findings=[f"Query {i + 1}: {a['analysis']['headline']}" for i, a in enumerate(analyses)],
+                    caveats=["Each finding refers to its own approved scope. "
+                             "Observed associations do not prove causes."],
+                    follow_up_questions=analyses[-1]["analysis"].get("follow_up_questions", []), memory=[])
+            return {**base, "route": "chart", "analyses": analyses, "analysis": summary,
+                    "grounded": all(a["grounded"] for a in analyses), "investigation_stop": reason}
+
+        if not state.get("grounded") or any(r["result"].get("truncated") for r in results):
+            return stop("Evidence is incomplete or unverified; further probes need a new scope.")
+        tracker = self.llm(state).tracker
+        if round_number >= MAX_ROUNDS or len(results) >= MAX_QUERIES:
+            return stop("Investigation query/round limit reached. You can continue in another request.")
+        if len(tracker.calls) >= MAX_CALLS or tracker.usd >= MAX_USD:
+            return stop("Investigation planning budget reached; existing evidence is preserved.")
+        try:
+            decision = review(self.llm(state), self.catalog, state.get("objective") or state["question"],
+                              results, ledger)
+            if decision.action == "stop" or not decision.probes:
+                return stop("No further supported probe proposed. Observed contributions do not prove causality.")
+            items, notes = [], []
+            for probe in decision.probes:
+                spec, note = resolve_probe(probe, results, self.catalog)
+                spec = retain_scope(spec, results[0].get("spec"), self.catalog)
+                items.append({"spec": spec.model_dump(mode="json"), "purpose": "Test hypothesis: " + probe.hypothesis})
+                notes.append(note)
+            prepared = self.prepare({"prepared": items})
+            if len(results) + len(prepared) > MAX_QUERIES:
+                return stop("Investigation query budget reached.")
+            seen = {r["sql"] for r in results}
+            if any(p["sql"] in seen for p in prepared) or len({p["sql"] for p in prepared}) != len(prepared):
+                return stop("The proposed probe repeats an executed query; investigation stopped.")
+        except Exception:
+            log.exception("adaptive investigation planning failed")
+            return stop("Further investigation planning failed; completed evidence is preserved.")
+        version = state.get("plan_version", 0) + 1
+        summary = "\n\n".join("**Unproven hypothesis:** " + note["hypothesis"] +
+            "\n**Alternative explanation:** " + note["competing_explanation"] + "\n" +
+            readback(QuerySpec.model_validate(item["spec"]), self.catalog)
+            for item, note in zip(prepared, notes, strict=True))
+        return {**base, "probe_ledger": [*ledger, *notes], "prepared": prepared,
+                "spec": prepared[0]["spec"], "template": None, "readback": summary,
+                "restated": "test the next hypotheses using the completed evidence",
+                "plan_version": version, "plan_digest": plan_digest(prepared, version, self.snapshot),
+                "confirmed_digest": None, "fast_path": False, "revision": "", "answers": {}, "choices": {},
+                "open_points": [OpenPoint("confirm", CONFIRM_QUESTION, [], "", "Approve the next probe").__dict__],
+                "route": "clarify", "_status": "needs_input"}
 
     def _analyse_one(self, state: State) -> dict:
         frame = _frame(state["result"])
@@ -664,7 +746,8 @@ class Agent:
     # ------------------------------------------------------------------ graph
     def _build(self) -> StateGraph:
         g = StateGraph(State)
-        for name in ["check_input", "interpret", "clarify", "execute", "analyse", "chart", "remember", "finish"]:
+        for name in ["check_input", "interpret", "clarify", "execute",
+                     "analyse", "reflect", "chart", "remember", "finish"]:
             g.add_node(name, getattr(self, name))
         route = lambda s: s["route"]                                       # noqa: E731
         g.add_edge(START, "check_input")
@@ -672,7 +755,8 @@ class Agent:
         g.add_conditional_edges("interpret", route, ["clarify", "execute", "interpret", "finish"])
         g.add_conditional_edges("clarify", route, ["interpret", "execute", "clarify", "finish"])
         g.add_conditional_edges("execute", route, ["analyse", "finish"])
-        g.add_edge("analyse", "chart")
+        g.add_edge("analyse", "reflect")
+        g.add_conditional_edges("reflect", route, ["chart", "clarify"])
         g.add_edge("chart", "remember")
         g.add_edge("remember", "finish")
         g.add_edge("finish", END)
@@ -723,20 +807,34 @@ class Agent:
         state = self.graph.get_state({"configurable": {"thread_id": run_id}}).values
         llm = self._llms.pop(run_id, None)
         self._memories.pop(run_id, None)
+        primary = (state.get("completed_results") or [{}])[0]
         result = {"type": "final", "run_id": run_id, "status": state.get("status"), "message": state.get("message"),
                 "question": state.get("question"), "restated": state.get("restated"),
-                "readback": state.get("readback"), "spec": state.get("spec"),
-                "confirmed_plan": state.get("prepared") if state.get("confirmed_digest") else None,
+                "readback": (readback(QuerySpec.model_validate(primary["spec"]), self.catalog)
+                             if primary.get("spec") else state.get("readback")),
+                "spec": primary.get("spec", state.get("spec")),
+                "confirmed_plan": ([{k: v for k, v in r.items() if k not in ("result", "metric_names")}
+                                    for r in state["completed_results"]] if state.get("completed_results") else
+                                    state.get("prepared") if state.get("confirmed_digest") else None),
                 "objective": state.get("objective") or state.get("question"),
                 "relationship": state.get("relationship", "new"),
                 "metric_definitions": {n: self.metrics.metrics[n].model_dump(mode="json")
-                                       for n in {name for item in state.get("results", [])
+                                       for n in {name for item in
+                                                 (state.get("completed_results") or state.get("results", []))
                                                  for name in item.get("metric_names", [])}},
-                "analyses": state.get("analyses", []), "template": state.get("template"),
-                "populations": populations(state.get("prepared", []), state.get("results", []),
+                "analyses": (state.get("analyses", []) if state.get("status") == "done" else
+                             state.get("completed_analyses") or state.get("analyses", [])),
+                "context_sources": [{k: e.get(k) for k in ("run_id", "question", "created_at", "stale")}
+                                    for e in state.get("investigation", {}).get("retrieved_evidence", [])],
+                "investigation_stop": state.get("investigation_stop"),
+                "probe_ledger": state.get("probe_ledger", []),
+                "template": primary.get("template", state.get("template")),
+                "populations": populations(state.get("completed_results") or state.get("results", []),
+                                           state.get("completed_results") or state.get("results", []),
                                            self.catalog, self.snapshot) if state.get("grounded") else [],
-                "trust": state.get("trust"), "sql": state.get("sql"),
-                "result": state.get("result"), "analysis": state.get("analysis"), "chart": state.get("chart"),
+                "trust": state.get("trust"), "sql": primary.get("sql", state.get("sql")),
+                "result": primary.get("result", state.get("result")),
+                "analysis": state.get("analysis"), "chart": state.get("chart"),
                 "warnings": state.get("warnings", []), "insight_id": state.get("insight_id"),
                 "grounded": state.get("grounded"), "verification": state.get("verification"),
                 "data_as_of": self.data["last_day"], "data_size": self.data["size"],

@@ -89,6 +89,8 @@ class AnalysisStep(BaseModel):
 
 
 class Interpretation(BaseModel):
+    adaptive: bool = Field(False, description="Enable evidence-directed follow-up probes only when the user requests "
+                          "an investigation, root-cause analysis, or testing competing explanations")
     result_scope: ResultReference | None = Field(None, description="For these/those/same groups: reference a verified "
                                                "population. Never invent its member values.")
     relationship: Literal["new", "refinement", "drilldown", "comparison", "investigation"] = Field(
@@ -584,13 +586,15 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
         if re.search(r"\bby (category|brand|city|channel)\b", answer, re.I):
             effective_question = re.sub(r"\bby (category|brand|city|channel)\b", "", effective_question, flags=re.I)
     effective_question += " " + " ".join(answers.values())
-    referential = refers_to_results(question)
-    available = saved_populations(investigation or {}, cat) if referential else []
+    referential = refers_to_results(question) or bool(re.search(
+        r"\b(?:earlier|previous|old|original) (?:analysis|investigation)\b|\brun [a-f0-9]{12,32}\b", question, re.I))
+    available = saved_populations(investigation or {}, cat)
     register = dict(register or {})
     from .fastpath import METRICS
     explicit_metric = any(re.search(rf"\b{re.escape(phrase)}\b", effective_question, re.I) for phrase in METRICS)
     inherited_metric = None
-    if referential and previous and re.search(r"\b(performing|performance)\b", question, re.I):
+    if (referential and previous and re.search(r"\b(performing|performance)\b", question, re.I)
+            and not re.search(r"\b(earlier|previous|old|original|run)\b", question, re.I)):
         ranked = next((m.metric for m in previous.measures if previous.ranking and m.name == previous.ranking.by), None)
         inherited_metric = ranked or (previous.measures[0].metric if len(previous.measures) == 1 else None)
     if explicit_metric or inherited_metric:
@@ -603,7 +607,7 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             return Decision('clarify', required=True, questions=[ClarifyingQuestion(
                 question='Which earlier groups should I use? Please run their analysis first or name the groups.',
                 options=[], default='', why='A result reference needs complete verified evidence')])
-        choices = [{k: p[k] for k in ('query_index', 'field', 'complete')} for p in available]
+        choices = [{k: p.get(k) for k in ('run_id', 'query_index', 'field', 'complete')} for p in available]
         background += "\nAvailable result populations (server binds the exact members): " + json.dumps(choices)
     unsettled = register_questions(question, register, answers)
     if unsettled:
@@ -622,8 +626,12 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
     if previous is not None:
         background += "\nPrevious confirmed plan (retain unchanged scope for follow-ups): " + previous.model_dump_json()
     reading = ask_model(llm, cat, terms, data, question, history, answers, background=background)
-    detail: dict = {"reading": reading.model_dump(mode="json"), "relationship": reading.relationship}
+    detail: dict = {"reading": reading.model_dump(mode="json"), "relationship": reading.relationship,
+                    "adaptive": reading.adaptive}
     for attempt in range(MAX_REPAIRS + 1):
+        detail["adaptive"] = reading.adaptive
+        if reading.result_scope is not None:
+            referential = True
         if reading.decline_reason:
             return Decision("decline", reason=reading.decline_reason, detail=detail)
         if reading.route == "unanswerable":

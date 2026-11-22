@@ -278,3 +278,35 @@ def test_concurrent_credential_replacements_leave_only_current_version_active(po
         versions = list(pool.map(replace, range(16)))
     active = [cid for cid in versions if store.credential(user['id'], cid)]
     assert active == [store.ai_profile(user['id'])['credential_id']]
+
+
+def test_adaptive_probe_and_evidence_survive_postgres_restart(postgres, con, tmp_path, monkeypatch):
+    from test_adaptive_investigations import configure, probe, save, start
+
+    from pantree_insights.config import get_settings
+    from pantree_insights.graph import Agent
+    from pantree_insights.memory import Memory
+
+    store, url, _ = postgres
+    monkeypatch.setattr(get_settings(), 'database_url', url)
+    monkeypatch.setattr(get_settings(), 'checkpoint_backend', 'postgres')
+    memory = Memory(tmp_path / 'adaptive', 'small')
+    first = Agent(con=con, memory=memory)
+    configure(first, [probe()])
+    rid, initial = start(first)
+    next_step = list(first.resume(rid, 'go ahead', initial['plan_version']))[-1]
+    assert next_step['kind'] == 'confirm'
+    first.close()
+    restored = Agent(con=con, memory=memory)
+    configure(restored, [{'action': 'stop'}])
+    try:
+        restored.restore_memory(rid, memory)
+        final = list(restored.resume(rid, 'go ahead', next_step['plan_version']))[-1]
+        assert final['status'] == 'done' and len(final['analyses']) == 2 and final['probe_ledger']
+        user = store.upsert_user('recall-pg@example.test')
+        chat = store.create_chat(user['id'])
+        save(store, user, chat, 'abcdefabcdef', 'Footwear refund investigation')
+        recalled = store.recall(user['id'], chat['id'], 'earlier footwear refund investigation', 'snapshot-a')
+        assert recalled['retrieved_evidence'][0]['run_id'] == 'abcdefabcdef'
+    finally:
+        restored.close()

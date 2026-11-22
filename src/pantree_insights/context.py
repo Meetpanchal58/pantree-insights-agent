@@ -10,7 +10,8 @@ from .spec import Catalog, Filter, QuerySpec, SpecError
 
 
 class ResultReference(BaseModel):
-    query_index: int = Field(ge=0, le=3, description="Zero-based query in the latest verified result")
+    run_id: str | None = Field(None, description="Retrieved historical run ID, or null for the latest result")
+    query_index: int = Field(ge=0, le=7, description="Zero-based query in the referenced verified result")
     field: str = Field(description="One available population field; values are resolved by the server")
 
 
@@ -76,23 +77,27 @@ def populations(plan: list[dict], results: list[dict], cat: Catalog, snapshot: s
 
 def saved_populations(context: dict, cat: Catalog) -> list[dict]:
     if "populations" in context:
-        return context["populations"]
+        return [*context["populations"], *context.get("historical_populations", [])]
     evidence = (context.get("evidence") or [{}])[-1]
-    return populations(evidence.get("plan", []), evidence.get("results", []), cat, evidence.get("snapshot"))
+    return [*populations(evidence.get("plan", []), evidence.get("results", []), cat, evidence.get("snapshot")),
+            *context.get("historical_populations", [])]
 
 
 def choose_population(question: str, choices: list[dict], reference: ResultReference | None = None) -> dict:
     matches = choices
     if reference:
-        matches = [p for p in choices if p["query_index"] == reference.query_index and p["field"] == reference.field]
+        matches = [p for p in choices if p["query_index"] == reference.query_index and p["field"] == reference.field
+                   and p.get("run_id") == reference.run_id]
     else:
         mentioned = []
         for p in choices:
+            if p.get("run_id"):
+                continue
             word = p["field"].split(".")[-1].removesuffix("_name").removesuffix("_id").replace("_", " ")
             forms = (word, word + "s", word[:-1] + "ies" if word.endswith("y") else word)
             if any(re.search(rf"\b{re.escape(w)}\b", question, re.I) for w in forms):
                 mentioned.append(p)
-        matches = mentioned or choices
+        matches = mentioned or [p for p in choices if not p.get("run_id")]
     if len(matches) != 1:
         raise SpecError("Which earlier result and group should this follow-up use? Name the query and group.")
     return matches[0]
