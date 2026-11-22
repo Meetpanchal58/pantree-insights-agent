@@ -133,7 +133,7 @@ clarification remains incomplete. Confirmation compliance is reported separately
 `--mode assisted` is an explicitly separate run. Reports refuse mixed modes and separate intended plans, gold
 result matches and checked evidence from unmeasured human narrative faithfulness. Legacy benchmark scripts remain reproducible tools; previous result artifacts have been removed.
 
-The current paid evaluation uses 100 preselected cases, autonomous blind confirmations, and a cumulative $4 reservation ledger. Budget exhaustion is reported as incomplete coverage; uncertain provider outcomes retain their reserved cost. See [evaluation instructions](../evals/README.md) and [current evidence](../evals/reports/current/README.md).
+The current paid evaluation uses 100 preselected cases, autonomous blind confirmations, and a cumulative reservation ledger ($2 ceiling for the published run). Budget exhaustion is reported as incomplete coverage; uncertain provider outcomes retain their reserved cost. See [evaluation instructions](../evals/README.md) and [current evidence](../evals/reports/current/README.md).
 
 ## Runtime
 

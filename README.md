@@ -40,40 +40,25 @@ Every query needs confirmation. Follow-up questions retain the approved context.
 
 ## Results
 
-The latest paid evaluation (22 November 2026, code `1df31b0`) used the same 100 questions as the previous run (seed 20261122): 56 answer cases and 44 behavior cases. It ran twice: once in autonomous mode and once in user mode. In autonomous mode, plans are confirmed blindly and the agent's questions go unanswered. In user mode, a simulated business user also picks one of the options the agent offers.
+This evaluation ran on 22 November 2026, on code `24b3f1e`, in autonomous mode. Plans are confirmed blindly and the agent's questions go unanswered. The run used 100 preselected questions (seed 20261122): 56 answer cases and 44 behavior cases.
 
-| Measure | Previous run (autonomous) | Latest, autonomous | Latest, user mode |
-| --- | --- | --- | --- |
-| Correct answer tables | 27/56 (48.2%) | **49/56 (87.5%)** [78.5–94.7%] | 47/56 (83.9%) [75.0–92.9%] |
-| Verified-labelled answers matching gold | 27/34 (79.4%) | 49/51 (96.0%) | 47/52 (90.3%) |
-| Verified-labelled reference mismatches (silent wrong) | 7 | 2 | 5 |
-| Refusals of unsafe requests | - | 12/12 | 12/12 |
-| Vague questions correctly clarified | - | 5/6 | 5/6 |
-| Token cost (ceiling $4) | $0.64 | $0.87 | $0.82 + $0.13 held for unconfirmed calls |
+| Measure | Result |
+| --- | --- |
+| Correct answer tables | **51/56 (91.0%)** [83.9–98.3%] |
+| Holdout answer tables | 18/18 |
+| Verified-labelled answers matching the reference | 51/53 (96.2%) |
+| Silent wrong answers | 2 |
+| Unsafe requests refused | 12/12 |
+| Vague questions correctly clarified | 6/6 |
+| Token cost | $0.93 for 100 questions (ceiling $2) |
+| Free compiler check | 98/98 cases; 294/294 matches across three passes |
 
-Square brackets are 95% bootstrap intervals. In both modes the regression scores use the column rubric fixed before the latest run: each question lists the columns it asks for. On the previous run's saved answers, that rubric alone turns 4 of its 29 failures into passes; the remaining gain comes from the code changes.
+The square brackets give a 95% bootstrap interval. The release gate (every answer correct, no silent wrong answers) still fails. The five answer failures:
+- **m10 "worst reviews", h10 "wrong size", and one follow-up.** These are ambiguous; asking is the intended behaviour, but autonomous mode cannot answer.
+- **m11.** The agent counts support contacts; the reference counts tickets.
+- **c21.** The funnel counts are correct, but given as three rows instead of one row.
 
-The release gate (every answer correct, no silent wrong answers) still fails. Remaining failures:
-- **Fixed after this run, not yet re-measured:** x11, a malformed contrast reading; z01, a declined period with no data.
-- **Plain ambiguity:** m10, h10 and a follow-up.
-- **Wrong row counts:** c24 and m11, by region and top 10.
-- **Provider errors in user mode:** two calls the provider didn't confirm; the paid run allows no retries.
-
-**Confirmation re-runs (same day, $0.47 in total).** These are targeted re-runs of only the questions that failed, not a new 100-question run. On the final code, every case fixed after the full run passes in both modes:
-- x11 and z01;
-- f06 and f08, the questions it had wrongly refused or asked about;
-- the "Mumbay" typo check;
-- c24, under its corrected reference;
-- c06 and e04.
-
-Still failing:
-- **m11:** the agent counts support contacts, while the reference counts tickets.
-- **m10, h10 and one follow-up:** genuinely ambiguous questions where asking is the intended behaviour.
-
-[Reports](evals/reports/2026-11-22/confirmation/).
-
-Reports: [autonomous](evals/reports/2026-11-22/autonomous/results.md), [user mode](evals/reports/2026-11-22/user/results.md), and the [previous run](evals/reports/current/results.md).
-These are simulated-data results from one repeat. Narrative faithfulness is not measured.
+[Full results, confidence intervals and failure analysis](evals/reports/current/results.md). These are results on simulated data from one run. The question suites were also used during development. Narrative faithfulness is not measured.
 
 ## Tech stack
 

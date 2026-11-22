@@ -73,6 +73,11 @@ QUALIFIED = {
 }
 
 
+POPULATION_ORDERS = re.compile(
+    r"\b(?:placed|place|placing|made|make|making|with|who ordered)\s+(?:an?\s+|any\s+|at least one\s+)?orders?\b", re.I)
+ASKED_ORDERS = re.compile(r"\bhow many orders\b|\borders and\b|\band orders\b", re.I)
+
+
 def intent_problems(question: str, spec: QuerySpec, cat: Catalog, last_day: str | None = None) -> list[str]:
     """Check explicit business terminology, independently of structural validity.
 
@@ -91,6 +96,9 @@ def intent_problems(question: str, spec: QuerySpec, cat: Catalog, last_day: str 
                 required.add(vocabulary[phrase])
             remaining = re.sub(pattern, " ", remaining)
     present = {m.metric for m in spec.measures}
+    # "customers who placed orders", "buyers with an order": the orders word names who is counted, not a measure.
+    if present - {"orders"} and POPULATION_ORDERS.search(question) and not ASKED_ORDERS.search(question):
+        required.discard("orders")
     if len(required) > 1 and not re.search(
             r"\b(?:and|vs|versus) orders\b|\borders (?:and|vs|versus)\b", question, re.I):
         required.discard("orders")  # e.g. revenue for cash-on-delivery orders names a population

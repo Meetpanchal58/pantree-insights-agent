@@ -604,9 +604,9 @@
       "question": "What is the return rate for women's products versus men's products?"
     }
   ],
-  "started_at": "2026-11-22T12:06:53.229637+00:00",
-  "finished_at": "2026-11-22T12:25:27.100982+00:00",
-  "ceiling_usd": 4.0,
+  "started_at": "2026-11-22T15:02:41.379592+00:00",
+  "finished_at": "2026-11-22T15:30:30.309605+00:00",
+  "ceiling_usd": 2.0,
   "budget_stopped": false,
   "adapter": "production managed structured-output adapter; retries disabled",
   "model": "openai:gpt-6.1-terra",
@@ -634,8 +634,8 @@
       4.5
     ]
   },
-  "known_usd": 0.63755825,
+  "known_usd": 0.92652725,
   "held_usd": 0,
-  "calls": 239,
+  "calls": 299,
   "uncertain_calls": 0
 }
