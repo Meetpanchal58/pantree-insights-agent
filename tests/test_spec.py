@@ -138,3 +138,21 @@ def test_a_name_several_ids_share_is_grouped_with_its_id(CAT):
                                  measures=[Measure(name="r", metric="last_click_revenue")],
                                  dimensions=["campaign"]), CAT)
     assert "campaigns.campaign_id AS campaign_id" in sql and "campaigns.campaign_name AS campaign" in sql
+
+
+@pytest.mark.parametrize("key", sorted(k for k in GOLD if k in ITEMS))
+def test_reading_checks_never_flag_a_gold_reading(key, CAT):
+    """The intent and coverage checks guard the model's reading; a correct reading must pass them untouched,
+    otherwise the agent asks the user to change a right answer (the main failure in the previous evaluation)."""
+    from pantree_insights.db import manifest
+    from pantree_insights.interpret.checks import coverage_problems, intent_problems, template_intent_problems
+    from pantree_insights.interpret.models import TemplateCall
+
+    data, question, gold = manifest(), ITEMS[key]["question"], GOLD[key]
+    if gold.get("template"):
+        problems = template_intent_problems(question, TemplateCall(name=gold["template"], **gold.get("params", {})),
+                                            CAT, data)
+    else:
+        spec = QuerySpec.model_validate(gold)
+        problems = intent_problems(question, spec, CAT, data["last_day"]) + coverage_problems(spec, None, data)
+    assert not problems, f"{key}: {question}\n{problems}"

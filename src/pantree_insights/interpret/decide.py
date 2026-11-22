@@ -161,8 +161,9 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
                              r"october|november|december|yesterday|today|last (?:week|month|year|\d+ days))\b",
                              question, re.I):
                     raise TemplateError("this template has no date filter; use a dated spec or clarify the scope")
+                notes = premise_notes(None, data, reading.template.start, reading.template.end)
                 return Decision("template", template=reading.template, restated=reading.restated_question,
-                                assumptions=reading.assumptions, detail=detail)
+                                assumptions=[*reading.assumptions, *notes], detail=detail)
             except TemplateError as error:
                 problems = [str(error)]
         elif reading.spec is not None:

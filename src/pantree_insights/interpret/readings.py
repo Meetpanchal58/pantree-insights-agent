@@ -128,17 +128,21 @@ def register_questions(question: str, register: dict[str, list[str]], answers: d
     return out
 
 
-def premise_notes(spec: QuerySpec, data: dict) -> list[str]:
-    """Facts the user must know about the question's premise (stated in the read-back and the answer)."""
+def premise_notes(spec: QuerySpec | None, data: dict, start: date | None = None, end: date | None = None) -> list[str]:
+    """Facts the user must know about the question's premise (stated in the read-back and the answer). Takes a
+    spec, or explicit bounds (a template call's analysis period)."""
     notes = []
     first, last = date.fromisoformat(str(data["first_day"])[:10]), date.fromisoformat(str(data["last_day"])[:10])
-    if spec.time and (spec.time.start or spec.time.end):
-        start, end = spec.time.start or first, spec.time.end or last
+    if spec is not None and spec.time:
+        start, end = spec.time.start, spec.time.end
+    if start or end:
+        start, end = start or first, end or last
         if end < first or start > last:
-            notes.append(f"The data covers {first} to {last}; the requested period is unavailable. "
-                         "Missing coverage cannot be interpreted as zero activity.")
+            notes.append(f"The data covers {first} to {last}; nothing is recorded in the requested period, so the "
+                         "result is empty for that period.")
         elif start < first or end > last:
-            notes.append(f"The data covers {first} to {last}; only that part of the requested period is included.")
+            notes.append(f"The data covers {first} to {last}; the result covers {max(start, first)} to "
+                         f"{min(end, last)}, the observed part of the requested period.")
     return notes
 
 

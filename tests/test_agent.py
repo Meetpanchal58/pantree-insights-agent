@@ -187,8 +187,17 @@ def test_a_period_without_data_is_stated(con, tmp_path):
     december = {**BY_CATEGORY, "spec": {**BY_CATEGORY["spec"], "time": {"start": "2024-12-01", "end": "2024-12-31"}}}
     agent, _ = make_agent(con, tmp_path, Script(interpreter=[december]))
     _, events = run(agent, "Revenue by category in December 2024?", use_defaults=True)
-    assert events[-1]["kind"] == "clarify" and "not fully observed" in events[-1]["message"]
-    assert not any(e["type"] == "result" for e in events)
+    # Answered (an empty period is a valid answer), never blocked; the read-back says no data is recorded.
+    assert events[-1]["status"] == "done", events[-1]
+    assert "nothing is recorded in the requested period" in str(events)
+
+
+def test_a_year_to_date_period_runs_on_the_observed_days(con, tmp_path):
+    year = {**BY_CATEGORY, "spec": {**BY_CATEGORY["spec"], "time": {"start": "2026-01-01", "end": "2026-12-31"}}}
+    agent, _ = make_agent(con, tmp_path, Script(interpreter=[year]))
+    _, events = run(agent, "Revenue by category in 2026?", use_defaults=True)
+    assert events[-1]["status"] == "done", events[-1]
+    assert "the observed part of the requested period" in str(events)
 
 
 def test_an_unverifiable_claim_is_removed_not_failing_the_answer(con, tmp_path):
