@@ -15,7 +15,15 @@ from ..templates import build as build_template
 from .checks import coverage_problems, intent_problems, template_intent_problems
 from .models import MAX_ALTERNATIVES, MAX_REPAIRS, READINGS, Decision
 from .prompts import ask_alternatives, ask_model
-from .readings import canonical, normalise, premise_notes, reading_options, register_questions
+from .readings import (
+    canonical,
+    compared_members,
+    immaterial,
+    normalise,
+    premise_notes,
+    reading_options,
+    register_questions,
+)
 
 
 def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], data: dict, question: str,
@@ -50,11 +58,14 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
     if inherited_metric and not explicit_metric:
         effective_question += " " + inherited_metric.replace("_", " ")
         background += f"\nThe established performance measure is {inherited_metric}; retain it for this follow-up."
-    if referential:
-        if not available:
-            return Decision('clarify', required=True, questions=[ClarifyingQuestion(
-                question='Which earlier groups should I use? Please run their analysis first or name the groups.',
-                options=[], default='', why='A result reference needs complete verified evidence')])
+    unbound = ClarifyingQuestion(
+        question='Which earlier groups should I use? Please run their analysis first or name the groups.',
+        options=[], default='', why='A result reference needs complete verified evidence')
+    if referential and not available:
+        # Read the question first: a request to decline, or one that names its groups itself, needs no earlier result.
+        background += ("\nNo earlier verified result exists in this conversation; "
+                       "nothing can be bound as 'these' groups.")
+    elif referential:
         choices = [{k: p.get(k) for k in ('run_id', 'query_index', 'field', 'complete')} for p in available]
         background += "\nAvailable result populations (server binds the exact members): " + json.dumps(choices)
     unsettled = register_questions(question, register, answers)
@@ -101,7 +112,9 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             return Decision("failed", reason="I could not apply the established scope to this follow-up. "
                             "No analysis was executed; your earlier results are saved.", detail=detail)
         problems = []
-        if referential and reading.route in ('spec', 'investigation', 'template'):
+        if referential and not available and reading.route in ('spec', 'investigation', 'template'):
+            return Decision('clarify', required=True, questions=[unbound], detail=detail)
+        if referential and available and reading.route in ('spec', 'investigation', 'template'):
             try:
                 population = choose_population(question, available, reading.result_scope)
                 plans = [step.spec for step in reading.steps] if reading.route == 'investigation' else [reading.spec]
@@ -122,7 +135,7 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             metrics = {m.metric for step in reading.steps if step.spec for m in step.spec.measures}
             for step in reading.steps:
                 if step.spec:
-                    step.spec = normalise(step.spec, cat, aliases)
+                    step.spec = compared_members(effective_question, normalise(step.spec, cat, aliases), cat, aliases)
                     problems += validate(step.spec, cat)
                     intent = intent_problems(effective_question, step.spec, cat, data["last_day"])
                     # Metrics may be answered by another approved step, but populations cannot silently disappear.
@@ -161,12 +174,13 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
                              r"october|november|december|yesterday|today|last (?:week|month|year|\d+ days))\b",
                              question, re.I):
                     raise TemplateError("this template has no date filter; use a dated spec or clarify the scope")
+                notes = premise_notes(None, data, reading.template.start, reading.template.end)
                 return Decision("template", template=reading.template, restated=reading.restated_question,
-                                assumptions=reading.assumptions, detail=detail)
+                                assumptions=[*reading.assumptions, *notes], detail=detail)
             except TemplateError as error:
                 problems = [str(error)]
         elif reading.spec is not None:
-            spec = normalise(reading.spec, cat, aliases)
+            spec = compared_members(effective_question, normalise(reading.spec, cat, aliases), cat, aliases)
             problems = validate(spec, cat)
             if not problems:
                 problems = intent_problems(effective_question.strip(), spec, cat, data["last_day"])
@@ -227,6 +241,9 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
         alt = normalise(alt, cat, aliases)
         if (validate(alt, cat) or intent_problems(effective_question, alt, cat, data["last_day"])
                 or canonical(alt) == canonical(spec)):
+            continue
+        if why := immaterial(effective_question, spec, alt):
+            detail.setdefault("dropped_alternatives", []).append(why)
             continue
         different.append(alt)
     if not different:

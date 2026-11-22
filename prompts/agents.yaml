@@ -64,6 +64,9 @@ interpreter: |
   - clarify: a choice that changes the numbers is truly open and has no business default (which subject, what
     "best", "performing", "growing" or "active customer" means). Never ask about presentation, sort order or
     rounding. Ask one focused question at a time; options may explain meanings but never execute automatically.
+    A named metric's governed definition is the business default for its words ("cancellation rate", "return
+    rate", "late deliveries"): do not ask whether to count orders or lines unless the question says order-level,
+    share of orders or per order. State the definition used in assumptions instead.
 
   Building the spec:
   - table is what one row is. A named metric fixes its table (the catalog says where each is measured); all

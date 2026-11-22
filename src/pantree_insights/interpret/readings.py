@@ -117,6 +117,96 @@ def canonical(spec: QuerySpec) -> str:
     }, sort_keys=True, default=str)
 
 
+COMPARE = r"\b(?:versus|vs\.?|compared? (?:with|to)|against|between)\b"
+
+
+def compared_members(question: str, spec: QuerySpec, cat: Catalog, aliases: dict[str, str]) -> QuerySpec:
+    """"COD versus prepaid" split by payment type must not be filtered to COD alone: when a single-member filter
+    sits on a split the question compares, the filter becomes the members the question names (or goes, when they
+    are all the members)."""
+    if not re.search(COMPARE, question, re.I) or not spec.dimensions:
+        return spec
+
+    def said(value: str) -> bool:
+        names = [value] + [a for a, v in aliases.items() if v == value]
+        return any(re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", question, re.I) for n in names)
+    try:
+        split = {cat.resolve(d, spec.table)[0] for d in spec.dimensions}
+    except Exception:                                  # noqa: BLE001 - validation reports it
+        return spec
+    filters = []
+    for f in spec.filters:
+        try:
+            expression, _, entry = cat.resolve(f.field, spec.table)
+        except Exception:                              # noqa: BLE001 - validation reports it
+            filters.append(f)
+            continue
+        if f.op in ("eq", "in") and len(f.values) == 1 and expression in split:
+            members = entry.labels() if entry is not None and entry.expression else cat.values_of(expression) or []
+            named = [m for m in members if said(str(m))]
+            if len(named) >= 2:
+                if set(named) < set(members):
+                    filters.append(f.model_copy(update={"op": "in", "values": named}))
+                continue
+        filters.append(f)
+    return spec.model_copy(update={"filters": filters})
+
+
+GENERIC = {"marketing", "product", "customer", "sales", "avg", "pct", "total", "share", "the", "of", "by"}
+
+
+def _stems(name: str) -> set[str]:
+    """'late_delivery_rate' -> {'late', 'deliv', 'rate'}: name words cut to 5 letters, generic words dropped."""
+    return {w[:5] for w in re.split(r"[_.\s]+", name.split(".")[-1].casefold()) if w and w not in GENERIC}
+
+
+def _mentioned(name: str, question: str) -> bool:
+    words = {w[:5] for w in re.findall(r"[a-z]+", question.casefold())}
+    stems = _stems(name)
+    return bool(stems) and stems <= words
+
+
+def _milestone(field: str | None, question: str) -> bool:
+    """Does the question name the event a date column records? 'sales.delivered_at' needs "delivered", not
+    "delivery address"; 'return_requested_at' is named by "returned" or "requested"."""
+    if not field:
+        return False
+    words = [w for w in field.split(".")[-1].removesuffix("_at").split("_") if w not in GENERIC]
+    forms = {w for w in words} | {w.removesuffix("ed").removesuffix("e") + "ed" for w in words} | {
+        "returned" if w == "return" else w for w in words}
+    return any(re.search(rf"\b{re.escape(f)}\b", question, re.I) for f in forms if len(f) > 3)
+
+
+def immaterial(question: str, spec: QuerySpec, alt: QuerySpec) -> str | None:
+    """Why an alternative reading is not worth asking about, or None if it is. Deterministic filters for what the
+    contrast prompt is told not to propose: presentation changes and readings that drop the question's own words."""
+    a, b = json.loads(canonical(spec)), json.loads(canonical(alt))
+    diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
+    if diff <= {"measures", "shares"} and (set(a["measures"]) <= set(b["measures"])
+                                          or set(b["measures"]) <= set(a["measures"])):
+        return "only adds or drops a supporting measure"
+    if diff == {"time"} and a["time"] and b["time"] and {**a["time"], "field": None} == {**b["time"], "field": None} \
+            and not _milestone(alt.time.field, question):
+        return "dates by another milestone the question does not mention"
+    if diff == {"filters"}:
+        added = {f.field for f in alt.filters} - {f.field for f in spec.filters}
+        kept = all(any(f == g for g in alt.filters) for f in spec.filters)
+        if kept and added and all(f.op == "is_set" and not _milestone(f.field, question)
+                                  for f in alt.filters if f.field in added):
+            return "only requires a milestone the question does not mention"
+    governed = {m.metric for m in spec.measures if m.metric}
+    named = {m for m in governed if _mentioned(m, question)}
+    if named - {m.metric for m in alt.measures}:
+        return "replaces a metric the question names"
+    if governed and not governed & {m.metric for m in alt.measures} and all(m.metric is None for m in alt.measures):
+        return "replaces a governed metric with an ad-hoc aggregate"
+    removed, added = set(spec.dimensions) - set(alt.dimensions), set(alt.dimensions) - set(spec.dimensions)
+    if removed and added and all(not _mentioned(d, question) for d in added) and any(
+            _mentioned(d, question) for d in removed):
+        return "replaces a split the question names with one it does not"
+    return None
+
+
 def register_questions(question: str, register: dict[str, list[str]], answers: dict[str, str]) -> list:
     """Known two-meaning phrases in the question that the user's answers have not settled."""
     asked = " ".join(answers).casefold()
@@ -128,17 +218,21 @@ def register_questions(question: str, register: dict[str, list[str]], answers: d
     return out
 
 
-def premise_notes(spec: QuerySpec, data: dict) -> list[str]:
-    """Facts the user must know about the question's premise (stated in the read-back and the answer)."""
+def premise_notes(spec: QuerySpec | None, data: dict, start: date | None = None, end: date | None = None) -> list[str]:
+    """Facts the user must know about the question's premise (stated in the read-back and the answer). Takes a
+    spec, or explicit bounds (a template call's analysis period)."""
     notes = []
     first, last = date.fromisoformat(str(data["first_day"])[:10]), date.fromisoformat(str(data["last_day"])[:10])
-    if spec.time and (spec.time.start or spec.time.end):
-        start, end = spec.time.start or first, spec.time.end or last
+    if spec is not None and spec.time:
+        start, end = spec.time.start, spec.time.end
+    if start or end:
+        start, end = start or first, end or last
         if end < first or start > last:
-            notes.append(f"The data covers {first} to {last}; the requested period is unavailable. "
-                         "Missing coverage cannot be interpreted as zero activity.")
+            notes.append(f"The data covers {first} to {last}; nothing is recorded in the requested period, so the "
+                         "result is empty for that period.")
         elif start < first or end > last:
-            notes.append(f"The data covers {first} to {last}; only that part of the requested period is included.")
+            notes.append(f"The data covers {first} to {last}; the result covers {max(start, first)} to "
+                         f"{min(end, last)}, the observed part of the requested period.")
     return notes
 
 

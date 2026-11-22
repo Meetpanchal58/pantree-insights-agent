@@ -9,8 +9,10 @@ Suites: regression (evals/regression.yaml + questions.yaml), holdout (holdout.ya
 over-asking pass), coverage (coverage.yaml), flow (flow_regression.yaml; follow-ups with chat history).
 
 Autonomous mode is the default: gold judges but does not steer. A scripted stakeholder blindly confirms plans.
-Use --mode assisted for a separate run in which a simulated stakeholder supplies gold-guided corrections.
-Never mix those modes in one accuracy report. Numerical checks are not a human narrative-faithfulness score.
+--mode user plays a business user: on answer questions it picks one of the options the agent offers (never free
+text, so no spec is leaked) and still confirms plans blindly; vague, refusal and over-asking items are judged on
+the agent's first response. --mode assisted adds gold-guided corrections. Never mix modes in one accuracy report.
+Numerical checks are not a human narrative-faithfulness score.
 
 Measures (docs/ARCHITECTURE.md): verified answers equal to the gold (gate: 100%), silent wrong answers (gate: 0),
 first reading correct, questions per answer, and the behaviour sets (declines, vague questions, over-asking).
@@ -39,7 +41,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "evals"))
 
 from provenance import SCORER_VERSION, cases_digest, data_digest, latency, provenance, stage_seconds  # noqa: E402
-from scoring import align, infer_columns, trim_top_n  # noqa: E402
+from scoring import align, infer_columns, trim_top_n, winner_only  # noqa: E402
 from stats import fmt, summarize  # noqa: E402
 
 from pantree_insights.config import get_settings  # noqa: E402
@@ -60,7 +62,8 @@ def load_suite(suite: str) -> list[dict]:
     if suite in ("regression", "all"):
         for e in _yaml("regression.yaml", "examples"):
             items.append({"suite": "regression", "set": "answer", "expect": "answer", "id": e["id"],
-                          "question": e["question"], "gold_sql": e["sql"], "difficulty": e.get("difficulty")})
+                          "question": e["question"], "gold_sql": e["sql"], "difficulty": e.get("difficulty"),
+                          **{k: e[k] for k in ("key_columns", "metric_columns") if k in e}})
         for q in _yaml("questions.yaml"):
             items.append({"suite": "regression", "set": q["expect"], **q})
     if suite in ("holdout", "all"):
@@ -89,7 +92,7 @@ def gold_frame(con, item: dict) -> tuple[pd.DataFrame, list[str], list[str]]:
     if result.truncated:
         raise ValueError("Gold SQL exceeded the row limit; a partial reference cannot score an answer")
     frame = result.frame
-    if item.get("key_columns") is not None and item.get("metric_columns"):
+    if item.get("key_columns") is not None and item.get("metric_columns") is not None:
         return frame, item["key_columns"], item["metric_columns"]
     keys, metrics = infer_columns(frame)
     return frame, keys, metrics
@@ -142,6 +145,10 @@ class Stakeholder:
                 "I mean: " + self.wanted.replace("**", "").replace("\n", "; ")
         return answers
 
+    def choose(self, event: dict) -> dict[str, str]:
+        """A business user's reply: the offered option closest to what they want, never a written correction."""
+        return {q["question"]: max(q["options"], key=lambda o: _overlap(o, self.wanted)) for q in event["questions"]}
+
 
 def _overlap(a: str, b: str) -> float:
     words = lambda t: set(re.findall(r"[a-z0-9]+", t.lower())) - {"the", "of", "a", "by", "and", "or", "in"}  # noqa: E731
@@ -171,7 +178,7 @@ def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None,
         event = events[-1]
         if event.get("kind") == "confirm":
             turns["confirmations"] += 1
-            if mode == "autonomous":
+            if mode in ("autonomous", "user"):
                 reply = "Go ahead"  # deliberately no gold-guided corrections
             elif stakeholder is not None:
                 ok = stakeholder.matches(event)
@@ -182,6 +189,10 @@ def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None,
         elif mode == "assisted" and stakeholder is not None:
             turns["questions"] += 1
             reply = stakeholder.answer(event)
+        elif mode == "user" and stakeholder is not None and item["set"] == "answer" and all(
+                q.get("options") for q in event.get("questions") or [{}]):
+            turns["questions"] += 1
+            reply = stakeholder.choose(event)
         else:
             break
         turns["interactions"] += 1
@@ -225,6 +236,12 @@ def judge(con, item: dict, final: dict, turns: dict) -> dict:
     ok, reason, _ = align(gold, trim_top_n(frame, gold, item["gold_sql"], item["question"]), keys, metrics,
                           label_columns=labels, percent_metrics=set(item.get("percent_metrics", [])),
                           tolerances=item.get("metric_tolerances"))
+    if not ok and metrics and len(frame) < len(gold):
+        winners = winner_only(frame, gold, metrics[0], item["question"])
+        if len(winners) < len(gold):
+            ok, reason, _ = align(winners, frame, keys, metrics, label_columns=labels,
+                                  percent_metrics=set(item.get("percent_metrics", [])),
+                                  tolerances=item.get("metric_tolerances"))
     if not ok and len(frame) > len(gold) and FULL_LIST.search(item["question"]):
         ok, reason, _ = align(gold, frame, keys, metrics, label_columns=labels, superset=True,
                               percent_metrics=set(item.get("percent_metrics", [])),
@@ -316,13 +333,14 @@ def _rate(rows: list[dict], key: str = "passed") -> str:
 def summary(rows: list[dict]) -> str:
     modes = {r.get("evaluation_mode", "legacy_assisted") for r in rows}
     if len(modes) > 1:
-        raise ValueError("autonomous and assisted rows must be reported separately")
+        raise ValueError("evaluation modes must be reported separately")
     out = [f"# Evaluation {datetime.now():%Y-%m-%d %H:%M}", "",
            f"Model {rows[0]['model'] if rows else '-'} · data {get_settings().data_size} · code "
            f"{rows[0]['code_revision'][:7] if rows else '-'}", "",
            "Format: mean [95% bootstrap CI over questions; Wilson at all-pass/all-fail boundaries] (n). "
            f"Evaluation mode: {next(iter(modes), 'no rows')}. "
-           "Autonomous confirmation is blind; unresolved ambiguities count as incomplete.", ""]
+           "Plan confirmation is blind in autonomous and user modes (user mode also picks offered options); "
+           "unresolved ambiguities count as incomplete.", ""]
     for suite in ("holdout", "regression", "coverage", "flow"):
         part = [r for r in rows if r["suite"] == suite]
         if not part:
@@ -442,8 +460,8 @@ def passes_gate(rows: list[dict], expected: int) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["autonomous", "assisted"], default="autonomous",
-                        help="autonomous confirms proposed plans without gold-guided corrections")
+    parser.add_argument("--mode", choices=["autonomous", "user", "assisted"], default="autonomous",
+                        help="autonomous confirms plans blindly; user also picks offered options; assisted corrects")
     parser.add_argument("--suite", choices=["holdout", "regression", "coverage", "flow", "all"], default="all")
     parser.add_argument("--sets", help="only these sets, e.g. answer,overask")
     parser.add_argument("--ids", help="comma-separated ids")

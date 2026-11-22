@@ -29,7 +29,9 @@ The sample is fixed before inference: 100 questions, seed 20261122, proportional
 
 Autonomous mode blindly confirms proposed plans. It never uses reference answers to correct the model. Real unresolved clarification remains incomplete. Assisted mode is a separate experiment and must not be mixed into this report.
 
-The scorer aligns dimension keys before comparing every numeric reference column. Integer counts match exactly; default float tolerances are 1e-9 relative and 1e-6 absolute. Different tolerances and percentage scaling require explicit case annotations. Truncated results cannot pass. See [scoring.py](scoring.py) for top-N and descriptive-key rules.
+User mode (`--mode user`) plays a business user: on answer cases it answers the agent's clarifying questions by choosing one of the offered options (never free text, so no reference plan is leaked) and still confirms plans blindly. Vague, refusal and over-asking cases are judged on the first response, as in autonomous mode. It measures what a stakeholder experiences when they can answer "by order or by line?"; it is reported separately.
+
+The scorer aligns dimension keys before comparing every numeric reference column. Integer counts match exactly; default float tolerances are 1e-9 relative and 1e-6 absolute. Different tolerances and percentage scaling require explicit case annotations. Truncated results cannot pass. See [scoring.py](scoring.py) for top-N, winner and descriptive-key rules. Each answer case lists the columns its question asks for (`key_columns`, `metric_columns`); supporting counts in the reference SQL are optional. The regression annotations were fixed on 2026-11-22, before the next paid run, by one rule applied to every case.
 
 ## Reproduce the free checks
 

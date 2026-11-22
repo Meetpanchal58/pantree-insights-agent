@@ -14,6 +14,9 @@ Fairness rules (each unit-tested in tests/test_scoring.py):
 - A gold key column the agent left out is optional when the gold rows are still unique on the keys it
   did return (e.g. category next to sku_id): it is descriptive, not a different breakdown.
 - Computed labels match on their words ("Sale event" = "sale-event day"), one-to-one only.
+- winner_only: a singular superlative ("Which surface has the best click-through rate?") is answered by the
+  winner alone; the agent's rows must then be the gold's top rows by the first metric (best/highest/most: largest
+  first; lowest/least/fewest: smallest first). "worst" is excluded: its direction depends on the metric.
 - trim_top_n: when the gold is a ranked list (ORDER BY ... LIMIT n) and the question names no size, only
   the agent's first n rows are compared, so "top 50" vs "top 10" is not a wrong answer.
 """
@@ -85,6 +88,21 @@ def _boolean_map(wanted: list[str], values: pd.Series) -> dict[str, str] | None:
 _NUMBER_IN_QUESTION = re.compile(r"\b(top|bottom|first|last|best|worst)\s+\d+|"
                                  r"\b\d+\s+(best|worst|top|largest|biggest)", re.I)
 _RANKED = re.compile(r"order\s+by[\s\S]+limit\s+(\d+)\s*;?\s*$", re.I)
+
+
+_SINGULAR_SUPERLATIVE = re.compile(
+    r"^which (?:[a-z-]+ ){1,3}(?:has|is|gets|had|was|brings) the (best|highest|most|largest|lowest|least|fewest)\b",
+    re.I)
+
+
+def winner_only(agent: pd.DataFrame, gold: pd.DataFrame, metric: str, question: str) -> pd.DataFrame:
+    """The gold's top rows (as many as the agent returned, at most 3) when a singular superlative is answered
+    with its winner; otherwise the gold unchanged."""
+    match = _SINGULAR_SUPERLATIVE.search(question.strip())
+    if agent is None or gold is None or not match or not 1 <= len(agent) <= 3 or len(agent) >= len(gold):
+        return gold
+    ascending = match[1].lower() in ("lowest", "least", "fewest")
+    return gold.sort_values(metric, ascending=ascending, kind="stable").head(len(agent)).reset_index(drop=True)
 
 
 def trim_top_n(agent: pd.DataFrame, gold: pd.DataFrame, gold_sql: str, question: str) -> pd.DataFrame:
