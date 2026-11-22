@@ -32,8 +32,7 @@ Thumbs.db
 
 node_modules/
 
-# Locally produced evaluation reports. Keep pinned historical evidence already tracked;
-# new evaluation runs are shared via GitHub Actions artifacts instead.
+# Timestamped local runs stay ignored. Only the reviewed current/ evidence set is published.
 /evals/reports/*.json
 /evals/reports/*.md
 !/evals/reports/README.md
