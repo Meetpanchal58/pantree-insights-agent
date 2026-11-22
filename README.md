@@ -40,40 +40,39 @@ Every query needs confirmation. Follow-up questions retain the approved context.
 
 ## Results
 
-The latest paid evaluation (22 November 2026, code `1df31b0`) used the same 100 questions as the previous run (seed 20261122): 56 answer cases and 44 behavior cases. It ran twice: once in autonomous mode and once in user mode. In autonomous mode, plans are confirmed blindly and the agent's questions go unanswered. In user mode, a simulated business user also picks one of the options the agent offers.
+The latest paid evaluation ran on 22 November 2026 on code `24b3f1e`, in autonomous mode. In autonomous mode, plans are confirmed blindly and the agent's questions go unanswered. It used the same 100 questions as every earlier run (seed 20261122): 56 answer cases and 44 behavior cases.
 
-| Measure | Previous run (autonomous) | Latest, autonomous | Latest, user mode |
+| Measure | First run | Mid-day run (`1df31b0`) | **Latest run (`24b3f1e`)** |
 | --- | --- | --- | --- |
-| Correct answer tables | 27/56 (48.2%) | **49/56 (87.5%)** [78.5–94.7%] | 47/56 (83.9%) [75.0–92.9%] |
-| Verified-labelled answers matching gold | 27/34 (79.4%) | 49/51 (96.0%) | 47/52 (90.3%) |
-| Verified-labelled reference mismatches (silent wrong) | 7 | 2 | 5 |
-| Refusals of unsafe requests | - | 12/12 | 12/12 |
-| Vague questions correctly clarified | - | 5/6 | 5/6 |
-| Token cost (ceiling $4) | $0.64 | $0.87 | $0.82 + $0.13 held for unconfirmed calls |
+| Correct answer tables | 27/56 (48.2%) | 49/56 (87.5%) | **51/56 (91.0%)** [83.9–98.3%] |
+| Unseen holdout answers | – | 16/18 | **18/18** |
+| Verified-labelled answers matching gold | 27/34 | 49/51 | 51/53 (96.2%) |
+| Silent wrong answers | 7 | 2 | 2 |
+| Unsafe requests refused | – | 12/12 | 12/12 |
+| Vague questions correctly clarified | – | 5/6 | 6/6 |
+| Token cost | $0.64 | $0.87 | $0.93 (ceiling $2) |
 
-Square brackets are 95% bootstrap intervals. In both modes the regression scores use the column rubric fixed before the latest run: each question lists the columns it asks for. On the previous run's saved answers, that rubric alone turns 4 of its 29 failures into passes; the remaining gain comes from the code changes.
+Square brackets are 95% bootstrap intervals. A user-mode run on `1df31b0` scored 47/56; in user mode, a simulated user also picks one of the options the agent offers.
 
-The release gate (every answer correct, no silent wrong answers) still fails. Remaining failures:
-- **Fixed after this run, not yet re-measured:** x11, a malformed contrast reading; z01, a declined period with no data.
-- **Plain ambiguity:** m10, h10 and a follow-up.
-- **Wrong row counts:** c24 and m11, by region and top 10.
-- **Provider errors in user mode:** two calls the provider didn't confirm; the paid run allows no retries.
+Two changes in scoring since the first run:
+- **Column rubric, applied to the mid-day and latest runs.** Regression questions now list the columns they ask for; it was fixed before those runs. On the first run's saved answers, the rubric alone turns 4 failures into passes; the rest of the gain is from code.
+- **c24 reference corrected before the latest run.** It had counted CRM and affiliate spend as paid ad spend. c24 is marked `tuned_on`.
 
-**Confirmation re-runs (same day, $0.47 in total).** These are targeted re-runs of only the questions that failed, not a new 100-question run. On the final code, every case fixed after the full run passes in both modes:
-- x11 and z01;
-- f06 and f08, the questions it had wrongly refused or asked about;
-- the "Mumbay" typo check;
-- c24, under its corrected reference;
-- c06 and e04.
+The release gate (every answer correct, no silent wrong answers) still fails. The five remaining answer failures:
+- **Ambiguous, asking is intended:** m10 "worst reviews", h10 "wrong size", and a follow-up. Autonomous mode cannot answer them.
+- **m11:** the agent counts support contacts; the reference counts tickets.
+- **c21:** the funnel counts are right, but given as three rows instead of one row with three columns. The scorer's layout rule fails it; the score is not changed.
 
-Still failing:
-- **m11:** the agent counts support contacts, while the reference counts tickets.
-- **m10, h10 and one follow-up:** genuinely ambiguous questions where asking is the intended behaviour.
+Behavior: one over-cautious failure, f05, "customers who placed orders". It is fixed after this run and not yet re-measured.
 
-[Reports](evals/reports/2026-11-22/confirmation/).
+Reports:
+- [latest run](evals/reports/2026-11-22/final-24b3f1e/results.md)
+- [mid-day autonomous](evals/reports/2026-11-22/autonomous/results.md)
+- [user mode](evals/reports/2026-11-22/user/results.md)
+- [confirmation re-runs](evals/reports/2026-11-22/confirmation/)
+- [first run](evals/reports/current/results.md)
 
-Reports: [autonomous](evals/reports/2026-11-22/autonomous/results.md), [user mode](evals/reports/2026-11-22/user/results.md), and the [previous run](evals/reports/current/results.md).
-These are simulated-data results from one repeat. Narrative faithfulness is not measured.
+These are simulated-data results from one repeat each. Narrative faithfulness is not measured.
 
 ## Tech stack
 

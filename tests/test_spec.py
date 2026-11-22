@@ -207,3 +207,17 @@ def test_a_misspelt_value_is_confirmed_not_silently_corrected(CAT):
                      filters=[Filter(field="city", op="eq", values=["Mumbai"])])
     assert misspelt_values("How many orders were shipped to Mumbay?", spec, CAT, ALIASES) == [("mumbay", "Mumbai")]
     assert misspelt_values("How many orders were shipped to Mumbai?", spec, CAT, ALIASES) == []
+
+
+def test_orders_naming_who_is_counted_is_not_a_requested_metric(CAT):
+    """holdout f05: 'How many distinct customers placed orders in 2026?' failed twice on a demand for the orders
+    metric and was never answered."""
+    from pantree_insights.interpret.checks import intent_problems
+    from pantree_insights.spec import TimeSpec
+
+    customers = QuerySpec(table="sales", measures=[Measure(name="c", agg="count_distinct", field="sales.customer_id")],
+                          time=TimeSpec(start="2026-01-01", end="2026-12-31"))
+    question = "How many distinct customers placed orders in 2026? I only need the count, no customer details."
+    assert intent_problems(question, customers, CAT, "2026-11-22") == []
+    both = "How many customers placed orders and how many orders were there in 2026?"
+    assert any("requests orders" in p for p in intent_problems(both, customers, CAT, "2026-11-22"))
