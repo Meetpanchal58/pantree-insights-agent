@@ -212,10 +212,12 @@ class Store:
 
     # ------------------------------------------------------------------ run tracking and opt-in feedback
     def create_run(self, run_id: str, user_id: str, chat_id: str, question: str,
-                   snapshot: str | None = None, use_defaults: bool = False, ai: dict | None = None) -> None:
+                   snapshot: str | None = None, use_defaults: bool = False, ai: dict | None = None,
+                   message_id: str | None = None) -> None:
         self._exec(insert(run_records).values(id=run_id, user_id=user_id, chat_id=chat_id,
                                                question=question, status="running", events=[],
                                                summary={"snapshot": snapshot, "use_defaults": use_defaults,
+                                                        "message_id": message_id,
                                                         **({"ai": ai} if ai else {})}))
 
     def save_run(self, run_id: str, status: str, events: list[dict], summary: dict | None = None) -> None:
@@ -233,14 +235,36 @@ class Store:
             c.execute(self._upsert(messages).values(id=mid, chat_id=chat_id, role="assistant",
                       content=event.get("message", ""), run=to_json(event)).on_conflict_do_nothing())
 
-    def save_reply(self, run_id: str, chat_id: str, events: list[dict], message: str) -> None:
+    def save_reply(self, run_id: str, chat_id: str, events: list[dict], message: str,
+                   edit: dict | None = None) -> str:
+        mid = edit['id'] if edit else _id()
+        events[-1]['message_id'] = mid
         with self.engine.begin() as c:
             changed = c.execute(update(run_records).where(run_records.c.id == run_id,
                                 run_records.c.chat_id == chat_id, run_records.c.status == "paused")
                                 .values(status="running", events=to_json(events), updated_at=_now()))
             if not changed.rowcount:
                 raise ValueError("This proposal has already been answered")
-            c.execute(insert(messages).values(id=_id(), chat_id=chat_id, role="user", content=message))
+            info = {'kind': 'reply', 'run_id': run_id, 'plan_version': events[-1].get('plan_version')}
+            if edit:
+                prior = c.execute(select(messages).where(messages.c.id == mid, messages.c.chat_id == chat_id,
+                                  messages.c.role == 'user')).mappings().first()
+                if not prior or prior['content'] != edit['expected']:
+                    raise ValueError('This message changed. Reopen the chat before editing it.')
+                info = {**(prior['run'] or {}), **info}
+                info['edits'] = [*(prior['run'] or {}).get('edits', []),
+                                 {'content': prior['content'], 'edited_at': str(_now())}]
+                c.execute(update(messages).where(messages.c.id == mid).values(content=message, run=to_json(info)))
+                later = c.execute(select(messages).where(messages.c.chat_id == chat_id,
+                    messages.c.role == 'assistant', messages.c.created_at > prior['created_at'])).mappings().all()
+                for old in later:
+                    payload = old['run'] or {}
+                    if payload.get('type') == 'clarify':
+                        c.execute(update(messages).where(messages.c.id == old['id']).values(
+                            run=to_json({**payload, 'superseded_by_edit': mid})))
+            else:
+                c.execute(insert(messages).values(id=mid, chat_id=chat_id, role="user", content=message, run=info))
+        return mid
 
     def complete_run(self, run_id: str, final: dict, events: list[dict], summary: dict,
                      headline: str, message: dict) -> bool:
@@ -621,8 +645,68 @@ class Store:
                 c.execute(delete(messages).where(messages.c.chat_id == chat_id))
                 c.execute(delete(chats).where(chats.c.id == chat_id))
 
+    def fork_message(self, user_id: str, chat_id: str, message_id: str, content: str,
+                     expected: str, key: str) -> dict:
+        """Create an edited copy with only preceding history; never rewrite downstream evidence."""
+        from .editing import reconstruction
+        branch_id = hashlib.sha256(f"{user_id}:{chat_id}:{message_id}:{key}".encode()).hexdigest()[:16]
+        edit_id = hashlib.sha256(f"{branch_id}:edited".encode()).hexdigest()[:16]
+        with self.engine.begin() as c:
+            source = c.execute(select(chats).where(chats.c.id == chat_id,
+                                chats.c.user_id == user_id).with_for_update()).mappings().first()
+            if not source:
+                raise LookupError('Chat not found')
+            existing = c.execute(select(messages).where(messages.c.id == edit_id)).mappings().first()
+            if existing:
+                info = existing['run'] or {}
+                if existing['content'] != content or info.get('original') != expected:
+                    raise ValueError('This edit key was already used for a different message.')
+                return {'chat_id': branch_id, 'message_id': edit_id, **info['reconstruction']}
+            rows = list(c.execute(select(messages).where(messages.c.chat_id == chat_id)
+                        .order_by(messages.c.created_at, messages.c.id)).mappings())
+            index = next((i for i, m in enumerate(rows) if m['id'] == message_id and m['role'] == 'user'), None)
+            if index is None:
+                raise LookupError('Your message was not found')
+            if rows[index]['content'] != expected:
+                raise ValueError('This message changed. Reopen the chat before editing it.')
+            seed = reconstruction(rows[:index], content)
+            if len(seed['question']) > 500:
+                raise ValueError('An analytical question must contain at most 500 characters.')
+            c.execute(insert(chats).values(id=branch_id, user_id=user_id, project_id=source['project_id'],
+                                          title=('Edited: ' + seed['question'])[:200]))
+            latest = None
+            for row in rows[:index]:
+                saved = dict(row['run'] or {})
+                if saved.get('status') == 'done' and saved.get('type') == 'final':
+                    origin = saved.get('run_id')
+                    record = c.execute(select(run_records).where(run_records.c.id == origin,
+                                       run_records.c.user_id == user_id)).mappings().first() if origin else None
+                    if record:
+                        copied_id = hashlib.sha256(f"{branch_id}:{origin}".encode()).hexdigest()[:32]
+                        saved = {**saved, 'run_id': copied_id, 'source_run_id': origin}
+                        c.execute(self._upsert(run_records).values(id=copied_id, user_id=user_id,
+                            chat_id=branch_id, question=record['question'], status='done', events=to_json([saved]),
+                            summary=to_json({'snapshot': (record['summary'] or {}).get('snapshot'),
+                                             'source_run_id': origin}), started_at=record['started_at'])
+                            .on_conflict_do_nothing())
+                    if saved.get('grounded'):
+                        latest = saved
+                c.execute(insert(messages).values(id=hashlib.sha256(f"{branch_id}:{row['id']}".encode()).hexdigest()[:16],
+                    chat_id=branch_id, role=row['role'], content=row['content'], run=to_json(saved) if saved else None,
+                    created_at=row['created_at']))
+            info = {'kind': 'edited', 'source_chat_id': chat_id, 'source_message_id': message_id,
+                    'original': expected, 'reconstruction': seed}
+            c.execute(insert(messages).values(id=edit_id, chat_id=branch_id, role='user', content=content, run=info))
+            if latest:
+                c.execute(insert(investigations).values(chat_id=branch_id, context=to_json({
+                    'objective': latest.get('objective'), 'current_plan': latest.get('confirmed_plan') or [],
+                    'populations': latest.get('populations') or [],
+                    'metric_definitions': latest.get('metric_definitions') or {}, 'evidence': []})))
+        return {'chat_id': branch_id, 'message_id': edit_id, **seed}
+
     def messages(self, chat_id: str) -> list[dict]:
-        return self._all(select(messages).where(messages.c.chat_id == chat_id).order_by(messages.c.created_at))
+        return self._all(select(messages).where(messages.c.chat_id == chat_id)
+                         .order_by(messages.c.created_at, messages.c.id))
 
     def add_message(self, chat_id: str, role: str, content: str, run: dict | None = None) -> str:
         mid = _id()
@@ -695,6 +779,8 @@ class Store:
                 lines.append(f"User: {m['content']}")
             else:
                 run = m.get("run") or {}
+                if run.get("superseded_by_edit"):
+                    continue
                 if run.get("status") == "done":
                     previous = run.get("spec")
                 plan = run.get("restated") or run.get("readback")

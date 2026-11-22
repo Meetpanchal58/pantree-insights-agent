@@ -310,3 +310,30 @@ def test_adaptive_probe_and_evidence_survive_postgres_restart(postgres, con, tmp
         assert recalled['retrieved_evidence'][0]['run_id'] == 'abcdefabcdef'
     finally:
         restored.close()
+
+
+def test_postgres_message_edit_is_durable_and_old_approval_is_not_replayed(postgres):
+    from test_adaptive_investigations import save
+
+    store, url, _ = postgres
+    user = store.upsert_user('edit-pg@example.test')
+    chat = store.create_chat(user['id'])
+    save(store, user, chat, 'eeaabb112233', 'Earlier footwear refund evidence')
+    target = store.add_message(chat['id'], 'user', 'Revenue?')
+    branch = store.fork_message(user['id'], chat['id'], target, 'Orders?', 'Revenue?', 'postgres-edit-key')
+    restarted = Store(url)
+    try:
+        assert restarted.fork_message(user['id'], chat['id'], target, 'Orders?', 'Revenue?',
+                                      'postgres-edit-key') == branch
+        assert restarted.messages(branch['chat_id'])[-1]['content'] == 'Orders?'
+        assert restarted.recall(user['id'], branch['chat_id'], 'footwear refund', 'snapshot-a')['retrieved_evidence']
+        store.create_run('pg-edit-reply', user['id'], chat['id'], 'Revenue?')
+        store.save_pause('pg-edit-reply', chat['id'], [], {'plan_version': 1, 'message': 'Run revenue?'})
+        mid = store.save_reply('pg-edit-reply', chat['id'], [{'type': 'answered', 'plan_version': 1}], 'g')
+        store.save_pause('pg-edit-reply', chat['id'], [], {'plan_version': 1, 'message': 'That looks incomplete.'})
+        assert store.save_reply('pg-edit-reply', chat['id'], [{'type': 'answered', 'plan_version': 1}],
+                                'go ahead', {'id': mid, 'expected': 'g'}) == mid
+        edited = next(m for m in restarted.messages(chat['id']) if m['id'] == mid)
+        assert edited['content'] == 'go ahead' and edited['run']['edits'][0]['content'] == 'g'
+    finally:
+        restarted.engine.dispose()

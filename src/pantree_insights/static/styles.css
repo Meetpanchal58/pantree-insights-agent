@@ -320,3 +320,15 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .dataset-card dl { grid-template-columns: 110px minmax(0,1fr); }
   #analyst-readiness { display: block; margin-left: 0; }
 }
+
+/* Visible touch-friendly editing, without changing historical answer cards. */
+.user-message { max-width: 85%; min-width: 0; }
+.user-message .bubble { max-width: 100%; overflow-wrap: anywhere; }
+.message-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 5px; }
+.message-actions .btn { min-height: 32px; }
+.message-editor { min-width: min(440px, 75vw); padding: 14px; margin-top: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.message-editor textarea { display: block; width: 100%; min-height: 100px; margin: 8px 0; resize: vertical; }
+.message-editor p { font-size: 13px; line-height: 1.5; }
+.edit-error { color: var(--danger, #c33); margin: 8px 0; }
+.confirm-plan { display: block; margin-top: 12px; min-height: 40px; }
+@media (max-width: 700px) { .user-message { max-width: 92%; } .message-actions .btn { min-height: 40px; } }

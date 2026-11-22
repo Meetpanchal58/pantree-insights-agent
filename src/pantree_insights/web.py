@@ -68,6 +68,14 @@ class AskIn(BaseModel):
     idempotency_key: str | None = Field(None, min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
+class EditMessageIn(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+    expected_content: str = Field(max_length=2000)
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    pending_run_id: str | None = None
+    plan_version: int | None = Field(None, ge=0)
+
+
 class AnswerIn(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     plan_version: int = Field(ge=0)
@@ -111,6 +119,8 @@ class Run:
     question: str
     started: float = field(default_factory=time.time)
     events: list[dict] = field(default_factory=list)
+    message_id: str | None = None
+    last_message_id: str | None = None
     paused: bool = False              # waiting for clarifying answers
     finished: bool = False
     segment_done: threading.Event = field(default_factory=threading.Event)
@@ -169,23 +179,26 @@ class Runner:
             return self._agent
 
     def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool = False,
-              run_id: str | None = None) -> Run:
+              run_id: str | None = None, initial_answers: dict | None = None,
+              recorded_message_id: str | None = None) -> Run:
         """Return at once: the agent (built on the first question after a restart, which can take a while on a
         cold instance) is prepared in the run's own thread, shown as a step, never inside the HTTP request.
         A failure while preparing ends the run with a saved failure, so the question always gets a reply."""
+        run_id = run_id or uuid.uuid4().hex[:12]
         history, previous = store.conversation(chat["id"])
         investigation = {**store.investigation(user["id"], chat["id"]),
                          **store.recall(user["id"], chat["id"], question, snapshot_signature())}
         if not previous and investigation.get("current_plan"):
             previous = investigation["current_plan"][0].get("spec")
-        store.add_message(chat["id"], "user", question)
+        message_id = recorded_message_id or store.add_message(chat["id"], "user", question,
+            run={"kind": "question", "run_id": run_id})
         if chat["title"] == "New chat":
             store.update_chat(user["id"], chat["id"], title=question[:80])
         scope = MemoryScope(store, user, chat)
-        run = Run(run_id or uuid.uuid4().hex[:12], user, chat, question, ai=store.pin_ai(user))
+        run = Run(run_id, user, chat, question, ai=store.pin_ai(user), message_id=message_id)
         self.runs[run.id] = run
         store.create_run(run.id, user["id"], chat["id"], question, snapshot=snapshot_signature(),
-                         use_defaults=use_defaults, ai=run.ai)
+                         use_defaults=use_defaults, ai=run.ai, message_id=message_id)
 
         def events():
             cold = self._agent is None
@@ -207,6 +220,7 @@ class Runner:
                        "detail": {"seconds": round(time.time() - started, 2)}}
             _, stream = agent.start(question, chat_id=chat["id"], history=history, use_defaults=use_defaults,
                                     memory=scope, run_id=run.id, investigation=investigation,
+                                    initial_answers=initial_answers,
                                     **({"previous_spec": previous} if previous else {}))
             yield from stream
         self._consume(store, run, events())
@@ -247,12 +261,13 @@ class Runner:
         return run
 
     def answer(self, store: Store, run: Run, message: str, plan_version: int,
-               response_id: str | None = None) -> int:
+               response_id: str | None = None, edit: dict | None = None) -> int:
         # admission_lock serializes retries and different replies within this single-instance application.
         if response_id:
             for i, event in enumerate(run.events):
                 if event.get("response_id") == response_id:
-                    if event.get("message") != message or event.get("plan_version") != plan_version:
+                    if (event.get("message") != message or event.get("plan_version") != plan_version
+                            or event.get("edited_message_id") != (edit or {}).get("id")):
                         raise HTTPException(409, "This reply key was already used for a different message.")
                     return i
         latest = next((e for e in reversed(run.events) if e["type"] == "clarify"), {})
@@ -260,9 +275,12 @@ class Runner:
             raise HTTPException(409, "The pending plan changed. Reopen the chat and reply to the latest plan.")
         since = len(run.events)
         event = {"type": "answered", "message": message, "plan_version": plan_version,
-                 "response_id": response_id, "t": time.time()}
+                 "response_id": response_id, "edited_message_id": (edit or {}).get("id"), "t": time.time()}
         if store is not None:
-            store.save_reply(run.id, run.chat["id"], [*run.events, event], message)
+            try:
+                run.last_message_id = store.save_reply(run.id, run.chat["id"], [*run.events, event], message, edit)
+            except ValueError as error:
+                raise HTTPException(409, str(error)) from error
         run.paused = False
         run.segment_done.clear()
         run.events.append(event)
@@ -598,7 +616,7 @@ def create_app() -> FastAPI:
             if saved:
                 if saved["question"] != body.question.strip():
                     raise HTTPException(409, "This idempotency key was used for a different request.")
-                return {"run_id": run_id}
+                return {"run_id": run_id, "message_id": (saved.get("summary") or {}).get("message_id")}
             if body.pending_run_id:
                 prior = store.run_record(user["id"], body.pending_run_id)
                 if not prior or prior["chat_id"] != chat_id:
@@ -608,7 +626,7 @@ def create_app() -> FastAPI:
                         if (event.get("message") != body.question.strip()
                                 or event.get("plan_version") != body.plan_version):
                             raise HTTPException(409, "This reply key was used for a different message.")
-                        return {"run_id": prior["id"], "since": i}
+                        return {"run_id": prior["id"], "since": i, "message_id": event.get("message_id")}
             pending = store.pending_run(user["id"], chat_id)
             if pending:
                 if body.pending_run_id != pending["id"]:
@@ -617,7 +635,7 @@ def create_app() -> FastAPI:
                 if not run:
                     raise HTTPException(409, "This analysis was interrupted. Reopen the chat before starting again.")
                 since = runner.answer(store, run, body.question.strip(), body.plan_version, body.idempotency_key)
-                return {"run_id": run.id, "since": since}
+                return {"run_id": run.id, "since": since, "message_id": run.last_message_id}
             if body.pending_run_id or body.plan_version is not None:
                 raise HTTPException(409, "This analysis is no longer waiting for a reply.")
             runner.prune()
@@ -629,7 +647,76 @@ def create_app() -> FastAPI:
                 raise HTTPException(429, f"You have used today's {settings.daily_question_limit} live questions. "
                                          "Demo replays are still available.")
             run = runner.start(store, user, chat, body.question.strip(), run_id=run_id)
-            return {"run_id": run.id}
+            return {"run_id": run.id, "message_id": run.message_id}
+
+    @app.post("/api/chats/{chat_id}/messages/{message_id}/edit")
+    def edit_message(chat_id: str, message_id: str, body: EditMessageIn,
+                     user=Depends(require_user), store: Store = Depends(get_store)):
+        if not store.chat(user["id"], chat_id):
+            raise HTTPException(404, "Chat not found")
+        content = body.content.strip()
+        if not content:
+            raise HTTPException(422, "Enter a message before saving")
+        with runner.admission_lock:
+            rows = store.messages(chat_id)
+            index = next((i for i, m in enumerate(rows) if m['id'] == message_id and m['role'] == 'user'), None)
+            if index is None:
+                raise HTTPException(404, "Your message was not found")
+            message = rows[index]
+            pending = store.pending_run(user['id'], chat_id)
+            # Replaying a successful in-place edit must not become a new fork after the run finishes.
+            if body.pending_run_id:
+                old = store.run_record(user['id'], body.pending_run_id)
+                if old and old['chat_id'] == chat_id:
+                    for i, event in enumerate(old.get('events') or []):
+                        if event.get('response_id') == body.idempotency_key:
+                            if (event.get('edited_message_id') != message_id or event.get('message') != content
+                                    or event.get('plan_version') != body.plan_version):
+                                raise HTTPException(409, 'This edit key was used for a different message')
+                            return {'chat_id': chat_id, 'run_id': old['id'], 'since': i, 'mode': 'reply'}
+            if pending and pending['status'] == 'running':
+                raise HTTPException(409, 'Wait for the current response before editing a message.')
+            latest = next((m['id'] for m in reversed(rows) if m['role'] == 'user'), None)
+            reply = ((message.get('run') or {}).get('kind') == 'reply' or
+                     index > 0 and (rows[index - 1].get('run') or {}).get('type') == 'clarify')
+            if pending and reply:
+                events = pending.get('events') or []
+                answered = next((i for i in range(len(events) - 1, -1, -1) if events[i].get('type') == 'answered'
+                    and (events[i].get('message_id') == message_id or
+                         not events[i].get('message_id') and events[i].get('message') == message['content'])), None)
+                # Approvals that already produced results are immutable evidence: edit them in a new copy.
+                if answered is None or any(e.get('type') == 'result' or
+                    e.get('step') == 'execute' and e.get('status') == 'done' for e in events[answered + 1:]):
+                    reply = False
+            if body.pending_run_id and latest == message_id and reply and not pending:
+                raise HTTPException(409, 'The analysis finished. Reopen the chat before editing this reply.')
+            if pending and latest == message_id and reply:
+                if body.pending_run_id != pending['id'] or body.plan_version is None:
+                    raise HTTPException(409, 'Reopen the chat to edit the latest pending reply.')
+                run = runner.restore(store, user, pending['id'])
+                if not run:
+                    raise HTTPException(409, 'The paused analysis is unavailable. Reopen the chat first.')
+                since = runner.answer(store, run, content, body.plan_version, body.idempotency_key,
+                                      edit={'id': message_id, 'expected': body.expected_content})
+                return {'chat_id': chat_id, 'run_id': run.id, 'since': since, 'mode': 'reply'}
+            try:
+                fork = store.fork_message(user['id'], chat_id, message_id, content,
+                                          body.expected_content, body.idempotency_key)
+            except LookupError as error:
+                raise HTTPException(404, str(error)) from error
+            except ValueError as error:
+                raise HTTPException(409, str(error)) from error
+            run_id = hashlib.sha256(f"edit:{fork['chat_id']}".encode()).hexdigest()[:32]
+            if store.run_record(user['id'], run_id):
+                return {'chat_id': fork['chat_id'], 'run_id': run_id, 'mode': 'fork'}
+            runner.prune()
+            if sum(not r.finished for r in runner.runs.values()) >= settings.max_pending_runs:
+                raise HTTPException(429, 'The analysis queue is full. Retry saving this edit shortly.')
+            if not store.reserve_question(user['id'], None if user['is_admin'] else settings.daily_question_limit):
+                raise HTTPException(429, 'Your daily question allowance is used. The edited copy is saved.')
+            run = runner.start(store, user, store.chat(user['id'], fork['chat_id']), fork['question'],
+                               run_id=run_id, initial_answers=fork['answers'], recorded_message_id=fork['message_id'])
+            return {'chat_id': fork['chat_id'], 'run_id': run.id, 'mode': 'fork'}
 
     @app.post("/api/runs/{run_id}/answer")
     def answer(run_id: str, body: AnswerIn, user=Depends(require_user), store: Store = Depends(get_store)):

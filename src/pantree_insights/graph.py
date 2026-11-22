@@ -98,6 +98,7 @@ class State(TypedDict, total=False):
     choices: dict[str, str]
     open_points: list[dict]
     clarify_rounds: int
+    clarification_notice: str
     fast_path: bool
     readings: list[dict]                       # different readings offered to the user
     spec: dict | None                          # the confirmed QuerySpec
@@ -417,7 +418,7 @@ class Agent:
         out.update({"relationship": relationship, "objective": objective or state["question"], "readback": summary,
                     "restated": decision.restated, "notes": decision.assumptions,
                     "trust": None, "open_points": [], "answers": answers, "choices": choices,
-                    "memory": background, "revision": "",
+                    "memory": background, "revision": "", "clarification_notice": "",
                     "adaptive": state.get("adaptive", False) or bool(decision.detail.get("adaptive")),
                     "fast_path": bool(decision.detail.get("fast_path")),
                     "_detail": {**detail, "readback": summary}})
@@ -480,6 +481,8 @@ class Agent:
                 "\n\nDoes this match your objective? Say ‘go ahead’ to run this plan, or tell me what to change.") \
             if confirming else "\n\n".join(p.question + (" Possible meanings: " + "; ".join(p.options)
                                                           if p.options else "") for p in points)
+        if state.get("clarification_notice"):
+            text = state["clarification_notice"] + "\n\n" + text
         payload = {"type": "clarify", "kind": "confirm" if confirming else "clarify", "message": text,
                    "questions": [p.public() for p in points], "plan_version": version,
                    "readback": state.get("readback"), "spec": state.get("spec"),
@@ -502,7 +505,23 @@ class Agent:
         if confirming and is_confirmation(message):
             return {"confirmed_digest": state["plan_digest"], "open_points": [], "route": "execute"}
         if is_confirmation(message):
-            return {"route": "clarify", "confirmed_digest": None}  # an unanswered question is not a plan
+            if state.get("prepared") and all(p.get("sql") for p in state["prepared"]):
+                # Recover from an unresolved edit by re-presenting the intact plan, never executing implicitly.
+                prepared = self.prepare(state)
+                version += 1
+                summary = "\n\n".join(readback(QuerySpec.model_validate(p["spec"]), self.catalog)
+                    if p.get("spec") else build_template(p["template"]["name"],
+                        TemplateCall.model_validate(p["template"]).params)[1] for p in prepared)
+                return {"route": "clarify", "prepared": prepared, "readback": summary,
+                        "plan_version": version, "plan_digest": plan_digest(prepared, version, self.snapshot),
+                        "confirmed_digest": None, "revision": "", "clarification_notice":
+                        "No correction was applied. Please confirm the unchanged plan below.",
+                        "open_points": [OpenPoint("confirm", CONFIRM_QUESTION, [], "", "Confirm the plan").__dict__]}
+            return {"route": "clarify", "confirmed_digest": None, "clarification_notice":
+                    "Please answer the open question below before I can prepare a plan."}
+        if confirming and len(message.strip()) == 1 and not message.isdigit():
+            return {"route": "clarify", "confirmed_digest": None, "clarification_notice":
+                    "That looks incomplete. Type 'go ahead' to run this plan, or describe the change you want."}
         if state.get("clarify_rounds", 0) >= MAX_CLARIFY_ROUNDS:
             return {"status": "declined", "message": "Let's restart with a concise objective and scope.",
                     "route": "finish"}
@@ -765,13 +784,15 @@ class Agent:
     # ------------------------------------------------------------------ running
     def start(self, question: str, chat_id: str | None = None, history: str = "", use_defaults: bool = False,
               memory: Any = None, run_id: str | None = None,
-              previous_spec: dict | None = None, investigation: dict | None = None) -> tuple[str, Iterator[dict]]:
+              previous_spec: dict | None = None, investigation: dict | None = None,
+              initial_answers: dict[str, str] | None = None) -> tuple[str, Iterator[dict]]:
         """memory: a scope with context(), save_insight() and close_gaps(); defaults to the file memory."""
         run_id = run_id or uuid.uuid4().hex[:12]
         if memory is not None:
             self._memories[run_id] = memory
         state = {"run_id": run_id, "chat_id": chat_id, "question": question, "history": history,
-                 "previous_spec": previous_spec, "plan_version": 0, "investigation": investigation or {}}
+                 "previous_spec": previous_spec, "plan_version": 0, "investigation": investigation or {},
+                 "answers": initial_answers or {}}
         return run_id, self._stream(run_id, state)
 
     def resume(self, run_id: str, message: str | dict | None, plan_version: int | None = None) -> Iterator[dict]:
