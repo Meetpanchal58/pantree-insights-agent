@@ -9,8 +9,10 @@ Suites: regression (evals/regression.yaml + questions.yaml), holdout (holdout.ya
 over-asking pass), coverage (coverage.yaml), flow (flow_regression.yaml; follow-ups with chat history).
 
 Autonomous mode is the default: gold judges but does not steer. A scripted stakeholder blindly confirms plans.
-Use --mode assisted for a separate run in which a simulated stakeholder supplies gold-guided corrections.
-Never mix those modes in one accuracy report. Numerical checks are not a human narrative-faithfulness score.
+--mode user plays a business user: on answer questions it picks one of the options the agent offers (never free
+text, so no spec is leaked) and still confirms plans blindly; vague, refusal and over-asking items are judged on
+the agent's first response. --mode assisted adds gold-guided corrections. Never mix modes in one accuracy report.
+Numerical checks are not a human narrative-faithfulness score.
 
 Measures (docs/ARCHITECTURE.md): verified answers equal to the gold (gate: 100%), silent wrong answers (gate: 0),
 first reading correct, questions per answer, and the behaviour sets (declines, vague questions, over-asking).
@@ -142,6 +144,10 @@ class Stakeholder:
                 "I mean: " + self.wanted.replace("**", "").replace("\n", "; ")
         return answers
 
+    def choose(self, event: dict) -> dict[str, str]:
+        """A business user's reply: the offered option closest to what they want, never a written correction."""
+        return {q["question"]: max(q["options"], key=lambda o: _overlap(o, self.wanted)) for q in event["questions"]}
+
 
 def _overlap(a: str, b: str) -> float:
     words = lambda t: set(re.findall(r"[a-z0-9]+", t.lower())) - {"the", "of", "a", "by", "and", "or", "in"}  # noqa: E731
@@ -171,7 +177,7 @@ def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None,
         event = events[-1]
         if event.get("kind") == "confirm":
             turns["confirmations"] += 1
-            if mode == "autonomous":
+            if mode in ("autonomous", "user"):
                 reply = "Go ahead"  # deliberately no gold-guided corrections
             elif stakeholder is not None:
                 ok = stakeholder.matches(event)
@@ -182,6 +188,10 @@ def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None,
         elif mode == "assisted" and stakeholder is not None:
             turns["questions"] += 1
             reply = stakeholder.answer(event)
+        elif mode == "user" and stakeholder is not None and item["set"] == "answer" and all(
+                q.get("options") for q in event.get("questions") or [{}]):
+            turns["questions"] += 1
+            reply = stakeholder.choose(event)
         else:
             break
         turns["interactions"] += 1
@@ -316,7 +326,7 @@ def _rate(rows: list[dict], key: str = "passed") -> str:
 def summary(rows: list[dict]) -> str:
     modes = {r.get("evaluation_mode", "legacy_assisted") for r in rows}
     if len(modes) > 1:
-        raise ValueError("autonomous and assisted rows must be reported separately")
+        raise ValueError("evaluation modes must be reported separately")
     out = [f"# Evaluation {datetime.now():%Y-%m-%d %H:%M}", "",
            f"Model {rows[0]['model'] if rows else '-'} · data {get_settings().data_size} · code "
            f"{rows[0]['code_revision'][:7] if rows else '-'}", "",
@@ -442,8 +452,8 @@ def passes_gate(rows: list[dict], expected: int) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["autonomous", "assisted"], default="autonomous",
-                        help="autonomous confirms proposed plans without gold-guided corrections")
+    parser.add_argument("--mode", choices=["autonomous", "user", "assisted"], default="autonomous",
+                        help="autonomous confirms plans blindly; user also picks offered options; assisted corrects")
     parser.add_argument("--suite", choices=["holdout", "regression", "coverage", "flow", "all"], default="all")
     parser.add_argument("--sets", help="only these sets, e.g. answer,overask")
     parser.add_argument("--ids", help="comma-separated ids")

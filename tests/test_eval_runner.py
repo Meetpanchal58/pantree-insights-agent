@@ -166,3 +166,39 @@ def test_autonomous_evaluation_never_receives_gold_corrections():
     events, turns = run_eval.ask(Agent(), {"set": "answer", "question": "q"}, Judge())
     assert len(events) == 2 and not turns["first_turn_correct"] and turns["confirmations"] == 1
     assert turns["first_turn_plan_ready"] and turns["confirmation_compliant"]
+
+
+def test_user_mode_picks_offered_options_and_confirms_blindly():
+    replies = []
+    question = {"type": "clarify", "kind": "clarify", "questions": [
+        {"question": "Which measure?", "options": ["Realized revenue", "Orders"]}]}
+
+    class Agent:
+        def start(self, *args, **kwargs):
+            return "run", iter([question])
+        def resume(self, run_id, reply, **kwargs):
+            replies.append(reply)
+            if len(replies) == 1:
+                return iter([{"type": "clarify", "kind": "confirm", "spec": {"table": "sales"}}])
+            return iter([{"type": "final", "status": "done"}])
+    class User:
+        wanted = "Measure: orders"
+        matches = staticmethod(lambda event: False)
+        choose = run_eval.Stakeholder.choose
+        def answer(self, event):
+            raise AssertionError("user mode never writes a gold correction")
+    events, turns = run_eval.ask(Agent(), {"set": "answer", "question": "q"}, User(), mode="user")
+    assert replies == [{"Which measure?": "Orders"}, "Go ahead"]
+    assert turns["questions"] == 1 and turns["confirmations"] == 1 and events[-1]["status"] == "done"
+
+
+@pytest.mark.parametrize("kind", ["clarify", "overask"])
+def test_user_mode_judges_behaviour_items_on_the_first_response(kind):
+    class Agent:
+        def start(self, *args, **kwargs):
+            return "run", iter([{"type": "clarify", "kind": "clarify",
+                                 "questions": [{"question": "Which?", "options": ["A", "B"]}]}])
+        def resume(self, *args, **kwargs):
+            raise AssertionError("behaviour items are not answered")
+    events, _ = run_eval.ask(Agent(), {"set": kind, "question": "q"}, None, mode="user")
+    assert len(events) == 1
