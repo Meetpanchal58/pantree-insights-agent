@@ -9,6 +9,7 @@ resumes it. Finished runs are saved as chat messages (with their events, so they
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import threading
@@ -60,6 +61,7 @@ class ChatPatch(BaseModel):
 class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     use_defaults: bool = False
+    idempotency_key: str | None = Field(None, min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class AnswerIn(BaseModel):
@@ -139,18 +141,20 @@ class Runner:
                     old.close()
             return self._agent
 
-    def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool) -> Run:
+    def start(self, store: Store, user: dict, chat: dict, question: str, use_defaults: bool,
+              run_id: str | None = None) -> Run:
         """Return at once: the agent (built on the first question after a restart, which can take a while on a
         cold instance) is prepared in the run's own thread, shown as a step, never inside the HTTP request.
         A failure while preparing ends the run with a saved failure, so the question always gets a reply."""
-        history = store.history(chat["id"])
+        history, previous = store.conversation(chat["id"])
         store.add_message(chat["id"], "user", question)
         if chat["title"] == "New chat":
             store.update_chat(user["id"], chat["id"], title=question[:80])
         scope = MemoryScope(store, user, chat)
-        run = Run(uuid.uuid4().hex[:12], user, chat, question)
+        run = Run(run_id or uuid.uuid4().hex[:12], user, chat, question)
         self.runs[run.id] = run
-        store.create_run(run.id, user["id"], chat["id"], question, snapshot=json.dumps(manifest(), sort_keys=True))
+        store.create_run(run.id, user["id"], chat["id"], question, snapshot=snapshot_signature(),
+                         use_defaults=use_defaults)
 
         def events():
             cold = self._agent is None
@@ -169,7 +173,7 @@ class Runner:
                 yield {"type": "step", "step": "prepare", "status": "done", "t": time.time(),
                        "detail": {"seconds": round(time.time() - started, 2)}}
             _, stream = agent.start(question, chat_id=chat["id"], history=history, use_defaults=use_defaults,
-                                    memory=scope, run_id=run.id)
+                                    memory=scope, run_id=run.id, **({"previous_spec": previous} if previous else {}))
             yield from stream
         self._consume(store, run, events())
         return run
@@ -187,7 +191,7 @@ class Runner:
             store.save_run(run_id, "interrupted", saved.get("events") or [])
             return None
         old_snapshot = (saved.get("summary") or {}).get("snapshot")
-        if old_snapshot and old_snapshot != json.dumps(manifest(), sort_keys=True):
+        if old_snapshot and old_snapshot != snapshot_signature():
             store.save_run(run_id, "interrupted", saved.get("events") or [],
                            {"reason": "The dataset changed during a paused analysis"})
             return None
@@ -261,13 +265,11 @@ class Runner:
                 if isinstance(detail.get("seconds"), (float, int)):
                     stage_times[event["step"]] = round(stage_times.get(event["step"], 0) + detail["seconds"], 2)
         calls = final.get("calls") or []
-        store.save_run(run.id, final.get("status", "failed"), [*run.events, final],
+        store.complete_run(run.id, final, [*run.events, final],
                        {"stages": stage_times, "cost_usd": (final.get("cost") or {}).get("usd", 0),
                         "llm_calls": len(calls), "trust": final.get("trust"),
-                        "verification": (final.get("verification") or {}).get("status")})
-        store.add_message(run.chat["id"], "assistant", headline, to_json({**final, "events": timeline}))
-        if final.get("cost"):
-            store.add_cost(run.user["id"], final["cost"].get("usd", 0.0))
+                        "verification": (final.get("verification") or {}).get("status")},
+                       headline, {**final, "events": timeline})
         run.agent = None  # Finished runs no longer need to retain an older snapshot's entire agent/index.
 
     def prune(self) -> None:
@@ -414,6 +416,14 @@ def create_app() -> FastAPI:
         if not chat:
             raise HTTPException(404, "Chat not found")
         with runner.admission_lock:
+            run_id = hashlib.sha256(f"{user['id']}:{chat_id}:{body.idempotency_key}".encode()).hexdigest()[:32] \
+                if body.idempotency_key else None
+            saved = store.run_record(user["id"], run_id) if run_id else None
+            if saved:
+                if (saved["question"] != body.question.strip()
+                        or (saved.get("summary") or {}).get("use_defaults", False) != body.use_defaults):
+                    raise HTTPException(409, "This idempotency key was used for a different request.")
+                return {"run_id": run_id}
             runner.prune()
             if sum(not r.finished for r in runner.runs.values()) >= settings.max_pending_runs:
                 raise HTTPException(429, "The analysis queue is full. Please retry later.")
@@ -422,7 +432,7 @@ def create_app() -> FastAPI:
             if not store.reserve_question(user["id"], None if user["is_admin"] else settings.daily_question_limit):
                 raise HTTPException(429, f"You have used today's {settings.daily_question_limit} live questions. "
                                          "Demo replays are still available.")
-            run = runner.start(store, user, chat, body.question.strip(), body.use_defaults)
+            run = runner.start(store, user, chat, body.question.strip(), body.use_defaults, run_id=run_id)
             return {"run_id": run.id}
 
     @app.post("/api/runs/{run_id}/answer")

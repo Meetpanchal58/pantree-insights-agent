@@ -116,6 +116,7 @@ metrics:
     higher_is_better: true
 
   units_sold:
+    time_aggregation: additive
     label: Units sold
     description: Units ordered and not cancelled (includes units later returned or not delivered).
     source: sales
@@ -124,6 +125,7 @@ metrics:
     higher_is_better: true
 
   gross_sales:
+    time_aggregation: additive
     label: Gross sales (GMV)
     description: Value of everything ordered at selling price, before coupons, cancellations and returns.
     source: sales
@@ -132,6 +134,7 @@ metrics:
     higher_is_better: true
 
   net_sales:
+    time_aggregation: additive
     label: Net sales
     description: What customers agreed to pay (after coupons, incl. shipping) for orders not cancelled. Returns not yet deducted.
     source: sales
@@ -140,6 +143,7 @@ metrics:
     higher_is_better: true
 
   realized_revenue:
+    time_aggregation: additive
     label: Realized revenue
     description: >-
       Money the shop keeps: delivered lines minus refunds. Excludes cancelled, returned-to-origin,
@@ -273,6 +277,7 @@ metrics:
 
   # ------------------------------------------------------------------ marketing
   marketing_spend:
+    time_aggregation: additive
     label: Marketing spend
     description: Money spent on paid media, affiliates and CRM messages.
     source: marketing
@@ -360,6 +365,7 @@ metrics:
     higher_is_better: false
 
   last_click_revenue:
+    time_aggregation: additive
     label: Last-click revenue
     description: >-
       Booked order revenue the shop credits to a campaign, channel or channel group under last-click

@@ -23,3 +23,11 @@ def con(shop_dir):
     from pantree_insights.db import connect
 
     return connect(shop_dir)
+
+
+@pytest.fixture
+def template_params():
+    dated = {"start": "2025-01-01", "end": "2025-03-01"}
+    return {"cohort_retention": {**dated, "as_of": "2025-06-01", "days": 30},
+            "session_funnel": {**dated, "steps": ["pdp_view", "add_to_cart", "purchase"]},
+            "customer_segments": dated}

@@ -36,6 +36,8 @@ class Call:
     output_tokens: int
     usd: float
     seconds: float
+    queue_seconds: float = 0.0
+    inference_seconds: float = 0.0
 
 
 @dataclass
@@ -156,6 +158,7 @@ class ChatLLM:
         # This does not override provider RPM/TPM quotas.
         if not gate.acquire(timeout=settings.llm_timeout_s):
             raise TimeoutError("Model request queue is busy; retry after the current run finishes")
+        inference_started = time.perf_counter()
         try:
             result = runnable.invoke([("system", system), ("user", user)])
         finally:
@@ -164,6 +167,8 @@ class ChatLLM:
         cached = (usage.get("input_token_details") or {}).get("cache_read", 0) or 0
         call = Call(agent, name, usage.get("input_tokens", 0), cached, usage.get("output_tokens", 0), 0.0,
                     round(time.perf_counter() - started, 2))
+        call.queue_seconds = round(inference_started - started, 6)
+        call.inference_seconds = round(time.perf_counter() - inference_started, 6)
         call.usd = round(price(name, call.input_tokens, cached, call.output_tokens), 6)
         self.tracker.calls.append(call)
         _record_spend(call.usd)

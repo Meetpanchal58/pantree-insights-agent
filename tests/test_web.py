@@ -32,6 +32,9 @@ def responder(agent, schema, system, user):
     if agent == "interpreter":
         if "clarify me" in user and "answers" not in user:
             return CLARIFY
+        if "Which measure?: Orders" in user:
+            return {"route": "spec", "restated_question": "Orders", "spec": {
+                "table": "sales", "measures": [{"name": "orders", "metric": "orders"}]}}
         return SPEC
     if agent == "contrast":
         return {"readings": []}
@@ -337,3 +340,19 @@ def test_terminal_event_waits_for_durable_result(monkeypatch):
         release.set()
     assert run.segment_done.wait(3)
     assert run.finished and run.events[-1]["type"] == "final"
+
+
+def test_ask_retries_are_idempotent_and_payload_conflicts_are_rejected(app_env):
+    from pantree_insights.store import get_store
+    client, codes, _ = app_env
+    sign_in(client, codes)
+    chat = client.post('/api/chats', json={}).json()
+    body = {'question': 'Show orders', 'idempotency_key': 'client-retry-123', 'use_defaults': True}
+    url = f"/api/chats/{chat['id']}/ask"
+    first = client.post(url, json=body).json()
+    assert client.post(url, json=body).json() == first
+    assert run_to_end(client, first['run_id'])[-1]['status'] == 'done'
+    assert client.post(url, json=body).json() == first
+    assert client.post(url, json={**body, 'question': 'Show revenue'}).status_code == 409
+    assert client.post(url, json={**body, 'use_defaults': False}).status_code == 409
+    assert len(get_store().messages(chat['id'])) == 2

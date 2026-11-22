@@ -4,7 +4,7 @@
 const STEP_LABELS = {
   queue: "Waiting for a free slot", prepare: "Preparing the data (first question after a restart)", check_input: "Checking the question", interpret: "Understanding the question",
   execute: "Running the verified query", analyse: "Explaining the result", chart: "Building the chart",
-  remember: "Saving to memory",
+  context: "Checking relevant context", remember: "Saving to memory",
   retrieve: "Finding relevant data", understand: "Understanding the question", plan: "Planning the analysis",
   write_sql: "Writing SQL", check_sql: "Safety checks", run_query: "Running the query", validate: "Reviewing the query",
   offline_demo: "Loading saved analysis",

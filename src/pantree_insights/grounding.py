@@ -173,7 +173,37 @@ def _close(claim: Claim, real: float) -> bool:
 
 def unsupported_assertion(text: str) -> bool:
     """Reject causal language that an observational query cannot establish."""
-    return bool(re.search(r"\b(caused?|causes|because|driven by|due to|resulted in|led to|proves?)\b", text, re.I))
+    return bool(re.search(r"\b(caused?|causes|because|driven by|due to|resulted in|led to|proves?|"
+                          r"attributable to|responsible for|as a result of|the reason for)\b", text, re.I))
+
+
+def qualitative_problems(text: str, claims: list[Claim], frame: pd.DataFrame, truncated: bool) -> list[str]:
+    """Conservative evidence mapping for explicit direction and superlative statements.
+
+    This is a lexical safeguard, not a general semantic faithfulness score. Comparisons must be local to
+    their sentence and carry a checked signed difference; ranks require a complete result population.
+    """
+    problems = []
+    by_id = {c.id: c for c in claims}
+    for sentence in re.split(r"[.!?;]\s+", text):
+        evidence = [by_id[i] for i in re.findall(r"\{(c\d+)\}", sentence) if i in by_id]
+        up = bool(re.search(r"\b(increased?|grew|rose|higher than)\b", sentence, re.I))
+        down = bool(re.search(r"\b(decreased?|fell|declined?|lower than)\b", sentence, re.I))
+        if up or down:
+            comparisons = [c for c in evidence if c.op in ("diff", "pct_change")]
+            if not comparisons or (up and down) or any((c.value <= 0 if up else c.value >= 0) for c in comparisons):
+                problems.append("direction needs a matching signed comparison claim in the same sentence")
+        high = bool(re.search(r"\b(highest|largest|maximum|leading)\b", sentence, re.I))
+        low = bool(re.search(r"\b(lowest|smallest|minimum)\b", sentence, re.I))
+        if high or low:
+            supported = not truncated and not (high and low) and evidence
+            for c in evidence:
+                values = pd.to_numeric(frame[c.column], errors="coerce")
+                supported = supported and c.op in ("value", "max" if high else "min") and \
+                    c.value == (values.max() if high else values.min())
+            if not supported:
+                problems.append("rank needs an extremum claim and a complete result population")
+    return problems
 
 
 def verify(frame: pd.DataFrame, claims: list[Claim], texts: dict[str, str | list[str]], *,
@@ -209,6 +239,7 @@ def verify(frame: pd.DataFrame, claims: list[Claim], texts: dict[str, str | list
         for text in value if isinstance(value, list) else [value]:
             if unsupported_assertion(text or ""):
                 problems.append(f"{name}: causal assertion is not established by this result")
+            problems += [f"{name}: {p}" for p in qualitative_problems(text or "", checked, frame, truncated)]
             for missing in set(re.findall(r"\{(c\d+)\}", text or "")) - ids:
                 problems.append(f"{name}: placeholder {{{missing}}} has no claim")
             for token in free_numbers(text or ""):
