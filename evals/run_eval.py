@@ -339,7 +339,8 @@ def summary(rows: list[dict]) -> str:
            f"{rows[0]['code_revision'][:7] if rows else '-'}", "",
            "Format: mean [95% bootstrap CI over questions; Wilson at all-pass/all-fail boundaries] (n). "
            f"Evaluation mode: {next(iter(modes), 'no rows')}. "
-           "Autonomous confirmation is blind; unresolved ambiguities count as incomplete.", ""]
+           "Plan confirmation is blind in autonomous and user modes (user mode also picks offered options); "
+           "unresolved ambiguities count as incomplete.", ""]
     for suite in ("holdout", "regression", "coverage", "flow"):
         part = [r for r in rows if r["suite"] == suite]
         if not part:

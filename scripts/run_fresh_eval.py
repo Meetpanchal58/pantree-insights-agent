@@ -80,7 +80,7 @@ def main():
     parser.add_argument('--questions', type=int, default=100)
     parser.add_argument('--seed', type=int, default=20261122)
     parser.add_argument('--max-cost-usd', type=float, default=4)
-    parser.add_argument('--mode', choices=['autonomous'], default='autonomous')
+    parser.add_argument('--mode', choices=['autonomous', 'user'], default='autonomous')
     parser.add_argument('--yes', action='store_true')
     parser.add_argument('--output-dir', type=Path, default=ROOT/'evals/reports/current')
     parser.add_argument('--ledger', type=Path, default=ROOT/'.cache/fresh-evaluation.db')
