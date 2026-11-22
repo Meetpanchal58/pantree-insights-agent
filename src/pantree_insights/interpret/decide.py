@@ -50,11 +50,13 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
     if inherited_metric and not explicit_metric:
         effective_question += " " + inherited_metric.replace("_", " ")
         background += f"\nThe established performance measure is {inherited_metric}; retain it for this follow-up."
-    if referential:
-        if not available:
-            return Decision('clarify', required=True, questions=[ClarifyingQuestion(
-                question='Which earlier groups should I use? Please run their analysis first or name the groups.',
-                options=[], default='', why='A result reference needs complete verified evidence')])
+    unbound = ClarifyingQuestion(
+        question='Which earlier groups should I use? Please run their analysis first or name the groups.',
+        options=[], default='', why='A result reference needs complete verified evidence')
+    if referential and not available:
+        # Read the question first: a request to decline, or one that names its groups itself, needs no earlier result.
+        background += "\nNo earlier verified result exists in this conversation; nothing can be bound as 'these' groups."
+    elif referential:
         choices = [{k: p.get(k) for k in ('run_id', 'query_index', 'field', 'complete')} for p in available]
         background += "\nAvailable result populations (server binds the exact members): " + json.dumps(choices)
     unsettled = register_questions(question, register, answers)
@@ -101,7 +103,9 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             return Decision("failed", reason="I could not apply the established scope to this follow-up. "
                             "No analysis was executed; your earlier results are saved.", detail=detail)
         problems = []
-        if referential and reading.route in ('spec', 'investigation', 'template'):
+        if referential and not available and reading.route in ('spec', 'investigation', 'template'):
+            return Decision('clarify', required=True, questions=[unbound], detail=detail)
+        if referential and available and reading.route in ('spec', 'investigation', 'template'):
             try:
                 population = choose_population(question, available, reading.result_scope)
                 plans = [step.spec for step in reading.steps] if reading.route == 'investigation' else [reading.spec]

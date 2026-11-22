@@ -16,9 +16,11 @@ class ResultReference(BaseModel):
 
 
 def refers_to_results(question: str) -> bool:
+    """A reference to groups from an earlier result ("these brands", "the same sellers"). Pronouns ("their average",
+    "reach them") and relative clauses ("those who returned") refer within the question, not to a result."""
     return bool(
         re.search(
-            r"\b(these|those|their|them)\b|"
+            r"\b(?:these|those)\b(?! (?:who|that|which|whose|with|where|of the)\b)|"
             r"\b(?:same|above|previous|earlier) "
             r"(?:results?|brands?|products?|groups?|categories|sellers?|customers?)\b",
             question,

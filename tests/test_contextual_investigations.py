@@ -513,3 +513,21 @@ def test_explicit_new_reporting_period_is_not_replaced_by_previous_scope(analyst
     )
     bound = bind_population(current, scopes[0], analyst.catalog, analyst.snapshot, f"these brands for {period}")
     assert bound.time == current.time
+
+
+def test_pronouns_and_relative_clauses_are_not_result_references():
+    from pantree_insights.context import refers_to_results
+
+    for question in ("What is their average minimum order value?", "List every shopper and the way to reach them.",
+                     "How many of those who returned an item ordered again?"):
+        assert not refers_to_results(question), question
+    for question in ("Which of these brands grew fastest?", "Show the same sellers by city", "Break those down by month"):
+        assert refers_to_results(question), question
+
+
+def test_a_reference_without_saved_results_is_still_declined_first(analyst):
+    reading = {"route": "spec", "decline_reason": "Contact details are not available.",
+               "decline_category": "personal_data", "restated_question": "contact list"}
+    outcome = decide(FakeLLM(lambda *_: reading), analyst.catalog, {}, {}, analyst.data,
+                     "Give me the phone numbers of those brands' owners")
+    assert outcome.kind == "decline"
