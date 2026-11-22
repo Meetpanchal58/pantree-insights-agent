@@ -31,7 +31,7 @@ src/pantree_insights/   graph.py (flow) · interpret.py · spec.py (compiler) ·
                         web.py · auth.py · store.py · memory.py · pulse.py · charts.py · demos.py · static/
 semantic/               schema, metrics, concepts, glossary (incl. two-meaning phrases), generated catalog
 prompts/agents.yaml     interpreter, contrast, analyst
-evals/                  questions, gold SQL, gold specs, runner with the simulated stakeholder, free compiler check
+evals/                  questions, gold SQL, gold specs, autonomous/assisted evaluator, free compiler check
 tests/                  1,400+ tests: compiler vs gold and vs an independent implementation, every flow route,
                         guardrails, knowledge-base lint, web app
 ```
@@ -83,6 +83,7 @@ DATA_SIZE=full uv run python evals/run_eval.py --suite all --yes --max-cost-usd 
 ```bash
 DATA_SIZE=small uv run python evals/fastpath_baseline.py    # five reviewed questions vs independent SQL
 DATA_SIZE=small uv run python evals/context_retrieval.py    # lexical metric-retrieval ablation
+DATA_SIZE=small uv run python evals/post38_benchmark.py     # no-model local runtime/storage measurements
 ```
 
 ## Deploy
@@ -96,10 +97,10 @@ Google Cloud Run, Neon Postgres, Google sign-in and email codes, data from Cloud
 - Questions outside the request format and the analysis templates are declined until a template is added.
 - The model path still relies on accurate interpretation and the read-back. Explicit intent checks and contrast
   reduce mistakes but do not prove semantic correctness.
-- Multi-fact plans require named metrics and conformed dimensions. Unsupported cohorts, per-group ranking and
+- Multi-fact plans require named metrics and conformed dimensions. Unsupported cohort definitions, per-group ranking and
   ambiguous cross-source dates still require a reviewed template or safe abstention.
 - Active work is bounded to one process; deployment remains at one instance. PostgreSQL stores paused checkpoints.
-- See [measured changes and remaining limits](docs/refactoring-validation.md).
+- See [measured changes and remaining limits](docs/post38-validation.md).
 
 ## License
 

@@ -116,12 +116,12 @@ def test_approved_joins_ctes_and_range_joins_pass():
                      "SELECT AVG(n) FROM a JOIN customers c ON c.customer_id = a.customer_id").ok
 
 
-def test_every_example_and_metric_uses_approved_joins():
+def test_every_example_and_metric_uses_approved_joins(template_params):
     from pantree_insights.semantic import load_metrics
     from pantree_insights.templates import TEMPLATES, build
 
     metrics = load_metrics()
-    queries = [build(n, {})[0] for n in TEMPLATES] + [metrics.sql(n) for n in metrics.metrics]
+    queries = [build(n, template_params.get(n, {}))[0] for n in TEMPLATES] + [metrics.sql(n) for n in metrics.metrics]
     queries += [c.sql for c in metrics.custom_metrics.values()]
     bad = {q[:60]: check_sql(q).errors for q in queries if not check_sql(q).ok}
     assert not bad, bad

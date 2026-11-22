@@ -1,4 +1,4 @@
-"""End-to-end evaluation (paid: real model calls) with a simulated stakeholder, plus free checks.
+"""Autonomous or stakeholder-assisted evaluation (paid: real models), plus free compiler checks.
 
     uv run python evals/run_eval.py --suite all --dry-run          # free: gold SQL and suite files
     uv run python evals/run_eval.py --suite all                    # prints the cost estimate
@@ -8,10 +8,9 @@
 Suites: regression (evals/regression.yaml + questions.yaml), holdout (holdout.yaml + behaviour.yaml + an
 over-asking pass), coverage (coverage.yaml), flow (flow_regression.yaml; follow-ups with chat history).
 
-Answer questions are run the way a real user works: every clarifying question and the read-back go to a
-simulated stakeholder who knows the question's intent (its gold spec, evals/gold_specs.yaml). It confirms a
-read-back only if it computes the intended thing, otherwise it says what it wants instead; it never helps beyond
-what a user would say. The stakeholder exists only here; in production the user plays this role.
+Autonomous mode is the default: gold only judges the initial response; pauses count as incomplete answers.
+Use --mode assisted for a separate run in which a simulated stakeholder supplies gold-guided corrections.
+Never mix those modes in one accuracy report. Numerical checks are not a human narrative-faithfulness score.
 
 Measures (docs/ARCHITECTURE.md): verified answers equal to the gold (gate: 100%), silent wrong answers (gate: 0),
 first reading correct, questions per answer, and the behaviour sets (declines, vague questions, over-asking).
@@ -151,8 +150,9 @@ def _overlap(a: str, b: str) -> float:
 
 
 # ----------------------------------------------------------------------------- running one question
-def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None) -> tuple[list[dict], dict]:
-    """All events of one question; for answer questions the stakeholder answers every pause."""
+def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None,
+        mode: str = "autonomous") -> tuple[list[dict], dict]:
+    """Gold judges the initial response; only explicitly assisted runs receive corrections."""
     defaults = item["set"] in ("decline", "adversarial", "false_decline")
     run_id, stream = agent.start(item["question"], use_defaults=defaults, history=item.get("history", ""),
                                  memory=memory)
@@ -165,7 +165,8 @@ def ask(agent, item: dict, stakeholder: Stakeholder | None, memory=None) -> tupl
     turns["first_turn_answered"] = first.get("status") == "done"
     if first.get("status") == "done" and stakeholder is not None:
         turns["first_reading"] = turns["first_turn_correct"]
-    while events[-1]["type"] == "clarify" and stakeholder is not None and turns["interactions"] < MAX_TURNS:
+    while events[-1]["type"] == "clarify" and stakeholder is not None and mode == "assisted" \
+            and turns["interactions"] < MAX_TURNS:
         event = events[-1]
         turns["interactions"] += 1
         if event.get("kind") == "confirm":
@@ -222,7 +223,7 @@ def judge(con, item: dict, final: dict, turns: dict) -> dict:
             "failure_type": None if ok else ("silent_wrong" if final.get("trust") == "verified" else "wrong")}
 
 
-def run(items: list[dict], live: Path | None = None, repeats: int = 1) -> list[dict]:
+def run(items: list[dict], live: Path | None = None, repeats: int = 1, mode: str = "autonomous") -> list[dict]:
     from pantree_insights.graph import Agent
     from pantree_insights.memory import Memory
     from pantree_insights.spec import default_catalog
@@ -240,7 +241,8 @@ def run(items: list[dict], live: Path | None = None, repeats: int = 1) -> list[d
             intent = specs.get(f"{item['suite']}/{item['id']}") if item["set"] == "answer" else None
             stakeholder = Stakeholder(intent, cat) if intent else None
             try:
-                events, turns = ask(agent, item, stakeholder, memory=Memory(Path(folder) / str(n), settings.data_size))
+                events, turns = ask(agent, item, stakeholder,
+                                    memory=Memory(Path(folder) / str(n), settings.data_size), mode=mode)
             except Exception as error:                     # noqa: BLE001 - failed attempts stay in the denominator
                 status = "api_error" if type(error).__module__.split(".")[0] == "openai" else "execution_error"
                 events, turns = [{"type": "final", "status": status, "message": str(error)[:300]}], {}
@@ -248,14 +250,15 @@ def run(items: list[dict], live: Path | None = None, repeats: int = 1) -> list[d
             if "LLM budget" in (final.get("message") or ""):
                 print(f"STOP: {final['message']} ({len(rows)} rows kept)", flush=True)
                 break
-            row = {**inputs, "model": settings.model_main, "repeat": repeat,
+            row = {**inputs, "evaluation_mode": mode, "model": settings.model_main, "repeat": repeat,
                    "preparation_seconds": preparation_seconds, "memory_mode": "isolated_per_question",
                    "cache_mode": "shared_agent_sql_cache; provider_cache_uncontrolled",
                    "suite": item["suite"], "set": item["set"], "id": item["id"], "question": item["question"],
                    "seconds": round(time.perf_counter() - started, 3), "status": final.get("status") or final["type"],
                    "final_type": final["type"], "final_kind": final.get("kind"),
                    "stage_seconds": stage_seconds(events), "calls": final.get("calls", []),
-                   "retrieval_seconds": None,  # this architecture has no standalone hybrid retrieval stage yet
+                   "retrieval_seconds": stage_seconds(events).get("context"),
+                   "narrative_faithfulness": None,  # requires independent semantic review, not lexical checks
                    "message": final.get("message"), "cost": (final.get("cost") or {}).get("usd"),
                    "trust": final.get("trust"), "spec": final.get("spec"), "template": final.get("template"),
                    "sql": final.get("sql"), "grounded": final.get("grounded"),
@@ -270,6 +273,10 @@ def run(items: list[dict], live: Path | None = None, repeats: int = 1) -> list[d
                 except Exception as error:  # noqa: BLE001 - retain the failed case and continue the evaluation
                     row.update(passed=False, result_correct=False, failure_type="evaluation_error",
                                reason=f"Could not score: {str(error)[:200]}")
+            row["final_intent_correct"] = bool(stakeholder and (final.get("spec") or final.get("template"))
+                                               and stakeholder.matches(final))
+            row["plan_sql_evidence_correct"] = (bool(row.get("result_correct") and row["final_intent_correct"]
+                                                     and row.get("grounded")) if item["set"] == "answer" else None)
             rows.append(row)
             if live is not None:
                 with live.open("a") as fh:
@@ -294,12 +301,14 @@ def _rate(rows: list[dict], key: str = "passed") -> str:
 
 
 def summary(rows: list[dict]) -> str:
+    modes = {r.get("evaluation_mode", "legacy_assisted") for r in rows}
+    if len(modes) > 1:
+        raise ValueError("autonomous and assisted rows must be reported separately")
     out = [f"# Evaluation {datetime.now():%Y-%m-%d %H:%M}", "",
            f"Model {rows[0]['model'] if rows else '-'} · data {get_settings().data_size} · code "
            f"{rows[0]['code_revision'][:7] if rows else '-'}", "",
            "Format: mean [95% bootstrap CI over questions; Wilson at all-pass/all-fail boundaries] (n). "
-           "Answer questions are answered with the simulated "
-           "stakeholder (evals/run_eval.py).", ""]
+           f"Evaluation mode: {next(iter(modes), 'no rows')}. Autonomous pauses count as incomplete answers.", ""]
     for suite in ("holdout", "regression", "coverage", "flow"):
         part = [r for r in rows if r["suite"] == suite]
         if not part:
@@ -321,6 +330,9 @@ def summary(rows: list[dict]) -> str:
             ("First-turn intended plan (all answer questions, before stakeholder assistance)",
              _rate([{**r, "f": bool(r.get('first_turn_correct'))} for r in answer], "f")),
             ("First-turn completed answer", _rate(answer, "first_turn_answered")),
+            ("Exact intended plan + gold table + checked evidence (not full narrative review)",
+             _rate(answer, "plan_sql_evidence_correct")),
+            ("Independent narrative faithfulness", "not measured"),
             ("Clarifying questions per answer", f"{statistics.mean(r.get('questions', 0) for r in answer):.2f}"
              if answer else "-"),
             ("Vague questions clarified", _rate([r for r in part if r["set"] == "clarify"])),
@@ -415,6 +427,8 @@ def passes_gate(rows: list[dict], expected: int) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["autonomous", "assisted"], default="autonomous",
+                        help="autonomous never receives gold-guided answers; pauses count as incomplete")
     parser.add_argument("--suite", choices=["holdout", "regression", "coverage", "flow", "all"], default="all")
     parser.add_argument("--sets", help="only these sets, e.g. answer,overask")
     parser.add_argument("--ids", help="comma-separated ids")
@@ -456,7 +470,7 @@ def main() -> None:
     live = out / f"{stamp}.partial.jsonl"
     print(f"Rows are saved as they finish: {live}", flush=True)
     try:
-        rows = run(items, live, args.repeats)
+        rows = run(items, live, args.repeats, mode=args.mode)
     finally:
         settings.daily_budget_usd = budget
     (out / f"{stamp}.json").write_text(json.dumps(rows, indent=1, default=str))

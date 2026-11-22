@@ -33,6 +33,8 @@ from .catalog import label_columns, load_catalog
 from .charts import build_chart
 from .config import get_settings
 from .db import connect, manifest, run_query, snapshot_signature
+from .fastpath import followup, independent_history
+from .fastpath import parse as fast_spec
 from .grounding import Claim, KeyValue, free_numbers, unsupported_assertion, verify
 from .guardrails import check_question, check_sql
 from .interpret import READINGS, Decision, TemplateCall, canonical, decide, readback
@@ -73,6 +75,7 @@ class State(TypedDict, total=False):
     chat_id: str | None
     question: str
     history: str
+    previous_spec: dict | None
     use_defaults: bool
     answers: dict[str, str]
     choices: dict[str, str]
@@ -153,7 +156,7 @@ def step(name: str):
                 raise
             detail = update.pop("_detail", {}) if isinstance(update, dict) else {}
             _emit(name, update.get("_status", "done") if isinstance(update, dict) else "done",
-                  seconds=round(time.perf_counter() - started, 2), **detail)
+                  seconds=round(time.perf_counter() - started, 6), **detail)
             if isinstance(update, dict):
                 update.pop("_status", None)
             return update
@@ -162,17 +165,27 @@ def step(name: str):
 
 
 class Agent:
+    _definition_version: str | None = None
+    _definition_lock = threading.Lock()
+
     def __init__(self, llm_factory: Callable[[], LLM] | None = None, memory: Memory | None = None, con=None,
                  data: dict | None = None):
         settings = get_settings()
         self.llm_factory = llm_factory or ChatLLM
         started = time.monotonic()
         log.info("agent_prepare phase=duckdb started")
+        self._owns_connection = con is None
         self.con = con or connect(settings.shop_dir)
         log.info("agent_prepare phase=duckdb seconds=%.2f", time.monotonic() - started)
         self.memory = memory or Memory()
-        self.metrics, self.glossary = load_metrics(), load_glossary()
         self.snapshot = snapshot_signature() if data is None else None
+        with self._definition_lock:
+            if self.snapshot != Agent._definition_version:
+                for loader in (load_metrics, load_glossary, load_schema, load_concepts, load_catalog):
+                    loader.cache_clear()
+                agents.prompts.cache_clear()
+                Agent._definition_version = self.snapshot
+            self.metrics, self.glossary = load_metrics(), load_glossary()
         info = data or manifest(settings.shop_dir)
         self.data = {"first_day": info["first_day"], "last_day": info["last_day"], "size": info["size"]}
         schema = load_schema()
@@ -193,13 +206,21 @@ class Agent:
         log.info("agent_prepare phase=checkpoint backend=%s started", settings.checkpoint_backend)
         if settings.checkpoint_backend == "postgres":
             from langgraph.checkpoint.postgres import PostgresSaver
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
 
             dsn = settings.database_url.replace("postgresql+psycopg://", "postgresql://")
             if not dsn.startswith(("postgresql://", "postgres://")):
                 raise RuntimeError("CHECKPOINT_BACKEND=postgres requires a PostgreSQL DATABASE_URL")
-            self._checkpoint_context = PostgresSaver.from_conn_string(dsn)
-            saver = self._checkpoint_context.__enter__()
-            saver.setup()
+            self._checkpoint_context = ConnectionPool(dsn, min_size=1, max_size=4, timeout=15,
+                kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}, open=False)
+            self._checkpoint_context.__enter__()
+            saver = PostgresSaver(self._checkpoint_context)
+            try:
+                saver.setup()
+            except Exception:
+                self.close()
+                raise
         else:
             saver = InMemorySaver()
         self._saver = saver
@@ -214,6 +235,9 @@ class Agent:
         if self._checkpoint_context is not None:
             self._checkpoint_context.__exit__(None, None, None)
             self._checkpoint_context = None
+        if self._owns_connection:
+            self.con.close()
+            self._owns_connection = False
 
     def llm(self, state: State) -> LLM:
         if state["run_id"] not in self._llms:
@@ -252,8 +276,17 @@ class Agent:
         answers, choices = dict(state.get("answers") or {}), dict(state.get("choices") or {})
         rounds = state.get("clarify_rounds", 0)
         background = state.get("memory")
+        previous = QuerySpec.model_validate(state["previous_spec"]) if state.get("previous_spec") else None
+        context_started = time.perf_counter()
         if background is None:
-            background = self.mem(state).context(state["question"], as_of=self.data["last_day"])
+            scope = self.mem(state)
+            constraints = scope.constraints() if hasattr(scope, "constraints") else None
+            direct = fast_spec(state["question"], self.catalog, self.data["last_day"]) or followup(
+                state["question"], previous, self.catalog, self.data["last_day"])
+            skip_context = constraints == "" and direct is not None and not answers and independent_history(
+                state.get("history", ""), self.catalog, self.data["last_day"])
+            background = "" if skip_context else scope.context(state["question"], as_of=self.data["last_day"])
+        _emit("context", "done", seconds=round(time.perf_counter() - context_started, 6))
         pick = choices.pop("reading", None)
         if pick is not None and state.get("readings"):           # the user chose one of the readings
             spec = QuerySpec.model_validate(state["readings"][int(pick)])
@@ -261,7 +294,7 @@ class Agent:
         else:
             decision = decide(self.llm(state), self.catalog, self.glossary.terms, self.aliases, self.data,
                               state["question"], state.get("history", ""), answers, self.glossary.ambiguous,
-                              contrast=get_settings().contrast_check, background=background)
+                              contrast=get_settings().contrast_check, background=background, previous=previous)
         detail = {"decision": decision.kind, "restated": decision.restated, "reason": decision.reason,
                   "fast_path": bool(decision.detail.get("fast_path"))}
         if decision.kind == "decline":
@@ -388,20 +421,39 @@ class Agent:
             facts.append("The result is truncated; do not treat partial rows as the complete population.")
         units = {c: RESULT_UNITS[c] for c in frame.columns if c in RESULT_UNITS} if state.get("template") else {}
         if state.get("spec"):
-            for m in QuerySpec.model_validate(state["spec"]).measures:
+            spec = QuerySpec.model_validate(state["spec"])
+            measures = {m.name: m for m in spec.measures}
+            for m in spec.measures:
                 if m.metric:
                     units[m.name] = self.metrics.metrics[m.metric].unit
                 elif m.ratio or m.agg == "share":
-                    units[m.name] = "ratio"
+                    money_ratio = m.ratio and all(measures[n].metric and
+                        self.metrics.metrics[measures[n].metric].unit == "inr" for n in m.ratio)
+                    units[m.name] = "multiple" if money_ratio else "ratio"
                 elif m.agg in ("count", "count_distinct"):
                     units[m.name] = "count"
+            operation = spec.operation
+            if operation:
+                for name, unit in list(units.items()):
+                    if operation.kind == "period_compare":
+                        units.update({f"{name}_previous": unit, f"{name}_delta":
+                                      "pct_points" if unit == "ratio" else unit, f"{name}_change_ratio": "ratio"})
+                    else:
+                        units[f"{name}_{operation.kind}"] = unit
         notes += "\nResult units: " + ", ".join(f"{c}={u}" for c, u in units.items())
         args = (self.llm(state), state["question"], state.get("readback", ""), state["sql"], frame,
                 state.get("memory", ""), notes, self.data)
-        analysis = (deterministic_analysis(frame, units) if state.get("fast_path")
+        analysis = (deterministic_analysis(frame, units) if state.get("fast_path") or (len(frame) <= 1 and units)
                     else agents.analyse(*args, concerns=facts))
         def checked(a):
-            return verify(frame, a.claims, a.texts(), units=units, truncated=state["result"].get("truncated", False))
+            check = verify(frame, a.claims, a.texts(), units=units, truncated=state["result"].get("truncated", False))
+            mentioned = {c.column for c in check.claims if any(
+                "{" + c.id + "}" in text for text in [a.headline, *a.findings])}
+            missing = [c for c in units if c in frame and frame[c].notna().any() and c not in mentioned]
+            if missing:
+                check.problems.append("summary omits requested measures: " + ", ".join(missing))
+                check.ok = False
+            return check
         check = checked(analysis)
         rewrote = not check.ok
         if rewrote:                                                         # one rewrite with the exact problems
@@ -409,6 +461,9 @@ class Agent:
             check = checked(analysis)
         if not check.ok:                     # an uncheckable sentence is removed; the verified table still answers
             analysis = drop_unverified(analysis, check.problems)
+            check = checked(analysis)
+        if not check.ok and units:
+            analysis = deterministic_analysis(frame, units)
             check = checked(analysis)
         # Render database-derived values, even when the model's rounded approximation was acceptable.
         analysis = analysis.model_copy(update={"claims": check.claims})
@@ -465,13 +520,14 @@ class Agent:
 
     # ------------------------------------------------------------------ running
     def start(self, question: str, chat_id: str | None = None, history: str = "", use_defaults: bool = False,
-              memory: Any = None, run_id: str | None = None) -> tuple[str, Iterator[dict]]:
+              memory: Any = None, run_id: str | None = None,
+              previous_spec: dict | None = None) -> tuple[str, Iterator[dict]]:
         """memory: a scope with context(), save_insight() and close_gaps(); defaults to the file memory."""
         run_id = run_id or uuid.uuid4().hex[:12]
         if memory is not None:
             self._memories[run_id] = memory
         state = {"run_id": run_id, "chat_id": chat_id, "question": question, "history": history,
-                 "use_defaults": use_defaults}
+                 "use_defaults": use_defaults, "previous_spec": previous_spec}
         return run_id, self._stream(run_id, state)
 
     def resume(self, run_id: str, answers: dict[str, str] | None) -> Iterator[dict]:

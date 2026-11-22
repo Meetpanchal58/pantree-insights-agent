@@ -25,9 +25,10 @@ from pydantic import BaseModel, Field, model_validator
 
 from .agents import ClarifyingQuestion, system_prompt
 from .catalog import describe
+from .fastpath import followup, independent_history
 from .fastpath import parse as fast_spec
 from .spec import TICKETS, Catalog, QuerySpec, validate
-from .templates import TemplateError
+from .templates import Event, TemplateError
 from .templates import build as build_template
 from .templates import describe as describe_templates
 
@@ -40,11 +41,19 @@ READINGS = "I can read this question in more than one way"
 class TemplateCall(BaseModel):
     """A template and its parameters. Every parameter is a declared field (providers' strict structured output
     rejects free-form objects); unset ones take the template's default."""
-    name: Literal["event_lift", "channel_roas", "platform_vs_recorded_orders", "repeat_within_days"]
+    name: Literal["event_lift", "channel_roas", "platform_vs_recorded_orders", "repeat_within_days",
+                  "cohort_retention", "session_funnel", "customer_segments"]
     days_before: int | None = Field(None, description="event_lift: baseline days before each event")
     by: Literal["channel", "channel_group"] | None = Field(None, description="channel_roas, "
                                                           "platform_vs_recorded_orders: the split")
     days: int | None = Field(None, description="repeat_within_days: window after the first order")
+    start: date | None = None
+    end: date | None = None
+    as_of: date | None = None
+    grain: Literal["month", "quarter", "year"] | None = None
+    steps: list[Event] | None = None
+    min_orders: int | None = None
+    recency_days: int | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -97,7 +106,8 @@ def catalog_text(cat: Catalog, terms: dict[str, str]) -> str:
                "columns ticket_id, opened_at, channel, issue_category, resolution_status")
     out.append("\n## Named metrics (use these for these concepts; table = where the metric is measured)")
     for name, m in cat.metrics.metrics.items():
-        out.append(f"- {name} ({m.unit}) on {cat.source_table(name)}: {m.label}. {m.description}"
+        out.append(f"- {name} ({m.unit}; time {m.time_aggregation}) on {cat.source_table(name)}: "
+                   f"{m.label}. {m.description}"
                    + (f" Note: {m.notes}" if m.notes else ""))
     out.append("\n## Cuts (concept names usable as dimensions and filter fields, per table)")
     for subject, s in cat.concepts.subjects.items():
@@ -204,6 +214,7 @@ def canonical(spec: QuerySpec) -> str:
         if spec.ranking else None,
         "shares": sorted(json.dumps(by_name.get(s), default=str) for s in spec.shares),
         "columns": sorted(spec.columns), "limit": spec.limit,
+        **({"operation": spec.operation.model_dump(mode="json")} if spec.operation else {}),
     }, sort_keys=True, default=str)
 
 
@@ -261,6 +272,13 @@ def readback(spec: QuerySpec, cat: Catalog, assumptions: list[str] | None = None
                      f"by {spec.ranking.by.replace('_', ' ')}")
     if spec.shares:
         lines.append("**Also shown:** share of the total for " + ", ".join(s.replace("_", " ") for s in spec.shares))
+    if spec.operation:
+        op = spec.operation
+        description = (f"compared with {op.previous_start} to {op.previous_end}; absent populations remain unknown"
+                       if op.kind == "period_compare" else
+                       f"{op.days}-calendar-day rolling sum including lookback; observed days only"
+                       if op.kind == "rolling_sum" else "cumulative sum from the requested start; observed days only")
+        lines.append("**Calculation:** " + description)
     if assumptions:
         lines.append("**Assumed:** " + "; ".join(assumptions))
     return "\n".join(lines)
@@ -306,7 +324,7 @@ def premise_notes(spec: QuerySpec, data: dict) -> list[str]:
     return notes
 
 
-def intent_problems(question: str, spec: QuerySpec, cat: Catalog) -> list[str]:
+def intent_problems(question: str, spec: QuerySpec, cat: Catalog, last_day: str | None = None) -> list[str]:
     """Check explicit business terminology, independently of structural validity.
 
     This is a conservative lexical check, not a claim of complete language understanding.
@@ -336,26 +354,62 @@ def intent_problems(question: str, spec: QuerySpec, cat: Catalog) -> list[str]:
             question, re.I):
         problems.append("the requested order grain differs from the governed line-level rate; clarify the denominator")
     for word in ("category", "brand", "city", "channel"):
-        if re.search(rf"\bby {word}\b", question, re.I) and word not in spec.dimensions:
+        cut = "marketing_channel" if word == "channel" and spec.table in (
+            "marketing_spend", "marketing_attribution", "sales") else word
+        if re.search(rf"\bby {word}\b", question, re.I) and cut not in spec.dimensions:
             # Qualified columns may be the same governed cut.
-            wanted = cat.concepts.column(word, cat.subject_of.get(spec.table))
+            wanted = cat.concepts.column(cut, cat.subject_of.get(spec.table))
             if wanted and wanted.column not in spec.dimensions:
                 problems.append(f"the question asks for a split by {word}")
+        try:
+            expression, _, entry = cat.resolve(cut, spec.table)
+            values = entry.labels() if entry and entry.expression else cat.values_of(expression)
+            for value in values or []:
+                if re.search(rf"\b(?:for|in|from|{word}(?: is| equals)?) ['\"]?{re.escape(value)}\b", question, re.I):  # noqa: SIM102
+                    if not any(cat.resolve(f.field, spec.table)[0] == expression and f.op in ("eq", "in")
+                               and any(str(v).casefold() == value.casefold() for v in f.values) for f in spec.filters):
+                        problems.append(f"the question explicitly restricts {word} to {value}")
+        except (KeyError, ValueError):
+            pass  # Unknown fields are structural validation's responsibility.
+    for word, grain in (("daily", "day"), ("weekly", "week"), ("monthly", "month")):
+        if re.search(rf"\b{word}\b", question, re.I) and (not spec.time or spec.time.grain != grain):
+            problems.append(f"the question requests {grain} aggregation")
+    if last_day and (expected := fast_spec(question, cat, last_day)) is not None:
+        if expected.time and (not spec.time or expected.time != spec.time):
+            problems.append("the interpreted dates or grain differ from the explicit requested period")
+        if expected.ranking and (not spec.ranking or expected.ranking.limit != spec.ranking.limit
+                                 or expected.ranking.order != spec.ranking.order):
+            problems.append("the ranking differs from the requested top/bottom count")
+    dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", question)
+    if dates and not spec.operation:
+        endpoints = {str(spec.time.start), str(spec.time.end)} if spec.time else set()
+        if not set(dates) <= endpoints:
+            problems.append("the interpreted date bounds omit an explicit requested date")
     return problems
 
 
 def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], data: dict, question: str,
            history: str = "", answers: dict[str, str] | None = None, register: dict[str, list[str]] | None = None,
            contrast: bool = True,
-           background: str = "") -> Decision:
+           background: str = "", previous: QuerySpec | None = None) -> Decision:
     """Read the question and decide: answer (spec / template), ask, decline or say it cannot be answered."""
     answers = answers or {}
+    effective_question = question
+    for prompt, answer in answers.items():
+        if re.search(r"\b(measure|metric)\b", prompt, re.I):
+            from .fastpath import METRICS
+            for phrase in sorted(METRICS, key=len, reverse=True):
+                effective_question = re.sub(rf"\b{re.escape(phrase)}\b", "", effective_question, flags=re.I)
+        if re.search(r"\bby (category|brand|city|channel)\b", answer, re.I):
+            effective_question = re.sub(r"\bby (category|brand|city|channel)\b", "", effective_question, flags=re.I)
+    effective_question += " " + " ".join(answers.values())
     unsettled = register_questions(question, register or {}, answers)
     if unsettled:
         return Decision("clarify", questions=unsettled, required=True, reason="ambiguity register")
 
-    if not history and not answers and background in ("", "(nothing remembered yet)"):
-        direct = fast_spec(question, cat, data["last_day"])
+    if not answers and background in ("", "(nothing remembered yet)") and independent_history(
+            history, cat, data["last_day"]):
+        direct = fast_spec(question, cat, data["last_day"]) or followup(question, previous, cat, data["last_day"])
         if direct is not None:
             notes = premise_notes(direct, data)
             if re.search(r"\b(today|yesterday|last)\b", question, re.I):
@@ -378,7 +432,15 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             try:
                 build_template(reading.template.name, reading.template.params)
                 # Reviewed SQL is not evidence that its unrestricted scope matches this request.
-                if re.search(r"\b(?:20\d{2}|january|february|march|april|may|june|july|august|september|"
+                dated = reading.template.name in ("cohort_retention", "session_funnel", "customer_segments")
+                if dated:
+                    requested = set(re.findall(r"\b\d{4}-\d{2}-\d{2}\b", question))
+                    supplied = {str(reading.template.start), str(reading.template.end), str(reading.template.as_of)}
+                    if not requested <= supplied:
+                        raise TemplateError("the analysis date bounds omit an explicit requested date")
+                if dated and reading.template.as_of and reading.template.as_of > date.fromisoformat(data["last_day"]):
+                    raise TemplateError("as_of exceeds the observed dataset; future retention is unknown")
+                if not dated and re.search(r"\b(?:20\d{2}|january|february|march|april|may|june|july|august|september|"
                              r"october|november|december|yesterday|today|last (?:week|month|year|\d+ days))\b",
                              question, re.I):
                     raise TemplateError("this template has no date filter; use a dated spec or clarify the scope")
@@ -390,7 +452,7 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             spec = normalise(reading.spec, cat, aliases)
             problems = validate(spec, cat)
             if not problems:
-                problems = intent_problems(question, spec, cat) if not answers else []
+                problems = intent_problems(effective_question.strip(), spec, cat, data["last_day"])
             if not problems:
                 break
         else:
@@ -409,7 +471,10 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
     notes = premise_notes(spec, data)
     decision = Decision("spec", spec=spec, restated=reading.restated_question,
                         assumptions=[*reading.assumptions, *notes], detail=detail)
-    if not contrast:
+    direct = fast_spec(question, cat, data["last_day"])
+    if not contrast or (not answers and background in ("", "(nothing remembered yet)")
+                        and direct is not None and canonical(direct) == canonical(spec)):
+        detail["contrast_skipped"] = "disabled or independently matched reviewed intent"
         return decision
 
     # Semantic differences matter even when a snapshot happens to produce equal values.

@@ -94,6 +94,13 @@ class Ranking(BaseModel):
     limit: int = Field(10, ge=1, le=500)
 
 
+class Operation(BaseModel):
+    kind: Literal["period_compare", "rolling_sum", "running_sum"]
+    previous_start: date | None = None
+    previous_end: date | None = None
+    days: int = Field(7, ge=1, le=366, description="Calendar days including the current day, for rolling_sum")
+
+
 class QuerySpec(BaseModel):
     table: str = Field(description="What one row is: the table whose rows are counted (sales, customers, ...)")
     measures: list[Measure] = Field(default_factory=list)
@@ -104,6 +111,7 @@ class QuerySpec(BaseModel):
     shares: list[str] = Field(default_factory=list, description="Measures also shown as share of the total")
     columns: list[str] = Field(default_factory=list, description="List mode: columns of the rows to list")
     limit: int | None = Field(None, ge=1, le=100, description="List mode: at most this many rows")
+    operation: Operation | None = None
 
 
 # ----------------------------------------------------------------------------- the catalog the spec is checked against
@@ -199,6 +207,15 @@ def _filtered_metric(expression: str, predicate: str) -> str:
 def validate(spec: QuerySpec, cat: Catalog) -> list[str]:
     """Problems, phrased for the user; [] means the spec can be compiled as asked."""
     problems: list[str] = []
+    if spec.operation:
+        base = spec.model_copy(update={"operation": None})
+        problems = validate(base, cat)
+        if not problems:
+            try:
+                compile_spec(spec, cat)
+            except SpecError as error:
+                problems.append(str(error))
+        return problems
     table = spec.table
     if table != TICKETS and table not in cat.schema.tables:
         return [f"unknown table {table}"]
@@ -323,6 +340,9 @@ def _default_time(spec: QuerySpec, cat: Catalog) -> str | None:
 
 def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
     """One DuckDB SELECT for the spec. Raises SpecError if it cannot be built safely."""
+    if spec.operation:
+        from .operations import compile_operation
+        return compile_operation(spec, cat)
     if len({cat.source_table(m.metric) for m in spec.measures if m.metric in cat.metrics.metrics}) > 1:
         return compile_multifact(spec, cat)
     if any(not re.fullmatch(r"[a-z][a-z0-9_]*", m.name) for m in spec.measures):

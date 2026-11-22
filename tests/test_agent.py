@@ -84,7 +84,7 @@ def test_a_clear_question_is_compiled_verified_and_explained(con, tmp_path):
     out = events[-1]
     assert out["status"] == "done" and out["trust"] == "verified" and out["grounded"]
     assert "product_master.category AS category" in out["sql"]
-    assert steps(events)[:4] == ["check_input", "interpret", "execute", "analyse"]
+    assert steps(events)[:5] == ["check_input", "context", "interpret", "execute", "analyse"]
     assert not fakes[0].prompts  # reviewed grammar and deterministic summary need no model calls
     assert next(i for i, e in enumerate(events) if e["type"] == "result") < next(
         i for i, e in enumerate(events) if e.get("step") == "analyse")
@@ -194,7 +194,9 @@ def test_an_unverifiable_claim_is_removed_not_failing_the_answer(con, tmp_path):
                                                 analyst=[lambda u: analysis_from(u, wrong=True)]))
     _, events = run(agent, "Break down realized revenue by category", use_defaults=True)
     out = events[-1]
-    assert out["status"] == "done" and out["grounded"] and "could be checked" in out["analysis"]["headline"]
+    assert out["status"] == "done" and out["grounded"]
+    assert out["analysis"]["claims"] and "123456789" not in str(out["analysis"])
+    assert all(c["value"] != 123456789 for c in out["analysis"]["claims"])
 
 
 def test_a_repeat_question_is_served_from_the_cache(con, tmp_path):

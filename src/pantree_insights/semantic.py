@@ -97,6 +97,14 @@ class Metric(BaseModel):
     unit: Literal["inr", "count", "ratio", "multiple", "days", "minutes", "rating"]
     higher_is_better: bool | None = None        # None = neither (e.g. order counts during events)
     notes: str | None = None
+    time_aggregation: Literal["additive", "non_additive", "semi_additive"] = "non_additive"
+
+    @model_validator(mode="after")
+    def _aggregation_policy(self):
+        if self.time_aggregation == "additive" and (self.denominator or re.search(
+                r"\b(?:AVG\s*\(|COUNT\s*\(\s*DISTINCT\b)", self.numerator, re.I)):
+            raise ValueError("ratios, averages and distinct counts cannot be declared time-additive")
+        return self
 
     def expression(self) -> str:
         if self.denominator:

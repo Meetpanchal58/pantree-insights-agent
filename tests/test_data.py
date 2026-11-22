@@ -52,8 +52,8 @@ def test_custom_metric_runs(con, name):
 
 
 @pytest.mark.parametrize("name", sorted(TEMPLATES))
-def test_template_passes_guardrails_and_returns_rows(con, name):
-    result = check_sql(build(name, {})[0])
+def test_template_passes_guardrails_and_returns_rows(con, name, template_params):
+    result = check_sql(build(name, template_params.get(name, {}))[0])
     assert result.ok, result.errors
     assert len(run_query(con, result.sql).frame) > 0
 

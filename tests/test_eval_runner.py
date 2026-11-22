@@ -81,7 +81,7 @@ def test_repeated_wrong_confirmations_are_bounded():
         def answer(self, event):
             return {"confirm": "wrong"}
 
-    events, turns = run_eval.ask(Agent(), {"set": "answer", "question": "q"}, User())
+    events, turns = run_eval.ask(Agent(), {"set": "answer", "question": "q"}, User(), mode="assisted")
     assert len(events) == run_eval.MAX_TURNS + 1
     assert turns["corrections"] == turns["interactions"] == run_eval.MAX_TURNS
 
@@ -149,3 +149,18 @@ def test_first_turn_metric_includes_answers_that_skip_confirmation():
     _, turns = run_eval.ask(Agent(), {"set": "answer", "question": "q"}, User())
     assert turns["first_turn_correct"] and turns["first_turn_answered"] and turns["first_reading"]
     assert turns["interactions"] == 0
+
+
+def test_autonomous_evaluation_never_receives_gold_corrections():
+    class Agent:
+        def start(self, *args, **kwargs):
+            return "run", iter([{"type": "clarify", "kind": "confirm", "spec": {"table": "sales"}}])
+        def resume(self, *args):
+            raise AssertionError("autonomous evaluation must not resume using gold")
+    class Judge:
+        def matches(self, event):
+            return False
+        def answer(self, event):
+            raise AssertionError("gold may judge, never steer an autonomous answer")
+    events, turns = run_eval.ask(Agent(), {"set": "answer", "question": "q"}, Judge())
+    assert len(events) == 1 and not turns["first_turn_correct"] and turns["interactions"] == 0

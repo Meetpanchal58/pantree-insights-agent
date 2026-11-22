@@ -5,11 +5,20 @@ from pantree_insights import db, graph, web
 
 
 def test_manifest_signature_includes_version_and_location(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "get_settings", lambda: SimpleNamespace(shop_dir=tmp_path))
+    prompts = tmp_path / "prompt.txt"
+    prompts.write_text("instructions")
+    monkeypatch.setattr(db, "get_settings", lambda: SimpleNamespace(
+        shop_dir=tmp_path, semantic_dir=tmp_path, prompts_file=prompts))
     path = tmp_path / "manifest.json"
     path.write_text('{"last_day":"2026-11-15"}')
     old = db.snapshot_signature()
     path.write_text('{"last_day":"2026-11-16"}')
+    assert db.snapshot_signature() != old
+    old = db.snapshot_signature()
+    (tmp_path / "metrics.yaml").write_text("changed definition")
+    assert db.snapshot_signature() != old
+    old = db.snapshot_signature()
+    prompts.write_text("changed instructions")
     assert db.snapshot_signature() != old
 
 

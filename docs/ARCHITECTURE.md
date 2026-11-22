@@ -7,20 +7,24 @@ the selected scope and numeric evidence, not a proof of natural-language underst
 ## Conditional flow
 
 ```text
-input safety -> context (once per request) -> intent
-  reviewed complete KPI grammar, no prior context -> validated QuerySpec
+input safety -> standing constraints -> intent
+  reviewed complete KPI grammar or explicit edit of prior spec, no conflicting context -> validated QuerySpec
   otherwise -> interpreter -> structural + explicit intent checks -> at most one repair
     material ambiguity -> clarification checkpoint
-    valid spec -> semantic contrast (no speculative SQL) -> read-back confirmation
+    valid spec -> conditional semantic contrast (no speculative SQL) -> read-back confirmation
     valid template -> parameter and supported-scope checks -> read-back confirmation
   -> single-source or grain-aware multi-fact compiler -> SQL safety -> execution
   -> snapshot check -> immediate result event
   -> deterministic KPI summary or analyst -> numeric/unit/prose checks -> at most one rewrite
-  -> remove unsupported claims -> recompute accepted values -> chart -> scoped memory
+  -> remove unsupported claims or use deterministic fallback -> recompute values -> chart -> scoped memory
 ```
 
-A grammar match consumes the whole question. Unknown filters, modifiers, date forms, prior chat, answers or
-business context use the interpreter. Relative dates follow the snapshot's last day and are disclosed. A known
+A grammar match consumes the whole question, including explicit uniquely resolved `where city/brand/category/channel
+is ...` filters. Prior self-contained questions and old numeric observations do not block it. Explicit `And by
+brand?` or `same for yesterday` edits preserve the previous successful plan. Unknown modifiers, arbitrary prior
+instructions, user/project preferences and business profiles still require interpretation. Chat context uses the
+last four turns; durable standing instructions belong in user/project preferences. Historical insights are fetched
+only when needed. Relative dates follow the snapshot's last day and are disclosed. A known
 ambiguous phrase is checked before either path. Unresolved interpretations stop after six clarification rounds.
 No metric is invented for an unsupported concept such as an undefined NMV.
 
@@ -36,7 +40,13 @@ unreviewed aggregates and explicit cross-source dates are not allowed on this pa
 One-to-many filters use correlated EXISTS when they only express membership. Unsupported projections across
 fan-out joins still fail, rather than inflating measures. Measured join metadata is tied to the schema, profiler
 implementation and published dataset manifest. The data publisher must update the manifest on every refresh.
-Templates retain their reviewed SQL for event lift, channel ROAS, reconciliation and fixed-window repeat purchase.
+`operations.py` reuses the compiler for whole-period comparisons and daily rolling/cumulative windows. Each
+comparison recomputes its own distinct counts and ratio denominators; windows require explicitly time-additive
+metrics. Windows use calendar days, include the required lookback and emit observed days only. Queries are
+bounded to 367 output days, with no early ranking. Semi-additive snapshots and non-additive values cannot be
+summed through time. Templates cover event lift, channel ROAS, reconciliation, repeat purchase, mature first-order
+cohorts, strictly ordered session funnels and customer frequency/recency segments. Dates and steps are typed,
+bounded parameters. Cohorts exclude immature buyers; funnels use first-step sessions as their denominator.
 Unknown template parameters and unsupported date scope cannot silently disappear.
 
 ## Evidence and delivery
@@ -47,6 +57,8 @@ values, small ungrounded numbers and common unsupported causal assertions. It do
 without their underlying numerators and denominators. Accepted approximations are replaced by recomputed
 values before display. ROAS is a multiple, rather than a percentage. Chart text and follow-up text are also checked.
 
+Explicit direction and extremum claims require matching evidence in the same sentence. Every requested numeric
+measure with observed values must appear in the summary; a failed rewrite falls back to deterministic evidence.
 These controls are not a complete theorem prover for prose. For example, arbitrary qualitative conclusions
 and unrecognised causal paraphrases remain a limitation of the model explanation path. Fast-path summaries
 use deterministic cell descriptions and make no causal claims. Model failures, unanswerable scope and material
@@ -58,11 +70,16 @@ The full catalog is kept for the model path. An offline ablation of 66 named-met
 metrics in 13 cases with keyword top-five retrieval and five cases with BM25 top-five or top-ten retrieval.
 This is metric recall, not model accuracy. No vector database was added. Stable catalog text is cached per
 catalog; business memory is fetched once per request, and provider clients are shared across runs while cost
-trackers remain private. SQL results remain bounded and keyed by snapshot.
+trackers remain private. SQL results remain bounded and keyed by the dataset, semantic files and prompts. Definition caches refresh on
+version changes. Old paused runs without the current version fingerprint must be asked again.
 
 `pantree-profile --publish-joins` generates reusable metadata during data upload. A missing artifact safely
 falls back to measurement. KPI pulse runs outside web startup. The web queue, retained completed histories and
 in-memory terminal checkpoints are bounded/cleaned. Quota increments and email-code attempts are atomic.
+Chat history and its last successful QuerySpec use one bounded database read. PostgreSQL checkpoints use a
+pool capped at four connections. Terminal status, chat answer and spend commit together once. Ask requests accept
+an optional `idempotency_key` (8–128 letters/digits/underscores/hyphens), scoped to the signed-in user and chat;
+retrying returns the same run ID, and a changed payload returns 409. This does not resume interrupted model calls.
 The app still uses one instance; active job leases and distributed event streaming are not implemented.
 
 ## Validation
@@ -70,7 +87,9 @@ The app still uses one instance; active job leases and distributed event streami
 `tests/reference_sql.py` and the gold SQL suites independently check the compiler. New adversarial fixtures
 exercise duplicate facts, NULL and absent groups, date boundaries, numerator/denominator behavior, concurrency,
 and grounding. `evals/fastpath_baseline.py` checks the five reviewed question examples without a model.
-`evals/context_retrieval.py` measures offline metric recall only. Paid evaluation reports first-turn outcomes
-before stakeholder assistance separately from later corrected outcomes.
+`evals/context_retrieval.py` measures offline metric recall only. Paid evaluation defaults to `--mode autonomous`: no gold-guided answers, and pauses count as incomplete.
+`--mode assisted` is an explicitly separate run. Reports refuse mixed modes and separate intended plans, gold
+result matches and checked evidence from unmeasured human narrative faithfulness. `evals/post38_benchmark.py`
+measures local startup, warm queries, PostgreSQL history/checkpoints and Parquet versus materialized DuckDB.
 
-See [validation and audit](refactoring-validation.md) for the tested snapshot, results and remaining work.
+See [post-PR #38 validation](post38-validation.md) for current evidence and pending external measurements.

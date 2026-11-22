@@ -149,6 +149,9 @@ class Memory:
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         return "" if "Empty until" in text else text.strip()
 
+    def constraints(self) -> str:
+        return self.profile()
+
     def context(self, question: str, as_of: str | None = None) -> str:
         """Memory as prompt text: profile, related insights (with their age) and relevant open gaps."""
         parts = []

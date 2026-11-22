@@ -173,16 +173,37 @@ class Store:
 
     # ------------------------------------------------------------------ run tracking and opt-in feedback
     def create_run(self, run_id: str, user_id: str, chat_id: str, question: str,
-                   snapshot: str | None = None) -> None:
+                   snapshot: str | None = None, use_defaults: bool = False) -> None:
         self._exec(insert(run_records).values(id=run_id, user_id=user_id, chat_id=chat_id,
                                                question=question, status="running", events=[],
-                                               summary={"snapshot": snapshot}))
+                                               summary={"snapshot": snapshot, "use_defaults": use_defaults}))
 
     def save_run(self, run_id: str, status: str, events: list[dict], summary: dict | None = None) -> None:
         values = {"status": status, "events": to_json(events), "updated_at": _now()}
         if summary is not None:
             values["summary"] = to_json(summary)
         self._exec(update(run_records).where(run_records.c.id == run_id).values(**values))
+
+    def complete_run(self, run_id: str, final: dict, events: list[dict], summary: dict,
+                     headline: str, message: dict) -> bool:
+        """Commit terminal state, answer and spend once, atomically, including concurrent retries."""
+        with self.engine.begin() as c:
+            original = c.execute(select(run_records.c.summary).where(run_records.c.id == run_id)).scalar()
+            summary = {**(original or {}), **summary}
+            row = c.execute(update(run_records).where(run_records.c.id == run_id,
+                            run_records.c.status.in_(["running", "paused"]))
+                .values(status=final.get("status", "failed"), events=to_json(events),
+                        summary=to_json(summary), updated_at=_now())
+                .returning(run_records.c.user_id, run_records.c.chat_id)).mappings().first()
+            if row is None:
+                return False
+            c.execute(insert(messages).values(id=_id(), chat_id=row["chat_id"], role="assistant",
+                                              content=headline, run=to_json(message)))
+            c.execute(update(chats).where(chats.c.id == row["chat_id"]).values(updated_at=_now()))
+            usd = (final.get("cost") or {}).get("usd", 0.0)
+            c.execute(self._upsert(usage).values(user_id=row["user_id"], day=str(date.today()), questions=0, usd=usd)
+                .on_conflict_do_update(index_elements=[usage.c.user_id, usage.c.day], set_={"usd": usage.c.usd + usd}))
+            return True
 
     def run_record(self, user_id: str, run_id: str) -> dict | None:
         return self._one(select(run_records).where(run_records.c.id == run_id,
@@ -307,10 +328,6 @@ class Store:
             c.execute(self._upsert(usage).values(user_id=key, day=str(date.today()), questions=0, usd=usd)
                 .on_conflict_do_update(index_elements=[usage.c.user_id, usage.c.day], set_={"usd": usage.c.usd + usd}))
 
-    def add_cost(self, user_id: str, usd: float) -> None:
-        day = str(date.today())
-        self._exec(update(usage).where(usage.c.user_id == user_id, usage.c.day == day).values(usd=usage.c.usd + usd))
-
     # ------------------------------------------------------------------ projects
     def projects(self, user_id: str) -> list[dict]:
         return self._all(select(projects).where(projects.c.user_id == user_id).order_by(projects.c.updated_at.desc()))
@@ -381,17 +398,23 @@ class Store:
         return mid
 
     def history(self, chat_id: str, turns: int = 4) -> str:
-        """The last few question/answer pairs, as text for the planner (follow-ups)."""
-        rows = self.messages(chat_id)[-turns * 2:]
+        return self.conversation(chat_id, turns)[0]
+
+    def conversation(self, chat_id: str, turns: int = 4) -> tuple[str, dict | None]:
+        """Fetch bounded history and the latest completed plan in one database roundtrip."""
+        rows = list(reversed(self._all(select(messages).where(messages.c.chat_id == chat_id)
+                    .order_by(messages.c.created_at.desc()).limit(max(1, min(turns, 20)) * 2))))
+        previous = None
         lines = []
         for m in rows:
             if m["role"] == "user":
                 lines.append(f"User: {m['content']}")
             else:
                 run = m.get("run") or {}
+                previous = run.get("spec") if run.get("status") == "done" else None
                 plan = run.get("restated") or (run.get("plan") or {}).get("restated_question")
                 lines.append(f"Analyst: {m['content']}" + (f" (analysed: {plan})" if plan else ""))
-        return "\n".join(lines)
+        return "\n".join(lines), previous
 
     # ------------------------------------------------------------------ memory
     def memories(self, *, user_id: str | None = None, project_id: str | None = None,
@@ -472,6 +495,11 @@ class MemoryScope:
         resolved = self.store.resolved_gaps()
         return [g for g in self.business.open_gaps(question, k=20)
                 if (g["id"], g.get("window_end")) not in resolved][:k]
+
+    def constraints(self) -> str:
+        """Standing instructions, separate from historical numerical observations."""
+        return "\n".join(filter(None, [self.user.get("preferences"),
+                         (self.project or {}).get("instructions"), self.business.profile()]))
 
     def context(self, question: str, as_of: str | None = None) -> str:
         parts = []
