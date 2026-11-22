@@ -310,8 +310,13 @@ questions:
     required_tables: [marketing_spend]
     key_columns: [region]
     metric_columns: [spend, ad_ctr]
+    # Reference corrected 2026-11-22 after the paid run of that day: it summed all marketing spend, including the
+    # region 'All' rows (CRM and affiliates, not split by region and not paid media). "Paid ad spend" is paid
+    # channel groups only (glossary: paid channel). The published scores of earlier runs are unchanged.
+    tuned_on: true
     gold_sql: |
-      SELECT region, SUM(spend) AS spend, SUM(clicks) * 1.0 / NULLIF(SUM(impressions), 0) AS ad_ctr
-      FROM marketing_spend
-      WHERE date_hour >= TIMESTAMP '2026-01-01' AND date_hour < TIMESTAMP '2027-01-01'
+      SELECT ms.region, SUM(ms.spend) AS spend, SUM(ms.clicks) * 1.0 / NULLIF(SUM(ms.impressions), 0) AS ad_ctr
+      FROM marketing_spend ms JOIN campaigns c ON ms.campaign_id = c.campaign_id
+      WHERE ms.date_hour >= TIMESTAMP '2026-01-01' AND ms.date_hour < TIMESTAMP '2027-01-01'
+        AND c.channel_group IN ('Paid Search', 'Paid Social', 'Display')
       GROUP BY 1

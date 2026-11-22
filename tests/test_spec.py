@@ -6,6 +6,7 @@ import pytest
 
 from pantree_insights.db import run_query
 from pantree_insights.guardrails import check_sql
+from pantree_insights.semantic import load_glossary
 from pantree_insights.spec import Filter, Measure, QuerySpec, compile_spec, default_catalog, validate
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
@@ -22,6 +23,7 @@ def CAT(con):
     return default_catalog(con)
 
 GOLD = load_gold_specs()
+ALIASES = {a.casefold(): v for v, names in load_glossary().value_aliases.items() for a in names}
 ITEMS = {f"{i['suite']}/{i['id']}": i for i in load_suite("all") if i["set"] == "answer"}
 
 
@@ -147,6 +149,7 @@ def test_reading_checks_never_flag_a_gold_reading(key, CAT):
     from pantree_insights.db import manifest
     from pantree_insights.interpret.checks import coverage_problems, intent_problems, template_intent_problems
     from pantree_insights.interpret.models import TemplateCall
+    from pantree_insights.interpret.readings import misspelt_values
 
     data, question, gold = manifest(), ITEMS[key]["question"], GOLD[key]
     if gold.get("template"):
@@ -155,6 +158,7 @@ def test_reading_checks_never_flag_a_gold_reading(key, CAT):
     else:
         spec = QuerySpec.model_validate(gold)
         problems = intent_problems(question, spec, CAT, data["last_day"]) + coverage_problems(spec, None, data)
+        problems += [f"typo? {w} -> {v}" for w, v in misspelt_values(question, spec, CAT, ALIASES)]
     assert not problems, f"{key}: {question}\n{problems}"
 
 
@@ -177,3 +181,29 @@ def test_the_prompt_says_sale_events_are_matched_by_date_window(CAT):
     lines = catalog_text(CAT, {}).splitlines()
     cuts = next(line for line in lines if line.startswith("- sales:") and "sale_event=" in line)
     assert "sale_event=sale_events.name (rows matched by date window" in cuts
+
+
+def test_a_ranking_without_a_count_shows_every_group_of_a_small_split(CAT):
+    """regression m11: 'What do customers contact support about most?' was cut to a default top 10 of 16 issues
+    and labelled verified."""
+    from pantree_insights.interpret.readings import complete_ranking
+    from pantree_insights.spec import Ranking
+
+    spec = QuerySpec(table="support_contacts", measures=[Measure(name="contacts", agg="count")], dimensions=["issue"],
+                     ranking=Ranking(by="contacts", limit=10))
+    assert complete_ranking("What do customers contact support about most?", spec, CAT).ranking.limit == 16
+    assert complete_ranking("What are the top 5 support issues?", spec, CAT).ranking.limit == 10
+    brands = spec.model_copy(update={"table": "sales", "dimensions": ["brand"],
+                                     "measures": [Measure(name="orders", metric="orders")],
+                                     "ranking": Ranking(by="orders", limit=10)})
+    assert complete_ranking("Which brands sell most?", brands, CAT).ranking.limit == 10     # hundreds of brands
+
+
+def test_a_misspelt_value_is_confirmed_not_silently_corrected(CAT):
+    """flow-typo: 'Mumbay' was read as Mumbai without asking."""
+    from pantree_insights.interpret.readings import misspelt_values
+
+    spec = QuerySpec(table="sales", measures=[Measure(name="orders", metric="orders")],
+                     filters=[Filter(field="city", op="eq", values=["Mumbai"])])
+    assert misspelt_values("How many orders were shipped to Mumbay?", spec, CAT, ALIASES) == [("mumbay", "Mumbai")]
+    assert misspelt_values("How many orders were shipped to Mumbai?", spec, CAT, ALIASES) == []

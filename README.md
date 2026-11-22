@@ -59,6 +59,19 @@ The release gate (every answer correct, no silent wrong answers) still fails. Re
 - **Wrong row counts:** c24 and m11, by region and top 10.
 - **Provider errors in user mode:** two calls the provider didn't confirm; the paid run allows no retries.
 
+**Confirmation re-runs (same day, $0.47 in total).** These are targeted re-runs of only the questions that failed, not a new 100-question run. On the final code, every case fixed after the full run passes in both modes:
+- x11 and z01;
+- f06 and f08, the questions it had wrongly refused or asked about;
+- the "Mumbay" typo check;
+- c24, under its corrected reference;
+- c06 and e04.
+
+Still failing:
+- **m11:** the agent counts support contacts, while the reference counts tickets.
+- **m10, h10 and one follow-up:** genuinely ambiguous questions where asking is the intended behaviour.
+
+[Reports](evals/reports/2026-11-22/confirmation/).
+
 Reports: [autonomous](evals/reports/2026-11-22/autonomous/results.md), [user mode](evals/reports/2026-11-22/user/results.md), and the [previous run](evals/reports/current/results.md).
 These are simulated-data results from one repeat. Narrative faithfulness is not measured.
 

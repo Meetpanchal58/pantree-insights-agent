@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import date
+from difflib import SequenceMatcher
 
 from ..agents import ClarifyingQuestion
 from ..spec import Catalog, QuerySpec
@@ -115,6 +116,50 @@ def canonical(spec: QuerySpec) -> str:
         "columns": sorted(spec.columns), "limit": spec.limit,
         **({"operation": spec.operation.model_dump(mode="json")} if spec.operation else {}),
     }, sort_keys=True, default=str)
+
+
+def misspelt_values(question: str, spec: QuerySpec, cat: Catalog, aliases: dict[str, str]) -> list[tuple[str, str]]:
+    """(word in the question, stored value) for filter values the question never names but nearly spells:
+    "Mumbay" read as Mumbai. The user confirms the correction instead of the model applying it silently."""
+    text = question.casefold()
+    words = re.findall(r"[\w'-]+", text)
+    out = []
+    for f in spec.filters + [w for m in spec.measures for w in m.where]:
+        if f.op not in ("eq", "in"):
+            continue
+        for value in f.values:
+            if not isinstance(value, str) or len(value) < 4:
+                continue
+            names = [value.casefold()] + [a for a, v in aliases.items() if v == value]
+            if any(n in text for n in names):
+                continue
+            size = len(value.split())
+            grams = [" ".join(words[i:i + size]) for i in range(len(words) - size + 1)]
+            close = max(grams, key=lambda g: SequenceMatcher(None, g, value.casefold()).ratio(), default="")
+            if close and SequenceMatcher(None, close, value.casefold()).ratio() >= 0.8:
+                out.append((close, value))
+    return out
+
+
+ALL_GROUPS = 30
+
+
+def complete_ranking(question: str, spec: QuerySpec, cat: Catalog) -> QuerySpec:
+    """"What do customers contact support about most?" names no count: a default top 10 of 16 issue categories
+    silently drops six of them. With no number in the question and a split of at most ALL_GROUPS members, rank
+    every group (still sorted, most first)."""
+    r = spec.ranking
+    if r is None or r.partition_by or len(spec.dimensions) != 1 or spec.time and spec.time.grain \
+            or re.search(r"\b\d+\b|\b(?:one|two|three|four|five|ten|twenty)\b", question, re.I):
+        return spec
+    try:
+        expression, _, entry = cat.resolve(spec.dimensions[0], spec.table)
+        members = entry.labels() if entry is not None and entry.expression else cat.values_of(expression)
+    except Exception:                                  # noqa: BLE001 - validation reports it
+        return spec
+    if not members or not r.limit < len(members) <= ALL_GROUPS:
+        return spec
+    return spec.model_copy(update={"ranking": r.model_copy(update={"limit": len(members)})})
 
 
 COMPARE = r"\b(?:versus|vs\.?|compared? (?:with|to)|against|between)\b"

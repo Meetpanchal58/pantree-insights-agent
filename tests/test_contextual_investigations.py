@@ -532,3 +532,16 @@ def test_a_reference_without_saved_results_is_still_declined_first(analyst):
     outcome = decide(FakeLLM(lambda *_: reading), analyst.catalog, {}, {}, analyst.data,
                      "Give me the phone numbers of those brands' owners")
     assert outcome.kind == "decline"
+
+
+def test_an_investigation_step_ranking_without_a_count_shows_every_group(analyst):
+    """m11 in the confirmation run: the same top-10 cut, planned as an investigation step."""
+    step = {"purpose": "most common issues", "spec": {
+        "table": "support_contacts", "measures": [{"name": "contacts", "agg": "count"},
+                                                  {"name": "csat", "metric": "avg_csat"}],
+        "dimensions": ["issue"], "ranking": {"by": "contacts", "limit": 10}}}
+    reading = {"route": "investigation", "restated_question": "support issues", "steps": [step, step]}
+    outcome = decide(FakeLLM(lambda *_: reading), analyst.catalog, {}, {}, analyst.data,
+                     "What do customers contact support about most, and how satisfied are they?")
+    assert outcome.kind == "investigation", outcome.reason
+    assert all(s.spec.ranking.limit == 16 for s in outcome.steps)
