@@ -287,3 +287,36 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .dictionary-section { padding: 16px; }
   .dataset-status { padding: 8px 12px; font-size: 10px; }
 }
+
+/* Readable workbook entry point and a first-visit guide. */
+.dataset-toolbar { padding: 14px 18px; }
+.dataset-toolbar .btn { font-size: 16px; padding: 11px 18px; font-weight: 650; }
+.dataset-toolbar p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 8px 0 0; }
+.dataset-mobile { font-size: 14px; padding: 9px 12px; }
+.dataset-explorer { font-size: 16px; }
+.dataset-head strong { font-size: 22px; }
+.dataset-head .muted, .dataset-status, .dataset-search label { font-size: 14px; }
+.sheet-tab { font-size: 15px; padding: 15px 19px; }
+.overview-heading { max-width: none; }
+.overview-heading h1 { font-size: 34px; }
+.dataset-intro { max-width: 860px; font-size: 17px; }
+.workbook-guide { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; margin: 22px 0; }
+.workbook-guide > div { padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.workbook-guide p { font-size: 15px; color: var(--muted); margin: 9px 0 0; }
+.dataset-notice { margin: 14px 0 20px; font-size: 14px; }
+.dataset-notice summary { cursor: pointer; }
+.overview-grid { grid-template-columns: repeat(auto-fit,minmax(min(350px,100%),1fr)); gap: 20px; }
+.dataset-card h2 { font-size: 20px; }
+.dataset-card p, .sheet-heading p { font-size: 16px; }
+.dataset-card dl { font-size: 14px; grid-template-columns: 125px minmax(0,1fr); gap: 12px; line-height: 1.5; }
+.spreadsheet, .dictionary-scroll table { font-size: 14px; }
+.dictionary-controls label { font-size: 15px; }
+#analyst-readiness { color: var(--muted); margin-left: 12px; }
+@media (max-width: 700px) {
+  .workbook-guide { grid-template-columns: 1fr; }
+  .overview-heading h1 { font-size: 28px; }
+  .dataset-head strong { font-size: 17px; }
+  .dataset-head .muted, .dataset-status { font-size: 12px; }
+  .dataset-card dl { grid-template-columns: 110px minmax(0,1fr); }
+  #analyst-readiness { display: block; margin-left: 0; }
+}

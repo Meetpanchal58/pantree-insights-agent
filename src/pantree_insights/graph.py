@@ -33,6 +33,7 @@ from . import agents
 from .catalog import label_columns, load_catalog
 from .charts import build_chart
 from .config import get_settings
+from .context import populations
 from .db import connect, manifest, run_query, snapshot_signature
 from .fastpath import followup, independent_history
 from .fastpath import parse as fast_spec
@@ -304,7 +305,7 @@ class Agent:
             state.get("history", ""), self.catalog, self.data["last_day"]))
         if needs_evidence and state.get("investigation") and "## Investigation" not in background:
             background += "\n## Investigation (verified historical evidence; recheck against current data)\n" + \
-                json.dumps(state["investigation"], default=str)
+                json.dumps({k: v for k, v in state["investigation"].items() if k != "populations"}, default=str)
         _emit("context", "done", seconds=round(time.perf_counter() - context_started, 6))
         pick = choices.pop("reading", None)
         revision = state.get("revision")
@@ -342,9 +343,13 @@ class Agent:
         else:
             decision = decide(self.llm(state), self.catalog, self.glossary.terms, self.aliases, self.data,
                               state["question"], state.get("history", ""), answers, self.glossary.ambiguous,
-                              contrast=get_settings().contrast_check, background=background, previous=previous)
+                              contrast=get_settings().contrast_check, background=background, previous=previous,
+                              investigation=state.get("investigation"), snapshot=self.snapshot)
         detail = {"decision": decision.kind, "restated": decision.restated, "reason": decision.reason,
                   "fast_path": bool(decision.detail.get("fast_path"))}
+        if decision.kind == "failed":
+            return {"status": "failed", "message": decision.reason, "route": "finish",
+                    "open_points": [], "confirmed_digest": None, "_detail": {**detail, **decision.detail}}
         if decision.kind == "decline":
             return {"status": "declined", "message": decision.reason, "route": "finish", "_status": "declined",
                     "_detail": {**detail, "decision": "decline"}}
@@ -366,6 +371,10 @@ class Agent:
                                             required=decision.required))
             done = {a.strip().lower() for a in answers}
             pending = [p for p in points if p.question.strip().lower() not in done]
+            if not pending:
+                return {"status": "failed", "message": "I could not apply your answer to the plan. "
+                        "Your earlier results are saved; no new analysis was executed.",
+                        "route": "finish", "open_points": [], "confirmed_digest": None, "_detail": detail}
             return {"open_points": [p.__dict__ for p in pending], "route": "clarify", "_status": "needs_input",
                     "confirmed_digest": None,
                     "memory": background,
@@ -463,6 +472,10 @@ class Agent:
                    "questions": [p.public() for p in points], "plan_version": version,
                    "readback": state.get("readback"), "spec": state.get("spec"),
                    "template": state.get("template"), "plan": state.get("prepared", [])}
+        if not text.strip():
+            return {"status": "failed",
+                    "message": "The planner returned no question or plan. Please retry this request.",
+                    "route": "finish", "confirmed_digest": None}
         given = interrupt(payload)
         message = str(given.get("message", "")).strip() if isinstance(given, dict) else ""
         if re.fullmatch(r"(?:please )?(?:cancel|stop|never mind|nevermind)(?: (?:it|this|the analysis))?[.!]?",
@@ -720,6 +733,8 @@ class Agent:
                                        for n in {name for item in state.get("results", [])
                                                  for name in item.get("metric_names", [])}},
                 "analyses": state.get("analyses", []), "template": state.get("template"),
+                "populations": populations(state.get("prepared", []), state.get("results", []),
+                                           self.catalog, self.snapshot) if state.get("grounded") else [],
                 "trust": state.get("trust"), "sql": state.get("sql"),
                 "result": state.get("result"), "analysis": state.get("analysis"), "chart": state.get("chart"),
                 "warnings": state.get("warnings", []), "insight_id": state.get("insight_id"),

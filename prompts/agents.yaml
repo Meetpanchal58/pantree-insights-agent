@@ -29,6 +29,12 @@ interpreter: |
   objective from a refinement, drill-down, comparison or investigation of prior verified evidence. Preserve
   unmodified periods, metric definitions and populations. Suggest useful approaches through the restated_question
   and proposed steps. Explain in plain business language; the user will explicitly confirm before execution.
+  For "these", "those" or "same" groups, select result_scope from the supplied verified populations.
+  Never reconstruct a ranked population from prose, examples or remembered brand names. The server binds
+  the exact members. Keep the established ranking metric for "performing" unless the user changes it.
+  A category/product drill-down is a new breakdown of that population, not a repeat of its old top-N ranking.
+  For root-cause questions, propose a measured outcome change plus supported breakdowns or cross-fact
+  comparisons at conformed dimensions. Quantify descriptive contributions; label untested causes as hypotheses.
   Never assume previous confirmation approves new or changed scope. If prior evidence is stale, propose recomputation.
 
   Otherwise choose the route:
@@ -41,7 +47,8 @@ interpreter: |
     compiled as separate aggregations at each source's native grain, joined on conformed dimensions.
     Comparisons between named
     events, periods or groups are a spec (a dimension plus an in-filter); "for each X, which Y ... most" is a spec
-    with both dimensions (all rows, ranked by the measure), not a per-group top N.
+    with both dimensions and ranking.partition_by containing the parent dimension.
+    For example, top products within each brand partitions by brand. A global top N is not a per-group ranking.
   - template: the question is one of the listed analyses (event lift vs the days before, ROAS from the shop's own
     attribution per channel, platform-reported vs recorded orders, repeat purchase within N days); fill its
     parameters from the question.

@@ -276,9 +276,18 @@ class Store:
                             "next_questions": (final.get("analysis") or {}).get("follow_up_questions", [])}
                 context = {"objective": final.get("objective") or prior.get("objective") or final.get("question"),
                            "origin_plan": prior.get("origin_plan") or compact_plan,
-                           "current_plan": compact_plan,
+                           "current_plan": compact_plan, "populations": final.get("populations", []),
                            "metric_definitions": final.get("metric_definitions", {}),
                            "evidence": [*(prior.get("evidence") or []), evidence][-8:]}
+                c.execute(self._upsert(investigations).values(chat_id=row["chat_id"], context=to_json(context))
+                          .on_conflict_do_update(index_elements=[investigations.c.chat_id],
+                                                set_={"context": to_json(context), "updated_at": _now()}))
+            elif final.get("result") is not None or final.get("analyses"):
+                # A newly displayed partial/unverified result supersedes the referent of "these".
+                # Keep historical evidence, but never silently bind an older complete population.
+                prior = c.execute(select(investigations.c.context)
+                                  .where(investigations.c.chat_id == row["chat_id"])).scalar() or {}
+                context = {**prior, "populations": []}
                 c.execute(self._upsert(investigations).values(chat_id=row["chat_id"], context=to_json(context))
                           .on_conflict_do_update(index_elements=[investigations.c.chat_id],
                                                 set_={"context": to_json(context), "updated_at": _now()}))

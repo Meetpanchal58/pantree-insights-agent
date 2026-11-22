@@ -27,10 +27,18 @@ instructions, user/project preferences and business profiles still require inter
 plan, current plan, metric definitions, and the last eight verified evidence summaries (six explicitly marked
 example rows per query). It survives that prose window and PostgreSQL restarts; complete runs remain in chat
 history. Independent objectives start a new context; refinements, drill-downs and comparisons preserve it.
+The record also stores complete result populations separately from those six-row prose excerpts. A typed
+`result_scope` identifies a query and dimension; server code binds the exact members, preferring stable IDs
+over labels. This is bounded to 500 complete rows and the same snapshot. Partial, unverified or stale results
+cannot silently reuse an older population. Legacy excerpts require a fresh query. Same-fact follow-ups retain
+the period unless changed explicitly; cross-fact date meanings remain part of the approval read-back.
 Standing instructions belong in user/project preferences. Historical insights are fetched
 only when needed. Relative dates follow the snapshot's last day and are disclosed. A known
 ambiguous phrase is checked before either path. Unresolved interpretations stop after six clarification rounds.
 No metric is invented for an unsupported concept such as an undefined NMV.
+An established ranked measure resolves generic performance questions about those results. A failed planner
+repair ends with an explicit failure, not an empty clarification or a demand to rephrase. Real unresolved
+business choices (including a user-specified group absent from the snapshot) still require clarification.
 
 ## Query planning
 
@@ -40,6 +48,11 @@ grain, applies its own governed date and population rules, and then joins on con
 happens after the join. Missing populations stay NULL; zero denominators produce NULL. Shared dimension and
 filter expressions must match across sources; same names with different meanings are refused. Row lists,
 unreviewed aggregates and explicit cross-source dates are not allowed on this path.
+Qualified catalogue primary keys may bind exact entity populations across facts; fact attributes still need
+shared business concepts. Duplicate implicit/explicit dimension IDs are compiled once, and cosmetic measure
+alias collisions are repaired without changing metric definitions. `Ranking.partition_by` implements top N
+within each requested parent dimension after aggregation, with deterministic tie-breaking. A previous top-N
+brand selection does not imply a global N-row limit on its product breakdown.
 
 One-to-many filters use correlated EXISTS when they only express membership. Unsupported projections across
 fan-out joins still fail, rather than inflating measures. Measured join metadata is tied to the schema, profiler
@@ -63,6 +76,7 @@ values before display. ROAS is a multiple, rather than a percentage. Chart text 
 
 Explicit direction and extremum claims require matching evidence in the same sentence. Every requested numeric
 measure with observed values must appear in the summary; a failed rewrite falls back to deterministic evidence.
+Entity matching favors complete observed labels: a color word in a product title is not a separate brand mention.
 These controls are not a complete theorem prover for prose. For example, arbitrary qualitative conclusions
 and unrecognised causal paraphrases remain a limitation of the model explanation path. Fast-path summaries
 use deterministic cell descriptions and make no causal claims. Model failures, unanswerable scope and material

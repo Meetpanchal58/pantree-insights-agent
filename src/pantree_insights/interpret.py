@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from .agents import ClarifyingQuestion, system_prompt
 from .catalog import describe
+from .context import ResultReference, bind_population, choose_population, refers_to_results, saved_populations
 from .fastpath import followup, independent_history
 from .fastpath import parse as fast_spec
 from .spec import TICKETS, Catalog, Filter, Measure, Operation, QuerySpec, Ranking, TimeSpec, validate
@@ -88,6 +89,8 @@ class AnalysisStep(BaseModel):
 
 
 class Interpretation(BaseModel):
+    result_scope: ResultReference | None = Field(None, description="For these/those/same groups: reference a verified "
+                                               "population. Never invent its member values.")
     relationship: Literal["new", "refinement", "drilldown", "comparison", "investigation"] = Field(
         "new", description="Relationship to the saved business objective; use new only for an independent question")
     decline_reason: str | None = Field(None, description="Only if the request must be declined; decided first")
@@ -144,6 +147,7 @@ def revise(llm, cat: Catalog, previous: QuerySpec, correction: str, data: dict) 
         if patch.time and previous.time and "time" not in patch.clear:
             changes["time"] = {**previous.time.model_dump(), **patch.time.model_dump(exclude_none=True)}
         direct = QuerySpec.model_validate({**previous.model_dump(), **changes})
+    direct = normalise(direct, cat, {})
     problems = validate(direct, cat) or intent_problems(correction, direct, cat, data["last_day"])
     if problems:
         return Decision("clarify", questions=[ClarifyingQuestion(question="; ".join(problems) + ". What should change?",
@@ -259,7 +263,7 @@ def catalog_text(cat: Catalog, terms: dict[str, str]) -> str:
 
 def ask_model(llm, cat: Catalog, terms: dict[str, str], data: dict, question: str, history: str = "",
               answers: dict[str, str] | None = None, problems: list[str] | None = None,
-              background: str = "") -> Interpretation:
+              background: str = "", prior_reading: Interpretation | None = None) -> Interpretation:
     system = system_prompt("interpreter", data_first_day=data["first_day"], data_last_day=data["last_day"]) \
         + "\n\n" + catalog_text(cat, terms)
     parts = []
@@ -270,6 +274,8 @@ def ask_model(llm, cat: Catalog, terms: dict[str, str], data: dict, question: st
     parts.append(f"## Question\n{question}")
     if answers:
         parts.append("## The user's answers\n" + "\n".join(f"- {q}: {a}" for q, a in answers.items()))
+    if prior_reading is not None:
+        parts.append("## Your previous proposed structure to repair\n" + prior_reading.model_dump_json())
     if problems:
         parts.append("## Your last spec could not be used; fix exactly these problems\n"
                      + "\n".join(f"- {p}" for p in problems))
@@ -322,7 +328,41 @@ def normalise(spec: QuerySpec, cat: Catalog, aliases: dict[str, str]) -> QuerySp
             return False
         return f"{expression} = '{f.values[0]}'" == always
     filters = [f for f in fix(spec.filters) if not redundant(f)]
-    return spec.model_copy(update={"filters": filters, "measures": measures})
+    dimensions, seen, reserved = [], {}, set()
+    dimension_aliases = {}
+    for d in spec.dimensions:
+        try:
+            expression, name, _ = cat.resolve(d, spec.table)
+            if expression in seen:
+                dimension_aliases[d] = seen[expression]
+                continue
+            seen[expression] = d
+            reserved.add(name)
+            if expression in cat.labels:
+                reserved.add(cat.labels[expression])
+        except ValueError:
+            pass
+        dimensions.append(d)
+    if spec.time and spec.time.grain:
+        reserved.add(spec.time.grain)
+    renamed = {}
+    if len({m.name for m in measures}) == len(measures):
+        used = reserved | {m.name for m in measures}
+        for m in measures:
+            if m.name in reserved:
+                base = m.metric or 'measure'
+                candidate, index = base + '_value', 2
+                while candidate in used:
+                    candidate, index = f'{base}_value_{index}', index + 1
+                renamed[m.name] = candidate
+                used.add(candidate)
+        measures = [m.model_copy(update={'name': renamed.get(m.name, m.name),
+                    'ratio': [renamed.get(r, r) for r in m.ratio] if m.ratio else None}) for m in measures]
+    ranking = (spec.ranking.model_copy(update={'by': renamed.get(spec.ranking.by, spec.ranking.by),
+               'partition_by': list(dict.fromkeys(dimension_aliases.get(d, d) for d in spec.ranking.partition_by))})
+               if spec.ranking else None)
+    return spec.model_copy(update={"filters": filters, "measures": measures, 'dimensions': dimensions,
+                                   'ranking': ranking, 'shares': [renamed.get(n, n) for n in spec.shares]})
 
 
 # ----------------------------------------------------------------------------- agreement
@@ -342,7 +382,8 @@ def canonical(spec: QuerySpec) -> str:
         "dimensions": sorted(spec.dimensions),
         "filters": sorted(json.dumps(filt(f), default=str) for f in spec.filters),
         "time": spec.time.model_dump(mode="json") if spec.time else None,
-        "ranking": [json.dumps(by_name.get(spec.ranking.by), default=str), spec.ranking.order, spec.ranking.limit]
+        "ranking": [json.dumps(by_name.get(spec.ranking.by), default=str), spec.ranking.order,
+                    spec.ranking.limit, sorted(spec.ranking.partition_by)]
         if spec.ranking else None,
         "shares": sorted(json.dumps(by_name.get(s), default=str) for s in spec.shares),
         "columns": sorted(spec.columns), "limit": spec.limit,
@@ -401,7 +442,9 @@ def readback(spec: QuerySpec, cat: Catalog, assumptions: list[str] | None = None
     lines.append("**Filters:** " + ("; ".join(show(f) for f in spec.filters) if spec.filters else "none"))
     if spec.ranking:
         lines.append(f"**Ranking:** {'top' if spec.ranking.order == 'desc' else 'bottom'} {spec.ranking.limit} "
-                     f"by {spec.ranking.by.replace('_', ' ')}")
+                     f"by {spec.ranking.by.replace('_', ' ')}" +
+                     (" within each " + ", ".join(label(d) for d in spec.ranking.partition_by)
+                      if spec.ranking.partition_by else " overall"))
     if spec.shares:
         lines.append("**Also shown:** " + ("contribution to net change for " if spec.operation else
                      "share of the total for ") + ", ".join(s.replace("_", " ") for s in spec.shares))
@@ -420,7 +463,7 @@ def readback(spec: QuerySpec, cat: Catalog, assumptions: list[str] | None = None
 # ----------------------------------------------------------------------------- the decision
 @dataclass
 class Decision:
-    kind: Literal["spec", "template", "investigation", "clarify", "decline", "unanswerable"]
+    kind: Literal["spec", "template", "investigation", "clarify", "decline", "unanswerable", "failed"]
     spec: QuerySpec | None = None
     template: TemplateCall | None = None
     questions: list[ClarifyingQuestion] = field(default_factory=list)
@@ -528,7 +571,8 @@ def intent_problems(question: str, spec: QuerySpec, cat: Catalog, last_day: str 
 def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], data: dict, question: str,
            history: str = "", answers: dict[str, str] | None = None, register: dict[str, list[str]] | None = None,
            contrast: bool = True,
-           background: str = "", previous: QuerySpec | None = None) -> Decision:
+           background: str = "", previous: QuerySpec | None = None,
+           investigation: dict | None = None, snapshot: str | None = None) -> Decision:
     """Read the question and decide: answer (spec / template), ask, decline or say it cannot be answered."""
     answers = answers or {}
     effective_question = question
@@ -540,7 +584,28 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
         if re.search(r"\bby (category|brand|city|channel)\b", answer, re.I):
             effective_question = re.sub(r"\bby (category|brand|city|channel)\b", "", effective_question, flags=re.I)
     effective_question += " " + " ".join(answers.values())
-    unsettled = register_questions(question, register or {}, answers)
+    referential = refers_to_results(question)
+    available = saved_populations(investigation or {}, cat) if referential else []
+    register = dict(register or {})
+    from .fastpath import METRICS
+    explicit_metric = any(re.search(rf"\b{re.escape(phrase)}\b", effective_question, re.I) for phrase in METRICS)
+    inherited_metric = None
+    if referential and previous and re.search(r"\b(performing|performance)\b", question, re.I):
+        ranked = next((m.metric for m in previous.measures if previous.ranking and m.name == previous.ranking.by), None)
+        inherited_metric = ranked or (previous.measures[0].metric if len(previous.measures) == 1 else None)
+    if explicit_metric or inherited_metric:
+        register = {k: v for k, v in register.items() if k not in ('performing', 'performance')}
+    if inherited_metric and not explicit_metric:
+        effective_question += " " + inherited_metric.replace("_", " ")
+        background += f"\nThe established performance measure is {inherited_metric}; retain it for this follow-up."
+    if referential:
+        if not available:
+            return Decision('clarify', required=True, questions=[ClarifyingQuestion(
+                question='Which earlier groups should I use? Please run their analysis first or name the groups.',
+                options=[], default='', why='A result reference needs complete verified evidence')])
+        choices = [{k: p[k] for k in ('query_index', 'field', 'complete')} for p in available]
+        background += "\nAvailable result populations (server binds the exact members): " + json.dumps(choices)
+    unsettled = register_questions(question, register, answers)
     if unsettled:
         return Decision("clarify", questions=unsettled, required=True, reason="ambiguity register")
 
@@ -554,6 +619,8 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             return Decision("spec", spec=direct, restated=question, assumptions=notes,
                             detail={"fast_path": True})
 
+    if previous is not None:
+        background += "\nPrevious confirmed plan (retain unchanged scope for follow-ups): " + previous.model_dump_json()
     reading = ask_model(llm, cat, terms, data, question, history, answers, background=background)
     detail: dict = {"reading": reading.model_dump(mode="json"), "relationship": reading.relationship}
     for attempt in range(MAX_REPAIRS + 1):
@@ -563,8 +630,38 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             return Decision("unanswerable", restated=reading.restated_question, detail=detail,
                             reason=reading.unanswerable_reason or "The data cannot answer this as asked.")
         if reading.route == "clarify" and reading.questions:
-            return Decision("clarify", questions=reading.questions, restated=reading.restated_question, detail=detail)
+            remaining = [q for q in reading.questions if q.question not in answers and not (
+                referential and inherited_metric and re.search(
+                    r"\b(?:which|what) (?:metric|measure)\b|what do you mean by ['\"]?perform",
+                    q.question, re.I))]
+            if remaining:
+                return Decision("clarify", questions=remaining, restated=reading.restated_question, detail=detail)
+            if attempt < MAX_REPAIRS:
+                reading = ask_model(llm, cat, terms, data, question, history, answers,
+                    problems=["These questions are already settled by the user's answers or established measure. "
+                              "Use that context to build the requested plan; do not ask them again."],
+                    background=background, prior_reading=reading)
+                continue
+            return Decision("failed", reason="I could not apply the established scope to this follow-up. "
+                            "No analysis was executed; your earlier results are saved.", detail=detail)
         problems = []
+        if referential and reading.route in ('spec', 'investigation', 'template'):
+            try:
+                population = choose_population(question, available, reading.result_scope)
+                plans = [step.spec for step in reading.steps] if reading.route == 'investigation' else [reading.spec]
+                if any(plan is None for plan in plans):
+                    raise ValueError('This result population needs a governed query rather than an unscoped template.')
+                bound = [bind_population(plan, population, cat, snapshot, effective_question) for plan in plans]
+                if reading.route == 'investigation':
+                    for step, plan in zip(reading.steps, bound, strict=True):
+                        step.spec = plan
+                else:
+                    reading.spec = bound[0]
+                reading.relationship = 'drilldown' if reading.relationship == 'new' else reading.relationship
+                detail['relationship'] = reading.relationship
+            except ValueError as error:
+                return Decision('clarify', required=True, questions=[ClarifyingQuestion(
+                    question=str(error), options=[], default='', why='Preserve the exact referenced population')])
         if reading.route == "investigation" and reading.steps:
             metrics = {m.metric for step in reading.steps if step.spec for m in step.spec.measures}
             for step in reading.steps:
@@ -623,14 +720,22 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             problems = ["no spec, template or question was given"]
         if attempt < MAX_REPAIRS:
             reading = ask_model(llm, cat, terms, data, question, history, answers, problems=problems,
-                                background=background)
+                                background=background, prior_reading=reading)
             detail["repair"] = {"problems": problems, "reading": reading.model_dump(mode="json")}
     else:
-        rephrase = "Let me rephrase the question"
-        questions = [ClarifyingQuestion(question=f"{CANNOT_BUILD}: {p}. What did you mean?", options=[rephrase],
-                                        default=rephrase, why="nothing is computed from a guess") for p in problems[:3]]
-        return Decision("clarify", questions=questions, required=True, restated=reading.restated_question,
-                        detail={**detail, "problems": problems})
+        # An explicitly requested, absent business value is a user-resolvable ambiguity.
+        # Invented fields, aliases or a wrong metric are planner failures, not wording problems.
+        missing = [p for p in problems if " has no value " in p and any(
+            re.search(rf"(?<!\w){re.escape(v)}(?!\w)", effective_question, re.I)
+            for v in re.findall(r"'([^']+)'", p.split(";", 1)[0]))]
+        if missing:
+            return Decision("clarify", required=True, questions=[ClarifyingQuestion(
+                question="; ".join(missing) + ". Which recorded value should I use?",
+                options=[], default="", why="The requested group is absent from this snapshot")], detail=detail)
+        return Decision("failed", reason="I couldn't construct a valid analysis for this request. "
+                        "This is a planning limitation, not a problem with your wording. "
+                        "No analytical query was executed; your earlier results are still available.",
+                        restated=reading.restated_question, detail={**detail, "problems": problems})
 
     notes = premise_notes(spec, data)
     decision = Decision("spec", spec=spec, restated=reading.restated_question,
@@ -642,9 +747,14 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
                          and spec.measures[0].metric is not None
                          and spec.measures[0].metric.replace("_", " ") in question.casefold()
                          and all(d.replace("_", " ") in question.casefold() for d in spec.dimensions))
-    if not contrast or explicit_low_risk or (not answers and background in ("", "(nothing remembered yet)")
+    bound_drilldown = (referential and inherited_metric and not reading.assumptions
+                       and {m.metric for m in spec.measures} == {inherited_metric}
+                       and not spec.operation and not spec.shares
+                       and not re.search(r"\b(why|cause|drivers?|explain)\b", question, re.I))
+    if not contrast or explicit_low_risk or bound_drilldown or (not answers
+                        and background in ("", "(nothing remembered yet)")
                         and direct is not None and canonical(direct) == canonical(spec)):
-        detail["contrast_skipped"] = "disabled, explicit low-risk scope, or independently matched reviewed intent"
+        detail["contrast_skipped"] = "disabled, explicit scope, bound result drilldown, or reviewed intent"
         return decision
 
     # Semantic differences matter even when a snapshot happens to produce equal values.
@@ -653,8 +763,14 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
     detail["alternatives"] = alternatives.model_dump(mode="json")
     different = []
     for alt in alternatives.readings[:MAX_ALTERNATIVES]:
+        if referential:
+            try:
+                alt = bind_population(alt, population, cat, snapshot, effective_question)
+            except ValueError:
+                continue
         alt = normalise(alt, cat, aliases)
-        if validate(alt, cat) or intent_problems(question, alt, cat) or canonical(alt) == canonical(spec):
+        if (validate(alt, cat) or intent_problems(effective_question, alt, cat, data["last_day"])
+                or canonical(alt) == canonical(spec)):
             continue
         different.append(alt)
     if not different:

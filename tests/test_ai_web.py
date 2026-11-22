@@ -89,3 +89,30 @@ def test_admin_manages_allowances_but_other_users_cannot(app_env, monkeypatch):
     assert get_store().ai_profile(ordinary)["daily_limit"] == 2.5
     assert client.get("/api/ai/settings").json()["exempt"]
     assert client.get("/api/admin/usage").status_code == 200
+
+
+def test_readiness_is_authenticated_reuses_preparation_and_spends_no_allowance(app_env):
+    client, codes, _ = app_env
+    assert client.get("/api/ready").status_code == 401
+    sign_in(client, codes)
+    before = client.get("/api/me").json()
+    assert client.get("/api/ready").json()["ready"]
+    from pantree_insights import web
+
+    agent = web.runner.agent
+    assert client.get("/api/ready").json()["ready"] and web.runner.agent is agent
+    after = client.get("/api/me").json()
+    assert before["limit"] == after["limit"] and before["ai"]["usage"] == after["ai"]["usage"]
+
+
+def test_readiness_failure_is_visible_without_internal_details(app_env, monkeypatch):
+    client, codes, _ = app_env
+    sign_in(client, codes)
+    from pantree_insights import web
+
+    def fail():
+        raise RuntimeError("private infrastructure details")
+
+    monkeypatch.setattr(web.runner, "_agent_factory", fail)
+    response = client.get("/api/ready")
+    assert response.status_code == 503 and "private infrastructure" not in response.text

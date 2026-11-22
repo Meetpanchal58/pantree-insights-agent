@@ -2,7 +2,7 @@
 const {chromium}=require('playwright');
 const fs=require('node:fs');
 (async()=>{
- const out='docs/screenshots/pr41'; fs.mkdirSync(out,{recursive:true});
+ const out=process.env.PANTREE_SCREENSHOT_DIR || 'docs/screenshots/pr41'; fs.mkdirSync(out,{recursive:true});
  const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
  try {
   const page=await browser.newPage({viewport:{width:1440,height:1000},storageState:process.env.PANTREE_BROWSER_STATE});

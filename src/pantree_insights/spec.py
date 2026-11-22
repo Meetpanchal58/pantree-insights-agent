@@ -92,6 +92,8 @@ class Ranking(BaseModel):
     by: str = Field(description="Measure name to rank by")
     order: Literal["desc", "asc"] = "desc"
     limit: int = Field(10, ge=1, le=500)
+    partition_by: list[str] = Field(default_factory=list, description="Optional dimensions: top N within each group, "
+                                   "such as top products within each brand. Must be requested splits.")
 
 
 class Operation(BaseModel):
@@ -322,15 +324,48 @@ def _check_filter(f: Filter, table: str, cat: Catalog) -> list[str]:
             close = ", ".join(f"'{a}'" for a in allowed[:8])
             return [f"{f.field} has no value {', '.join(map(repr, unknown))}; stored values include {close}"]
     elif cat.con is not None and cat.kind(expression, table) == "text":     # many values: check they exist
-        for v in f.values:
-            t, c = expression.split(".")
-            cursor = cat.con.cursor()
-            try:
-                if cursor.execute(f'SELECT 1 FROM {t} WHERE "{c}" = ? LIMIT 1', [str(v)]).fetchone() is None:
-                    return [f"{f.field} has no value '{v}'"]
-            finally:
-                cursor.close()
+        t, c = expression.split(".")
+        cursor = cat.con.cursor()
+        values = list(dict.fromkeys(str(v) for v in f.values))
+        try:
+            placeholders = ", ".join("?" for _ in values)
+            found = {str(row[0]) for row in cursor.execute(
+                f'SELECT DISTINCT "{c}" FROM {t} WHERE "{c}" IN ({placeholders})', values).fetchall()}
+            missing = [v for v in values if v not in found]
+            if missing:
+                return [f"{f.field} has no value '{missing[0]}'"]
+        finally:
+            cursor.close()
     return []
+
+
+def _rank(sql: str, spec: QuerySpec, cat: Catalog) -> str:
+    ranking = spec.ranking
+    direction = ranking.order.upper()
+    order = f"{ranking.by} {direction} NULLS LAST"
+    if not ranking.partition_by:
+        return sql + f"\nORDER BY {order}\nLIMIT {ranking.limit}"
+    if any(field not in spec.dimensions for field in ranking.partition_by):
+        raise SpecError("per-group ranking must name dimensions included in the result")
+    tree = sqlglot.parse_one(sql, read="duckdb")
+    names = [e.alias_or_name for e in tree.selects]
+    keys = []
+    for field in ranking.partition_by:
+        expression, name, _ = cat.resolve(field, spec.table)
+        key = cat.labels.get(expression) or name
+        if key not in names and _tables(expression):
+            key = f"{_tables(expression)[0]}_{key}"
+        if key not in names:
+            raise SpecError("per-group ranking dimension is not available in the result")
+        keys.append(f'"{key}"')
+    # Aggregate first; rank result groups afterwards. No measure can be inflated by this wrapper.
+    partition = ", ".join(dict.fromkeys(keys))
+    tie_break = ", ".join(f'"{n}" ASC NULLS LAST' for n in names if n != ranking.by)
+    ordering = order + (", " + tie_break if tie_break else "")
+    selected = ", ".join(f'"{n}"' for n in names)
+    return (f"SELECT {selected} FROM ({sql}) AS ranked_groups "
+            f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {partition} ORDER BY {ordering}) <= {ranking.limit} "
+            f"ORDER BY {partition}, {ordering}")
 
 
 # ----------------------------------------------------------------------------- compilation
@@ -487,6 +522,11 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
         if id_column:
             groups.append((id_column, f"{expression.split('.')[0]}.{id_column}"))
         groups.append((name, expression))
+    # Labels add their identity key. Explicitly asking for that key must not add it twice.
+    groups = list(dict.fromkeys(groups))
+    aliases = [name for name, _ in groups]
+    groups = [(f"{_tables(expression)[0]}_{name}" if aliases.count(name) > 1 and _tables(expression) else name,
+               expression) for name, expression in groups]
     list_cols = []
     for c in spec.columns:
         expression, name = field_sql(c)
@@ -530,8 +570,7 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
     else:
         sql = inner
     if spec.ranking:
-        direction = "DESC" if spec.ranking.order == "desc" else "ASC"
-        sql += f"\nORDER BY {spec.ranking.by} {direction} NULLS LAST\nLIMIT {spec.ranking.limit}"
+        sql = _rank(sql, spec, cat)
     elif spec.time and spec.time.grain:
         sql += f"\nORDER BY {spec.time.grain}"
     elif groups and spec.measures:
@@ -550,8 +589,15 @@ def compile_multifact(spec: QuerySpec, cat: Catalog) -> str:
         raise SpecError("multi-fact plans support named metrics and their ratios, not row lists or raw aggregates")
     if spec.time and spec.time.field:
         raise SpecError("multi-fact periods use each metric's governed date; an explicit shared date is ambiguous")
-    if any("." in d for d in spec.dimensions) or any("." in f.field for f in spec.filters):
-        raise SpecError("multi-fact splits and global filters must use shared business concepts")
+    # Qualified fact attributes are not conformed merely because both stages can reach that fact.
+    # Stable catalogue identity keys are safe references; every stage still checks join cardinality.
+    for field in [*spec.dimensions, *(f.field for f in spec.filters)]:
+        if "." in field:
+            table, column = field.split(".", 1)
+            facts = {cat.source_table(name) for name in cat.metrics.metrics}
+            description = cat.schema.tables[table].columns.get(column, "") if table in cat.schema.tables else ""
+            if table in facts or "primary key" not in description.lower():
+                raise SpecError("multi-fact scopes need shared business concepts or a catalogue primary key")
     stages: dict[str, list[Measure]] = {}
     names = [m.name for m in spec.measures]
     if len(names) != len(set(names)) or any(not re.fullmatch(r"[a-z][a-z0-9_]*", n) for n in names):
@@ -604,7 +650,7 @@ def compile_multifact(spec: QuerySpec, cat: Catalog) -> str:
     if spec.ranking:
         if spec.ranking.by not in names:
             raise SpecError("ranking must name a measure")
-        sql += f"\nORDER BY {spec.ranking.by} {spec.ranking.order.upper()} NULLS LAST LIMIT {spec.ranking.limit}"
+        sql = _rank(sql, spec, cat)
     elif keys:
         sql += "\nORDER BY " + ", ".join(keys)
     return sql

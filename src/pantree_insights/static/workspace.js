@@ -51,10 +51,12 @@ async function selectSheet(name) {
 function renderOverview() {
   const m = W.metadata;
   $('#dataset-content').innerHTML = `<div class="overview-heading"><span class="eyebrow">KNOW YOUR DATA</span><h1>One workbook. The whole business.</h1>
-    <p>${esc(m.notice)}</p><div class="row"><span class="tag">${m.tables.length} governed tables</span><span class="tag">${m.relationships.length} approved relationships</span><button class="btn small" id="jump-dictionary">Data dictionary & joins ↓</button></div></div>
+    <p class="dataset-intro">Explore the data behind your answers. Start with a table below, open its sample rows, then check what each column means and how tables connect.</p>
+    <div class="workbook-guide"><div><strong>1 · Choose a table</strong><p>Each sheet represents a business area. “One row represents” explains what is being counted.</p></div><div><strong>2 · Read real examples</strong><p>Open a sheet to see up to 30 sample rows. Scroll sideways for more columns; this does not change your data.</p></div><div><strong>3 · Understand the connections</strong><p>The dictionary explains columns. Relationships show how tables connect and when a join could double-count records.</p></div></div>
+    <details class="dataset-notice"><summary>About this dataset and sample values</summary><p>${esc(m.notice)}</p></details><div class="row"><span class="tag">${m.tables.length} governed tables</span><span class="tag">${m.relationships.length} approved relationships</span><button class="btn small" id="jump-dictionary">Data dictionary & joins ↓</button></div></div>
     <div class="overview-grid">${m.tables.map(t => `<article class="dataset-card"><div class="row"><span class="tag">${esc(t.group)}</span><button class="btn small" data-open-table="${esc(t.name)}">Open sheet ↗</button></div>
-      <h2>${esc(t.name)}</h2><p>${esc(t.description)}</p><dl><dt>Grain</dt><dd>${esc(t.grain)}</dd><dt>Primary key</dt><dd>${esc(t.primary_key.join(', ') || 'Not declared')}</dd>
-      <dt>Main date</dt><dd>${esc(t.date_column || 'Not declared')}</dd><dt>Use cases</dt><dd>${esc(t.uses.join(' · ') || t.description)}</dd></dl></article>`).join('')}</div>
+      <h2>${esc(t.name)}</h2><p>${esc(t.description)}</p><dl><dt>One row represents</dt><dd>${esc(t.grain)}</dd><dt>Unique identifier</dt><dd>${esc(t.primary_key.join(', ') || 'Not declared')}</dd>
+      <dt>Main date column</dt><dd>${esc(t.date_column || 'Not declared')}</dd><dt>Questions it helps answer</dt><dd>${esc(t.uses.join(' · ') || t.description)}</dd></dl></article>`).join('')}</div>
     <section class="dictionary-section"><h2>Data dictionary & relationships</h2><p class="muted">Select a table to inspect actual types, values and approved joins. Samples are read only when needed.</p>
       <div class="dictionary-controls"><label>Table <select id="dictionary-table">${m.tables.map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('')}</select></label>
       <label>Find a column <input id="dictionary-search" type="search" placeholder="Name, meaning or data type"></label></div>
@@ -215,3 +217,18 @@ async function adminUsage(target) {
     target.querySelectorAll('[data-save-allowance]').forEach(b=>b.onclick=async()=>{try {await api(`/api/admin/usage/${b.dataset.saveAllowance}`,{method:'PUT',body:{daily_limit:Number(target.querySelector(`[data-allowance="${b.dataset.saveAllowance}"]`).value)}});toast('Daily allowance saved');}catch(e){toast(e.message);}});
   } catch(e){target.textContent=e.message;}
 }
+
+// Keep startup CPU allocated during an actual request, without blocking chat navigation or charging a question.
+let preparingAnalyst = null, preparedAt = 0;
+async function warmAnalyst() {
+  if (!S.me?.user || preparingAnalyst || Date.now()-preparedAt < 300000) return;
+  const owner=S.me.user.id || S.me.user.email, status=$('#analyst-readiness');
+  status.textContent='Preparing the analyst… You can browse data while it loads.';
+  preparingAnalyst=api('/api/ready',{timeoutMs:90000,retries:0}).then(data=>{
+    if((S.me?.user?.id || S.me?.user?.email)!==owner)return;
+    if(data.ready) {preparedAt=Date.now();status.textContent='Analyst ready';}
+    else status.textContent='Analyst will prepare when you ask a question.';
+  }).catch(()=>{if(S.me?.user)status.textContent='Preparation is taking longer. Your question will show its progress.';})
+    .finally(()=>{preparingAnalyst=null;});
+}
+window.addEventListener('focus',()=>warmAnalyst());

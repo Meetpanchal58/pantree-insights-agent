@@ -199,7 +199,8 @@ def test_clarifying_period_does_not_disable_original_metric_validation(cat):
     result = decide(FakeLLM(lambda *_: wrong), cat, {}, {},
                     {'first_day': '2025-01-01', 'last_day': '2025-01-05'}, 'What is GMV?',
                     answers={'Which period?': 'All data'}, contrast=False)
-    assert result.kind == 'clarify' and result.required
+    assert result.kind == 'failed'
+    assert any('explicitly requests gross_sales' in p for p in result.detail['problems'])
 
 
 def test_shared_history_and_memory_still_use_zero_models(con, tmp_path):
