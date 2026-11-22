@@ -13,9 +13,10 @@ the SQL behind it, a chart and an explanation.
 2. **Asks** when something is genuinely open: a phrase with two meanings, or two readings that give different
    numbers.
 3. **Routes**: complete, context-free KPI questions use a reviewed grammar and deterministic summary with zero
-   model calls. Other questions receive a read-back for confirmation; material ambiguity is always asked.
+   model calls. Every analysis explains its plan and waits for explicit confirmation in the normal chat input.
+   Corrections preserve untouched requirements and produce a new version to confirm.
 4. **Computes** with SQL built by code from the governed definitions (or a reviewed analysis template). No model
-   writes SQL.
+   writes SQL. One approval can cover up to four proposed queries; expanding scope needs another approval.
 5. **Delivers** the checked table immediately, then explains it. Accepted numerical claims are replaced with
    recomputed values; units, incomplete populations and common unsupported causal assertions are checked.
 
@@ -32,7 +33,7 @@ src/pantree_insights/   graph.py (flow) · interpret.py · spec.py (compiler) ·
 semantic/               schema, metrics, concepts, glossary (incl. two-meaning phrases), generated catalog
 prompts/agents.yaml     interpreter, contrast, analyst
 evals/                  questions, gold SQL, gold specs, autonomous/assisted evaluator, free compiler check
-tests/                  1,400+ tests: compiler vs gold and vs an independent implementation, every flow route,
+tests/                  1,600+ tests: compiler vs gold and vs an independent implementation, every flow route,
                         guardrails, knowledge-base lint, web app
 ```
 
@@ -83,7 +84,8 @@ DATA_SIZE=full uv run python evals/run_eval.py --suite all --yes --max-cost-usd 
 ```bash
 DATA_SIZE=small uv run python evals/fastpath_baseline.py    # five reviewed questions vs independent SQL
 DATA_SIZE=small uv run python evals/context_retrieval.py    # lexical metric-retrieval ablation
-DATA_SIZE=small uv run python evals/post38_benchmark.py     # no-model local runtime/storage measurements
+DATA_SIZE=small uv run python evals/conversation_benchmark.py # interpretation/revision/post-confirmation phases
+DATA_SIZE=small uv run python evals/post38_benchmark.py     # local storage/resources/PostgreSQL measurements
 ```
 
 ## Deploy
@@ -100,7 +102,7 @@ Google Cloud Run, Neon Postgres, Google sign-in and email codes, data from Cloud
 - Multi-fact plans require named metrics and conformed dimensions. Unsupported cohort definitions, per-group ranking and
   ambiguous cross-source dates still require a reviewed template or safe abstention.
 - Active work is bounded to one process; deployment remains at one instance. PostgreSQL stores paused checkpoints.
-- See [measured changes and remaining limits](docs/post38-validation.md).
+- See [measured changes and remaining limits](docs/pr40-validation.md).
 
 ## License
 
