@@ -307,3 +307,33 @@ def test_a_failure_while_preparing_still_answers_the_question(app_env):
     assert events[-1]["type"] == "final" and events[-1]["status"] == "failed"
     detail = client.get(f"/api/chats/{chat['id']}").json()
     assert [m["role"] for m in detail["messages"]] == ["user", "assistant"]          # never left unanswered
+
+
+@pytest.mark.parametrize("secret", ["", "short", " " * 40, "dev-only" + "x" * 40])
+def test_production_rejects_missing_or_weak_session_secrets(monkeypatch, secret):
+    from pantree_insights import web
+    from pantree_insights.config import Settings
+    monkeypatch.setattr(web, "get_settings", lambda: Settings(app_env="production", session_secret=secret))
+    with pytest.raises(RuntimeError, match="SESSION_SECRET"):
+        web.create_app()
+
+
+def test_terminal_event_waits_for_durable_result(monkeypatch):
+    import threading
+
+    from pantree_insights.web import Run, Runner
+    runner = Runner(lambda: object())
+    run = Run("persist", {}, {}, "question")
+    saving, release = threading.Event(), threading.Event()
+    def delayed_save(*args):
+        saving.set()
+        assert release.wait(3)
+    monkeypatch.setattr(runner, "_save", delayed_save)
+    runner._consume(None, run, iter([{"type": "final", "status": "done"}]))
+    try:
+        assert saving.wait(3)
+        assert not run.events and not run.finished
+    finally:
+        release.set()
+    assert run.segment_done.wait(3)
+    assert run.finished and run.events[-1]["type"] == "final"

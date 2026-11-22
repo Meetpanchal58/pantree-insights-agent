@@ -228,26 +228,30 @@ class Runner:
                                    "detail": {"seconds": round(time.time() - started, 2)}})
             try:
                 for event in events:
-                    run.events.append({**event, "t": event.get("t", time.time())})
+                    event = {**event, "t": event.get("t", time.time())}
                     if event["type"] == "clarify":
+                        store.save_run(run.id, "paused", [*run.events, event])
                         run.paused = True
-                        store.save_run(run.id, "paused", run.events)
                     elif event["type"] == "final":
                         self._save(store, run, event)
+                    # A terminal event must not reach the browser before its chat/feedback record exists.
+                    run.events.append(event)
+                    if event["type"] == "final":
+                        run.finished = True
             except Exception as error:                      # never leave the browser waiting
                 log.exception("run %s failed", run.id)
                 final = {"type": "final", "run_id": run.id, "question": run.question,
                          "status": "failed", "t": time.time(),
                          **failure_details(error)}
-                run.events.append(final)
                 self._save(store, run, final)
+                run.events.append(final)
+                run.finished = True
             finally:
                 self._slots.release()
                 run.segment_done.set()
         threading.Thread(target=work, daemon=True, name=f"run-{run.id}").start()
 
     def _save(self, store: Store, run: Run, final: dict) -> None:
-        run.finished = True
         headline = ((final.get("analysis") or {}).get("headline") or final.get("message") or "")
         timeline = [{**e, "t": round(e["t"] - run.started, 2)} for e in run.events if e["type"] != "final"]
         stage_times = {}
@@ -257,7 +261,7 @@ class Runner:
                 if isinstance(detail.get("seconds"), (float, int)):
                     stage_times[event["step"]] = round(stage_times.get(event["step"], 0) + detail["seconds"], 2)
         calls = final.get("calls") or []
-        store.save_run(run.id, final.get("status", "failed"), run.events,
+        store.save_run(run.id, final.get("status", "failed"), [*run.events, final],
                        {"stages": stage_times, "cost_usd": (final.get("cost") or {}).get("usd", 0),
                         "llm_calls": len(calls), "trust": final.get("trust"),
                         "verification": (final.get("verification") or {}).get("status")})
@@ -291,8 +295,9 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    if settings.app_env == "production" and settings.session_secret.startswith("dev-only"):
-        raise RuntimeError("Set SESSION_SECRET in production.")
+    if settings.app_env == "production" and (len(settings.session_secret.strip()) < 32
+                                              or settings.session_secret.startswith("dev-only")):
+        raise RuntimeError("Set a random SESSION_SECRET of at least 32 characters in production.")
     app = FastAPI(title="Pantree Insights", lifespan=lifespan, docs_url=None, redoc_url=None)
     @app.middleware("http")
     async def request_reference(request: Request, call_next):

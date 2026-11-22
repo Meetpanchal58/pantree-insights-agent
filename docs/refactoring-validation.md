@@ -9,7 +9,7 @@ dependency and does not claim that the aspirational architecture scores have bee
 
 - Unchanged baseline: **1,479 passed, 1 skipped** in 96.37 s.
 - Refactored full suite: **1,519 passed, 1 skipped** in 88.64 s; four additional regression tests were then added
-  and included in the final focused checks. The skip is an existing offline-demo snapshot check: its pinned
+  and included in a 62-test focused pass. The final web/authentication pass contains 18 tests. The skip is an existing offline-demo snapshot check: its pinned
   fixture differs from the nightly simulator data. These whole-suite times are not controlled latency benchmarks.
 - Compiler evaluation: **98/98** answer cases equal independent gold SQL (94 compiled specs, four templates).
 - Gold validation: **129 queries**, **zero problems**, across 172 evaluation items.
@@ -62,7 +62,10 @@ Additional fixes include a difference operation incorrectly evaluating division 
 keys matching the wrong evidence, unrestricted small free-typed numbers, colliding SQL output aliases, invalid
 ratio dependencies and non-finite filters. High-cardinality filter probes now use independent DuckDB cursors.
 Email codes cannot be redeemed twice concurrently, failed attempts cannot lose increments, first-use budget
-rows cannot race, and daily question admission is an atomic quota check plus increment.
+rows cannot race, and daily question admission is an atomic quota check plus increment. Production startup
+also rejects empty, whitespace-only, short and known development session-signing secrets.
+CI exposed a final-event/persistence race: immediate feedback could arrive before its chat record existed.
+Terminal events now wait for durable storage; a blocked-save regression test verifies this ordering.
 
 ## Supported analytical boundaries
 
