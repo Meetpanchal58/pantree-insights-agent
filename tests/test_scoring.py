@@ -152,3 +152,18 @@ def test_a_complete_list_holds_the_golds_top_n():
     assert not align(gold, agent, ["name"], ["lift"])[0]                 # without the each-question rule
     wrong = agent.assign(lift=[0.1, 0.5, 0.3])
     assert not align(gold, wrong, ["name"], ["lift"], superset=True)[0]
+
+
+def test_a_singular_superlative_may_be_answered_by_its_winner():
+    from scoring import winner_only
+
+    gold = pd.DataFrame({"surface": ["plp", "home_recs", "search_results"], "ctr": [0.02, 0.05, 0.03]})
+    winner = pd.DataFrame({"surface": ["home_recs"], "ctr": [0.05]})
+    question = "Which page surface has the best click-through rate?"
+    assert score(winner_only(winner, gold, "ctr", question), winner, ["surface"], ["ctr"])[0]
+    wrong = pd.DataFrame({"surface": ["plp"], "ctr": [0.02]})
+    assert not score(winner_only(wrong, gold, "ctr", question), wrong, ["surface"], ["ctr"])[0]
+    # Plural or open questions still need every row; "worst" has no fixed direction.
+    for other in ("Which page surfaces have the best click-through rate?", "What is CTR by page surface?",
+                  "Which page surface has the worst click-through rate?"):
+        assert winner_only(winner, gold, "ctr", other) is gold

@@ -5,6 +5,12 @@
 #   - events are compared by their date window (start_date..end_date), because events overlap
 #   - ratios are computed as SUM / SUM over the period, never as an average of daily ratios
 
+# Scoring rubric (fixed 2026-11-22 before the next paid run; written after reviewing the previous run, applied
+# to every item by the same rule, not only to failed ones): key_columns / metric_columns list what the question
+# asks for. Supporting counts in the gold SQL (denominators such as delivered_lines, a
+# component of a ratio, a listed SKU's stock) are shown for context and are optional, as in holdout.yaml.
+# Items without annotations require every numeric gold column.
+
 examples:
   # ------------------------------------------------------------------ easy
   - id: e01
@@ -37,6 +43,8 @@ examples:
   - id: e05
     difficulty: easy
     question: What share of customers are Prime members?
+    key_columns: []
+    metric_columns: [prime_share]
     sql: SELECT AVG(CASE WHEN is_prime THEN 1.0 ELSE 0 END) AS prime_share, COUNT(*) AS customers FROM customers
     tags: [customers, prime]
 
@@ -87,6 +95,8 @@ examples:
   - id: m04
     difficulty: medium
     question: What is the return rate by category?
+    key_columns: [category]
+    metric_columns: [return_rate]
     sql: |
       SELECT p.category,
              COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) * 1.0
@@ -110,6 +120,8 @@ examples:
   - id: m06
     difficulty: medium
     question: How does the RTO rate compare between COD and prepaid orders?
+    key_columns: [payment_type]
+    metric_columns: [rto_rate]
     sql: |
       SELECT CASE WHEN payment_method = 'COD' THEN 'COD' ELSE 'Prepaid' END AS payment_type,
              COUNT(*) FILTER (WHERE rto_at IS NOT NULL) * 1.0
@@ -122,6 +134,8 @@ examples:
   - id: m07
     difficulty: medium
     question: What is the click-through rate by listing position?
+    key_columns: [position]
+    metric_columns: [ctr]
     sql: |
       SELECT position, AVG(CASE WHEN clicked THEN 1.0 ELSE 0 END) AS ctr, COUNT(*) AS impressions
       FROM impressions WHERE position <= 10
@@ -131,6 +145,8 @@ examples:
   - id: m08
     difficulty: medium
     question: Which SKUs of active products are out of stock right now?
+    key_columns: [sku_id, product_name, category]
+    metric_columns: []
     sql: |
       SELECT il.sku_id, p.product_name, p.category, il.inbound_qty
       FROM inventory_live il JOIN product_master p ON p.product_id = il.product_id
@@ -151,6 +167,8 @@ examples:
   - id: m10
     difficulty: medium
     question: Which product categories get the worst reviews?
+    key_columns: [category]
+    metric_columns: [avg_rating, negative_share]
     sql: |
       SELECT p.category, AVG(r.rating) AS avg_rating,
              AVG(CASE WHEN r.sentiment = 'Negative' THEN 1.0 ELSE 0 END) AS negative_share,
@@ -163,6 +181,8 @@ examples:
   - id: m11
     difficulty: medium
     question: What do customers contact support about most, and how satisfied are they?
+    key_columns: [issue_category]
+    metric_columns: [tickets, avg_csat]
     sql: |
       SELECT issue_category, COUNT(DISTINCT ticket_id) AS tickets,
              AVG(csat) AS avg_csat, AVG(first_response_minutes) AS avg_first_response_minutes
@@ -173,6 +193,8 @@ examples:
   - id: m12
     difficulty: medium
     question: How much revenue comes from new versus repeat customers?
+    key_columns: [customer_type]
+    metric_columns: [realized_revenue]
     sql: |
       SELECT CASE WHEN is_first_order THEN 'New' ELSE 'Repeat' END AS customer_type,
              COUNT(DISTINCT order_id) AS orders,
@@ -186,6 +208,8 @@ examples:
   - id: h01
     difficulty: hard
     question: What is the conversion rate (orders per visit) by device?
+    key_columns: [device]
+    metric_columns: [conversion_rate]
     sql: |
       SELECT device,
              COUNT(DISTINCT CASE WHEN event_type = 'purchase' THEN session_id END) * 1.0
@@ -216,6 +240,8 @@ examples:
   - id: h03
     difficulty: hard
     question: How much did each sale event lift daily net sales compared with the two weeks before it?
+    key_columns: [name, start_date]
+    metric_columns: [lift]
     sql: |
       WITH daily AS (
         SELECT CAST(placed_at AS DATE) AS day,
@@ -236,6 +262,8 @@ examples:
   - id: h04
     difficulty: hard
     question: Which channels bring the best return on ad spend, using our own attribution?
+    key_columns: [channel]
+    metric_columns: [roas]
     sql: |
       WITH revenue AS (
         SELECT c.channel, SUM(a.credit_last_click * a.order_revenue) AS attributed_revenue
@@ -265,6 +293,8 @@ examples:
   - id: h06
     difficulty: hard
     question: Which couriers deliver late most often?
+    key_columns: [courier]
+    metric_columns: [late_share]
     sql: |
       SELECT courier,
              AVG(CASE WHEN CAST(delivered_at AS DATE) > CAST(promised_delivery_date AS DATE) THEN 1.0 ELSE 0 END)
@@ -277,6 +307,8 @@ examples:
   - id: h07
     difficulty: hard
     question: How do ad platforms' reported orders compare with orders we recorded, by channel?
+    key_columns: [channel]
+    metric_columns: [platform_orders, shop_orders]
     sql: |
       WITH platform AS (
         SELECT c.channel, SUM(m.platform_conversions) AS platform_orders
@@ -297,6 +329,8 @@ examples:
   - id: h08
     difficulty: hard
     question: What share of buyers order again within 90 days of their first order?
+    key_columns: []
+    metric_columns: [repeat_within_90d]
     sql: |
       WITH firsts AS (
         SELECT customer_id, MIN(placed_at) AS first_at
@@ -317,6 +351,8 @@ examples:
   - id: h09
     difficulty: hard
     question: Which product sizes in each category lose the most sales to stock-outs?
+    key_columns: [category, size]
+    metric_columns: [lost_units]
     sql: |
       SELECT p.category, ps.size, SUM(ih.lost_sales_units) AS lost_units, SUM(ih.demand_units) AS demand_units,
              SUM(ih.lost_sales_units) * 1.0 / NULLIF(SUM(ih.demand_units), 0) AS lost_share
@@ -331,6 +367,8 @@ examples:
   - id: h10
     difficulty: hard
     question: Do customers who get the wrong size return more in footwear or apparel?
+    key_columns: [category, size_fit]
+    metric_columns: [return_rate]
     sql: |
       SELECT p.category, s.size_fit,
              COUNT(*) FILTER (WHERE s.return_requested_at IS NOT NULL) * 1.0 / COUNT(*) AS return_rate,

@@ -41,7 +41,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "evals"))
 
 from provenance import SCORER_VERSION, cases_digest, data_digest, latency, provenance, stage_seconds  # noqa: E402
-from scoring import align, infer_columns, trim_top_n  # noqa: E402
+from scoring import align, infer_columns, trim_top_n, winner_only  # noqa: E402
 from stats import fmt, summarize  # noqa: E402
 
 from pantree_insights.config import get_settings  # noqa: E402
@@ -62,7 +62,8 @@ def load_suite(suite: str) -> list[dict]:
     if suite in ("regression", "all"):
         for e in _yaml("regression.yaml", "examples"):
             items.append({"suite": "regression", "set": "answer", "expect": "answer", "id": e["id"],
-                          "question": e["question"], "gold_sql": e["sql"], "difficulty": e.get("difficulty")})
+                          "question": e["question"], "gold_sql": e["sql"], "difficulty": e.get("difficulty"),
+                          **{k: e[k] for k in ("key_columns", "metric_columns") if k in e}})
         for q in _yaml("questions.yaml"):
             items.append({"suite": "regression", "set": q["expect"], **q})
     if suite in ("holdout", "all"):
@@ -91,7 +92,7 @@ def gold_frame(con, item: dict) -> tuple[pd.DataFrame, list[str], list[str]]:
     if result.truncated:
         raise ValueError("Gold SQL exceeded the row limit; a partial reference cannot score an answer")
     frame = result.frame
-    if item.get("key_columns") is not None and item.get("metric_columns"):
+    if item.get("key_columns") is not None and item.get("metric_columns") is not None:
         return frame, item["key_columns"], item["metric_columns"]
     keys, metrics = infer_columns(frame)
     return frame, keys, metrics
@@ -235,6 +236,12 @@ def judge(con, item: dict, final: dict, turns: dict) -> dict:
     ok, reason, _ = align(gold, trim_top_n(frame, gold, item["gold_sql"], item["question"]), keys, metrics,
                           label_columns=labels, percent_metrics=set(item.get("percent_metrics", [])),
                           tolerances=item.get("metric_tolerances"))
+    if not ok and metrics and len(frame) < len(gold):
+        winners = winner_only(frame, gold, metrics[0], item["question"])
+        if len(winners) < len(gold):
+            ok, reason, _ = align(winners, frame, keys, metrics, label_columns=labels,
+                                  percent_metrics=set(item.get("percent_metrics", [])),
+                                  tolerances=item.get("metric_tolerances"))
     if not ok and len(frame) > len(gold) and FULL_LIST.search(item["question"]):
         ok, reason, _ = align(gold, frame, keys, metrics, label_columns=labels, superset=True,
                               percent_metrics=set(item.get("percent_metrics", [])),
