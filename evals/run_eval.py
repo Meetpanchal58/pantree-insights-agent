@@ -46,7 +46,7 @@ from pantree_insights.config import get_settings  # noqa: E402
 from pantree_insights.db import connect, run_query  # noqa: E402
 from pantree_insights.guardrails import check_sql  # noqa: E402
 
-COST_PER_QUESTION = 0.012      # measured on the Nov 18 v2 run (prompt-cached interpreter + analyst)
+COST_PER_QUESTION = 0.04       # planning allowance only; actual cost depends on calls and token usage
 FULL_LIST = re.compile(r"\b(each|every|per)\b", re.I)
 MAX_TURNS = 5                  # stakeholder answers per question before giving up
 
@@ -233,7 +233,8 @@ def judge(con, item: dict, final: dict, turns: dict) -> dict:
             "failure_type": None if ok else ("silent_wrong" if final.get("trust") == "verified" else "wrong")}
 
 
-def run(items: list[dict], live: Path | None = None, repeats: int = 1, mode: str = "autonomous") -> list[dict]:
+def run(items: list[dict], live: Path | None = None, repeats: int = 1, mode: str = "autonomous",
+        llm_factory=None, should_stop=None) -> list[dict]:
     from pantree_insights.graph import Agent
     from pantree_insights.memory import Memory
     from pantree_insights.spec import default_catalog
@@ -242,7 +243,7 @@ def run(items: list[dict], live: Path | None = None, repeats: int = 1, mode: str
     inputs = provenance(items, settings.shop_dir)
     prepared = time.perf_counter()
     con, cat, specs = connect(), default_catalog(), gold_specs()
-    agent = Agent()
+    agent = Agent(llm_factory=llm_factory) if llm_factory else Agent()
     preparation_seconds = time.perf_counter() - prepared
     rows = []
     with TemporaryDirectory(prefix="pantree-eval-") as folder:
@@ -295,6 +296,8 @@ def run(items: list[dict], live: Path | None = None, repeats: int = 1, mode: str
             cost = f"${row['cost']:.3f}" if row["cost"] is not None else "cost unknown"
             print(f"{mark} {item['set'][:8]:8s} {item['id']:7s} {row['seconds']:5.1f}s {cost}  "
                   f"{row['reason'][:60]}", flush=True)
+            if should_stop and should_stop():
+                break
     agent.close()
     unchanged = data_digest(settings.shop_dir) == inputs["data_sha256"]
     for row in rows:
@@ -467,7 +470,7 @@ def main() -> None:
         return dry_run(items)
     if not args.yes:
         print(f"{len(items)} questions x {args.repeats} repeats: about "
-              f"${len(items) * args.repeats * COST_PER_QUESTION:.2f} (historical estimate). "
+              f"${len(items) * args.repeats * COST_PER_QUESTION:.2f} (planning allowance, not a measured forecast). "
               "Re-run with --yes to start.")
         return
     if get_settings().model_main.startswith("openai:") and not os.getenv("OPENAI_API_KEY"):
