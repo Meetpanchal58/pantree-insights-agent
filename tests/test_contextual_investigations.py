@@ -521,7 +521,8 @@ def test_pronouns_and_relative_clauses_are_not_result_references():
     for question in ("What is their average minimum order value?", "List every shopper and the way to reach them.",
                      "How many of those who returned an item ordered again?"):
         assert not refers_to_results(question), question
-    for question in ("Which of these brands grew fastest?", "Show the same sellers by city", "Break those down by month"):
+    for question in ("Which of these brands grew fastest?", "Show the same sellers by city",
+                     "Break those down by month"):
         assert refers_to_results(question), question
 
 

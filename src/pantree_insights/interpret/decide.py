@@ -15,7 +15,7 @@ from ..templates import build as build_template
 from .checks import coverage_problems, intent_problems, template_intent_problems
 from .models import MAX_ALTERNATIVES, MAX_REPAIRS, READINGS, Decision
 from .prompts import ask_alternatives, ask_model
-from .readings import canonical, normalise, premise_notes, reading_options, register_questions
+from .readings import canonical, immaterial, normalise, premise_notes, reading_options, register_questions
 
 
 def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], data: dict, question: str,
@@ -55,7 +55,8 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
         options=[], default='', why='A result reference needs complete verified evidence')
     if referential and not available:
         # Read the question first: a request to decline, or one that names its groups itself, needs no earlier result.
-        background += "\nNo earlier verified result exists in this conversation; nothing can be bound as 'these' groups."
+        background += ("\nNo earlier verified result exists in this conversation; "
+                       "nothing can be bound as 'these' groups.")
     elif referential:
         choices = [{k: p.get(k) for k in ('run_id', 'query_index', 'field', 'complete')} for p in available]
         background += "\nAvailable result populations (server binds the exact members): " + json.dumps(choices)
@@ -232,6 +233,9 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
         alt = normalise(alt, cat, aliases)
         if (validate(alt, cat) or intent_problems(effective_question, alt, cat, data["last_day"])
                 or canonical(alt) == canonical(spec)):
+            continue
+        if why := immaterial(effective_question, spec, alt):
+            detail.setdefault("dropped_alternatives", []).append(why)
             continue
         different.append(alt)
     if not different:

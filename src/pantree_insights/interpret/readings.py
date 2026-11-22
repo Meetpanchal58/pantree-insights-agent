@@ -117,6 +117,61 @@ def canonical(spec: QuerySpec) -> str:
     }, sort_keys=True, default=str)
 
 
+GENERIC = {"marketing", "product", "customer", "sales", "avg", "pct", "total", "share", "the", "of", "by"}
+
+
+def _stems(name: str) -> set[str]:
+    """'late_delivery_rate' -> {'late', 'deliv', 'rate'}: name words cut to 5 letters, generic words dropped."""
+    return {w[:5] for w in re.split(r"[_.\s]+", name.split(".")[-1].casefold()) if w and w not in GENERIC}
+
+
+def _mentioned(name: str, question: str) -> bool:
+    words = {w[:5] for w in re.findall(r"[a-z]+", question.casefold())}
+    stems = _stems(name)
+    return bool(stems) and stems <= words
+
+
+def _milestone(field: str | None, question: str) -> bool:
+    """Does the question name the event a date column records? 'sales.delivered_at' needs "delivered", not
+    "delivery address"; 'return_requested_at' is named by "returned" or "requested"."""
+    if not field:
+        return False
+    words = [w for w in field.split(".")[-1].removesuffix("_at").split("_") if w not in GENERIC]
+    forms = {w for w in words} | {w.removesuffix("ed").removesuffix("e") + "ed" for w in words} | {
+        "returned" if w == "return" else w for w in words}
+    return any(re.search(rf"\b{re.escape(f)}\b", question, re.I) for f in forms if len(f) > 3)
+
+
+def immaterial(question: str, spec: QuerySpec, alt: QuerySpec) -> str | None:
+    """Why an alternative reading is not worth asking about, or None if it is. Deterministic filters for what the
+    contrast prompt is told not to propose: presentation changes and readings that drop the question's own words."""
+    a, b = json.loads(canonical(spec)), json.loads(canonical(alt))
+    diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
+    if diff <= {"measures", "shares"} and (set(a["measures"]) <= set(b["measures"])
+                                          or set(b["measures"]) <= set(a["measures"])):
+        return "only adds or drops a supporting measure"
+    if diff == {"time"} and a["time"] and b["time"] and {**a["time"], "field": None} == {**b["time"], "field": None} \
+            and not _milestone(alt.time.field, question):
+        return "dates by another milestone the question does not mention"
+    if diff == {"filters"}:
+        added = {f.field for f in alt.filters} - {f.field for f in spec.filters}
+        kept = all(any(f == g for g in alt.filters) for f in spec.filters)
+        if kept and added and all(f.op == "is_set" and not _milestone(f.field, question)
+                                  for f in alt.filters if f.field in added):
+            return "only requires a milestone the question does not mention"
+    governed = {m.metric for m in spec.measures if m.metric}
+    named = {m for m in governed if _mentioned(m, question)}
+    if named - {m.metric for m in alt.measures}:
+        return "replaces a metric the question names"
+    if governed and not governed & {m.metric for m in alt.measures} and all(m.metric is None for m in alt.measures):
+        return "replaces a governed metric with an ad-hoc aggregate"
+    removed, added = set(spec.dimensions) - set(alt.dimensions), set(alt.dimensions) - set(spec.dimensions)
+    if removed and added and all(not _mentioned(d, question) for d in added) and any(
+            _mentioned(d, question) for d in removed):
+        return "replaces a split the question names with one it does not"
+    return None
+
+
 def register_questions(question: str, register: dict[str, list[str]], answers: dict[str, str]) -> list:
     """Known two-meaning phrases in the question that the user's answers have not settled."""
     asked = " ".join(answers).casefold()
