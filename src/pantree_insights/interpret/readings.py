@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import date
+from difflib import SequenceMatcher
 
 from ..agents import ClarifyingQuestion
 from ..spec import Catalog, QuerySpec
@@ -115,6 +116,29 @@ def canonical(spec: QuerySpec) -> str:
         "columns": sorted(spec.columns), "limit": spec.limit,
         **({"operation": spec.operation.model_dump(mode="json")} if spec.operation else {}),
     }, sort_keys=True, default=str)
+
+
+def misspelt_values(question: str, spec: QuerySpec, cat: Catalog, aliases: dict[str, str]) -> list[tuple[str, str]]:
+    """(word in the question, stored value) for filter values the question never names but nearly spells:
+    "Mumbay" read as Mumbai. The user confirms the correction instead of the model applying it silently."""
+    text = question.casefold()
+    words = re.findall(r"[\w'-]+", text)
+    out = []
+    for f in spec.filters + [w for m in spec.measures for w in m.where]:
+        if f.op not in ("eq", "in"):
+            continue
+        for value in f.values:
+            if not isinstance(value, str) or len(value) < 4:
+                continue
+            names = [value.casefold()] + [a for a, v in aliases.items() if v == value]
+            if any(n in text for n in names):
+                continue
+            size = len(value.split())
+            grams = [" ".join(words[i:i + size]) for i in range(len(words) - size + 1)]
+            close = max(grams, key=lambda g: SequenceMatcher(None, g, value.casefold()).ratio(), default="")
+            if close and SequenceMatcher(None, close, value.casefold()).ratio() >= 0.8:
+                out.append((close, value))
+    return out
 
 
 ALL_GROUPS = 30

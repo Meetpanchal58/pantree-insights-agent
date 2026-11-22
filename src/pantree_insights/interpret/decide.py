@@ -20,6 +20,7 @@ from .readings import (
     compared_members,
     complete_ranking,
     immaterial,
+    misspelt_values,
     normalise,
     premise_notes,
     reading_options,
@@ -188,6 +189,15 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             if not problems:
                 problems = intent_problems(effective_question.strip(), spec, cat, data["last_day"])
             if not problems:
+                typos = [(w, v) for w, v in misspelt_values(question, spec, cat, aliases)
+                         if not any(v.casefold() in a.casefold() for a in answers.values())]
+                if typos:
+                    word, value = typos[0]
+                    return Decision("clarify", required=True, restated=reading.restated_question, detail=detail,
+                                    questions=[ClarifyingQuestion(
+                                        question=f"Did you mean {value} for \"{word}\"?",
+                                        options=[f"Yes, {value}", "No, something else"], default=f"Yes, {value}",
+                                        why=f"\"{word}\" is not a recorded value; {value} is the closest")])
                 break
         else:
             problems = ["no spec, template or question was given"]

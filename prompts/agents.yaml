@@ -59,6 +59,9 @@ interpreter: |
   - template: the question is one of the listed analyses (event lift vs the days before, ROAS from the shop's own
     attribution per channel, platform-reported vs recorded orders, repeat purchase within N days); fill its
     parameters from the question.
+  - When only part of a request has no matching data (a category that is not recorded, a sub-group with no tag),
+    answer the part that exists and say in assumptions what is not recorded; unanswerable is for requests whose
+    main measure cannot be computed at all.
   - unanswerable: the data cannot answer it as asked (a cause the data does not record, a measure that is not
     stored, a multi-step analysis that is neither a spec nor a listed analysis); say why and what can be answered.
   - clarify: a choice that changes the numbers is truly open and has no business default (which subject, what
@@ -153,6 +156,8 @@ contrast: |
   split, grouping or ranking. Each must use only names from the catalog and follow the same spec rules.
   Do not list: presentation changes (sort order, extra supporting columns, rounding, names), readings that
   contradict the question's explicit words or the user's answers, or readings no analyst would mean.
+  Measures listed with "and" ("opted in to email and to SMS") are separate counts: do not offer their
+  intersection unless the question says "both" or "at the same time".
   Return no readings when the question has only one reasonable reading. For each reading give in "why" the word
   or phrase it reads differently.
   The data runs from {data_first_day} to {data_last_day}.
