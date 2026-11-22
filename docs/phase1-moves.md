@@ -288,3 +288,9 @@ Paths are relative to src/pantree_insights; browser paths are relative to its st
 | `app.js:init` | `session.js:init` |
 | `app.js:showSignin` | `session.js:showSignin` |
 | `app.js:renderUser` | `session.js:renderUser` |
+| `app.js:fileName` | `render.js:fileName` |
+| `app.js:userBubble` | `render.js:userBubble` |
+| `app.js:autosize` | `render.js:autosize` |
+| `app.js:$` | `state.js:$` |
+| `app.js:esc` | `state.js:esc` |
+| `workspace.js:money` | `workspace.js:money` |

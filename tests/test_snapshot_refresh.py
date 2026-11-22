@@ -48,6 +48,6 @@ def test_paused_run_resumes_with_its_own_agent(monkeypatch):
 def test_snapshot_change_stops_before_saving_an_insight(monkeypatch):
     agent = object.__new__(graph.Agent)
     agent.snapshot = "old"
-    monkeypatch.setattr("pantree_insights.graph.agent.snapshot_signature", lambda: "new")
+    monkeypatch.setattr("pantree_insights.graph.nodes_deliver.snapshot_signature", lambda: "new")
     result = agent.remember({"run_id": "r", "analysis": {}, "question": "q"})
     assert result["status"] == "failed" and result["insight_id"] is None

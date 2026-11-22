@@ -55,7 +55,7 @@ See [the implementation and validation limits](pr43-validation.md).
 
 ## Query planning
 
-`spec.py` retains QuerySpec and compiles each named metric from `semantic/metrics.yaml`. A multi-fact spec may
+`spec/` retains QuerySpec and compiles each named metric from `semantic/metrics.yaml`. A multi-fact spec may
 combine named metrics from two to four sources and ratios of their results. Each stage aggregates at its native
 grain, applies its own governed date and population rules, and then joins on conformed concept keys. Ranking
 happens after the join. Missing populations stay NULL; zero denominators produce NULL. Shared dimension and
