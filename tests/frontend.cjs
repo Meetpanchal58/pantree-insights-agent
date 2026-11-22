@@ -131,6 +131,16 @@ const path = require('node:path');
     assert.equal(await page.locator('#chart').getAttribute('data-drawn'),'yes');
     assert(!await page.evaluate(()=>fmtNum(247,'lost_sales_units').includes('₹')));
     assert(await page.evaluate(()=>fmtNum(100,'net_sales').includes('₹')));
+    // Verified rows arrive before analysis completes and never mark the run finished.
+    await page.evaluate(()=>{
+      newTimeline('Revenue',false); S.busy=true;
+      onEvent({type:'result',run_id:'early',trust:'verified',data_as_of:'2026-11-22',data_size:'small',
+        result:{columns:['revenue'],data:[[123.45]],truncated:false},sql:'SELECT 123.45 AS revenue'},null);
+    });
+    assert.match(await page.locator('#result table').innerText(),/₹123/);
+    assert.equal(await page.evaluate(()=>S.run.final.result.data[0][0]),123.45);
+    assert.match(await page.locator('#result h3').innerText(),/Preparing the explanation/);
+    assert.equal(await page.evaluate(()=>S.busy),true);
     // A settled clarification must stop displaying an unresolved question marker.
     await page.evaluate(()=>{
       newTimeline('Clarification',false);

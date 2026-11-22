@@ -47,7 +47,9 @@ class Analysis(BaseModel):
 
     def texts(self) -> dict[str, str | list[str]]:
         return {"headline": self.headline, "findings": self.findings, "recommendations": self.recommendations,
-                "caveats": self.caveats, "memory": [m.statement for m in self.memory]}
+                "caveats": self.caveats, "memory": [m.statement for m in self.memory],
+                "chart_title": self.chart_title, "chart_subtitle": self.chart_subtitle,
+                "follow_up_questions": self.follow_up_questions}
 
     def rendered(self) -> Analysis:
         """The same analysis with placeholders replaced by the claims' formatted values."""
@@ -56,6 +58,7 @@ class Analysis(BaseModel):
             "headline": r(self.headline), "findings": [r(t) for t in self.findings],
             "recommendations": [r(t) for t in self.recommendations], "caveats": [r(t) for t in self.caveats],
             "memory": [m.model_copy(update={"statement": r(m.statement)}) for m in self.memory],
+            "follow_up_questions": [r(t) for t in self.follow_up_questions],
             "chart_title": r(self.chart_title), "chart_subtitle": r(self.chart_subtitle)})
 
 

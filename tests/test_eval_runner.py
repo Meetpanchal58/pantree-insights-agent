@@ -137,3 +137,15 @@ def test_live_runner_repeats_and_counts_failures(monkeypatch, tmp_path, provider
     run_eval.rescore(report)
     assert report.read_bytes() == original
     assert report.with_name("report.rescored.json").exists()
+
+
+def test_first_turn_metric_includes_answers_that_skip_confirmation():
+    class Agent:
+        def start(self, *args, **kwargs):
+            return "run", iter([{"type": "final", "status": "done", "spec": {"table": "sales"}}])
+    class User:
+        def matches(self, event):
+            return True
+    _, turns = run_eval.ask(Agent(), {"set": "answer", "question": "q"}, User())
+    assert turns["first_turn_correct"] and turns["first_turn_answered"] and turns["first_reading"]
+    assert turns["interactions"] == 0

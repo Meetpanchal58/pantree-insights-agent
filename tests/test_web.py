@@ -259,7 +259,8 @@ def test_readback_is_sent_to_the_browser_and_confirming_finishes(app_env):
     client, codes, _ = app_env
     sign_in(client, codes)
     chat = client.post("/api/chats", json={}).json()
-    run_id = client.post(f"/api/chats/{chat['id']}/ask", json={"question": "Revenue by category?"}).json()["run_id"]
+    run_id = client.post(f"/api/chats/{chat['id']}/ask",
+                         json={"question": "Break down revenue by category"}).json()["run_id"]
     events = run_to_end(client, run_id, confirm=False)
     assert events[-1]["kind"] == "confirm" and "**Measure:**" in events[-1]["readback"]
     client.post(f"/api/runs/{run_id}/answer", json={"answers": {CONFIRM_QUESTION: CONFIRM_YES}})

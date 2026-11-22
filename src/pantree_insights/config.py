@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     llm_max_retries: int = 1
     max_parallel_llm_calls: int = 2  # bound concurrent provider requests per instance
     max_concurrent_runs: int = 4     # questions processed at once per instance; the rest queue visibly
-    contrast_check: bool = True      # run materially different readings; ask when their numbers differ
+    max_pending_runs: int = 32      # bounded active + queued + paused requests per instance
+    contrast_check: bool = True      # check semantic alternatives on the model path; never execute alternatives
     # Sampling temperature. None = provider default: OpenAI reasoning models (gpt-6.x) do not accept a
     # temperature, so it is only sent when set. Reports record the value used.
     temperature: float | None = None

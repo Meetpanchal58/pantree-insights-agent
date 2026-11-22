@@ -212,7 +212,22 @@ def profile_for(con: duckdb.DuckDBPyConnection, info: dict, *, joins_only: bool 
     key = f"{info['size']}_{info['last_day']}_{digest}"
     if joins_only:
         key += "_joins"
+        published = published_path(info)
+        if published.exists():
+            try:
+                return _from_json(published.read_text())
+            except (ValueError, KeyError, TypeError):
+                pass  # invalid artifacts never replace measured cardinality
     return cached_profile(con, key, joins_only=joins_only)
+
+
+def published_path(info: dict) -> Path:
+    """Portable profile identity: manifest contents + schema + profiler implementation, not mount paths."""
+    info = {k: v for k, v in info.items() if k != "snapshot_signature"}
+    digest = hashlib.sha256(json.dumps(info, sort_keys=True).encode()
+                            + (get_settings().semantic_dir / "schema.yaml").read_bytes()
+                            + Path(__file__).read_bytes()).hexdigest()[:24]
+    return get_settings().shop_dir / ".pantree" / f"joins_{digest}.json"
 
 
 @lru_cache
@@ -225,6 +240,26 @@ def get_profile() -> Profile:
 
 def main() -> None:
     """pantree-profile: ID formats, join cardinality and unmatched rows."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="pantree-profile")
+    parser.add_argument("--publish-joins", action="store_true", help="write measured join metadata beside the dataset")
+    args = parser.parse_args()
+    if args.publish_joins:
+        from .db import connect, manifest
+
+        con = connect()
+        try:
+            measured = build_profile(con, joins_only=True)
+        finally:
+            con.close()
+        path = published_path(manifest())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(_to_json(measured))
+        temporary.replace(path)
+        print(f"Published measured join metadata: {path}")
+        return
     profile = get_profile()
     print("ID formats:")
     for col, fmt in sorted(profile.id_formats().items()):

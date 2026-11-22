@@ -64,8 +64,8 @@ ENV_VARS="APP_ENV=production,DATA_DIR=/data,DATA_SIZE=full,ADMIN_EMAILS=[\"${ADM
 # Keep min-instances=0 for low idle cost; min=1 is an optional paid latency upgrade.
 gcloud run deploy "$SERVICE" --image "$IMAGE" --region "$REGION" \
   --service-account "$SA" --allow-unauthenticated \
-  --min-instances 0 --max-instances 1 --concurrency 20 \
-  --cpu 1 --memory 2Gi --cpu-throttling --timeout 300 \
+  --min-instances "${MIN_INSTANCES:-0}" --max-instances 1 --concurrency "${CONCURRENCY:-20}" \
+  --cpu "${CPU:-1}" --memory "${MEMORY:-2Gi}" --cpu-throttling --timeout 300 \
   --execution-environment gen2 --cpu-boost \
   --add-volume "name=data,type=cloud-storage,bucket=${BUCKET},readonly=true" \
   --add-volume-mount "volume=data,mount-path=/data" \

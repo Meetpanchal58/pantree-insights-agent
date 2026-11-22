@@ -18,6 +18,7 @@ Fields are concept names ("category", "payment_type", "city") or qualified catal
 """
 from __future__ import annotations
 
+import math
 import re
 from datetime import date, timedelta
 from functools import lru_cache
@@ -34,6 +35,7 @@ GRAINS = ("day", "week", "month", "quarter", "year")
 TICKETS = "tickets"                          # virtual table: the tickets source (one row per support ticket)
 
 
+@lru_cache(maxsize=128)
 def _aliases(from_: str) -> dict[str, str] | None:
     """{'s': 'sales', 'p': 'product_master'} for a metric source's FROM clause; None if it is a subquery."""
     tree = sqlglot.parse_one(f"SELECT 1 FROM {from_}", read="duckdb")
@@ -201,6 +203,15 @@ def validate(spec: QuerySpec, cat: Catalog) -> list[str]:
     if table != TICKETS and table not in cat.schema.tables:
         return [f"unknown table {table}"]
     names = [m.name for m in spec.measures]
+    if any(not re.fullmatch(r"[a-z][a-z0-9_]*", n) for n in names):
+        problems.append("measure names must be lowercase SQL identifiers")
+    multi = len({cat.source_table(m.metric) for m in spec.measures if m.metric in cat.metrics.metrics}) > 1
+    if multi:
+        try:
+            compile_multifact(spec, cat)
+        except (SpecError, KeyError, ValueError) as error:
+            problems.append(str(error))
+        return problems
     if len(set(names)) != len(names):
         problems.append("two measures have the same name")
     if not spec.measures and not spec.columns:
@@ -219,8 +230,9 @@ def validate(spec: QuerySpec, cat: Catalog) -> list[str]:
             problems += _check_field(m.field, table, cat, numeric=True)
         if m.agg == "share" and not m.where:
             problems.append(f"{m.name}: a share needs the condition (where) it counts")
-        if m.ratio and (len(m.ratio) != 2 or any(r not in names for r in m.ratio)):
-            problems.append(f"{m.name}: ratio must name two other measures")
+        if m.ratio and (len(m.ratio) != 2 or any(r not in [x.name for x in spec.measures if not x.ratio]
+                                                for r in m.ratio)):
+            problems.append(f"{m.name}: ratio must name two non-ratio measures")
         if m.ratio and m.where:
             problems.append(f"{m.name}: apply filters to its numerator and denominator measures")
         for f in m.where:
@@ -236,6 +248,8 @@ def validate(spec: QuerySpec, cat: Catalog) -> list[str]:
             problems.append("the period starts after it ends")
         if spec.time.field:
             problems += _check_field(spec.time.field, table, cat)
+            if not problems and cat.kind(cat.resolve(spec.time.field, table)[0], table) != "timestamp":
+                problems.append("the time field must be a date or timestamp")
         elif _default_time(spec, cat) is None and (spec.time.start or spec.time.end or spec.time.grain):
             problems.append(f"{table} has no main date: say which date the period applies to")
     if spec.ranking and spec.ranking.by not in names:
@@ -269,11 +283,14 @@ def _check_filter(f: Filter, table: str, cat: Catalog) -> list[str]:
     if f.op in ("is_set", "is_not_set"):
         return []
     if f.op.endswith("_field"):
-        return [] if f.other else [f"{f.field}: {f.op} needs the other column"]
+        return _check_field(f.other, table, cat) if f.other else [f"{f.field}: {f.op} needs the other column"]
     if not f.values:
         return [f"filter on {f.field} has no value"]
+    if any(isinstance(v, float) and not math.isfinite(v) for v in f.values):
+        return [f"filter on {f.field} must use finite values"]
     if f.op in ("lt", "lte", "gt", "gte"):
-        ok = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in f.values)
+        ok = len(f.values) == 1 and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                                       and math.isfinite(v) for v in f.values)
         return [] if ok else [f"{f.field} {f.op} needs a number"]
     allowed = entry.labels() if entry is not None and entry.expression else cat.values_of(expression)
     if allowed is not None:
@@ -284,8 +301,12 @@ def _check_filter(f: Filter, table: str, cat: Catalog) -> list[str]:
     elif cat.con is not None and cat.kind(expression, table) == "text":     # many values: check they exist
         for v in f.values:
             t, c = expression.split(".")
-            if cat.con.execute(f'SELECT 1 FROM {t} WHERE "{c}" = ? LIMIT 1', [str(v)]).fetchone() is None:
-                return [f"{f.field} has no value '{v}'"]
+            cursor = cat.con.cursor()
+            try:
+                if cursor.execute(f'SELECT 1 FROM {t} WHERE "{c}" = ? LIMIT 1', [str(v)]).fetchone() is None:
+                    return [f"{f.field} has no value '{v}'"]
+            finally:
+                cursor.close()
     return []
 
 
@@ -302,6 +323,10 @@ def _default_time(spec: QuerySpec, cat: Catalog) -> str | None:
 
 def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
     """One DuckDB SELECT for the spec. Raises SpecError if it cannot be built safely."""
+    if len({cat.source_table(m.metric) for m in spec.measures if m.metric in cat.metrics.metrics}) > 1:
+        return compile_multifact(spec, cat)
+    if any(not re.fullmatch(r"[a-z][a-z0-9_]*", m.name) for m in spec.measures):
+        raise SpecError("measure names must be lowercase SQL identifiers")
     table = spec.table
     where: list[str] = []
     needed: list[str] = []                     # tables the query reads besides the base table
@@ -353,12 +378,20 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
             expression, _, _ = cat.resolve(f.field, table)
             targets = _tables(expression)
             join = joins.get(targets[0]) if len(targets) == 1 else None
+            # Filters on a one-to-many relationship mean membership, not replication of base rows.
+            if not join and len(targets) == 1 and targets[0] != table and not f.op.endswith("_field"):
+                target = targets[0]
+                path = cat.graph.path(table, [target]) if table != TICKETS else []
+                if path and any(s.fans_out for s in path) and not any(s.right in joined for s in path):
+                    first, *rest = path
+                    nested = first.right + "".join(f" JOIN {s.right} ON {s.on}" for s in rest)
+                    join = f"{nested} ON {first.on}"
             if join and targets[0] not in joined:
                 memberships.setdefault(join, []).append(condition(f, register=False))
             else:
                 clauses.append(condition(f))
         for join, predicates in memberships.items():
-            target, on = join.split(" ON ", 1)
+            target, on = join.rsplit(" ON ", 1)
             clauses.append(f"EXISTS (SELECT 1 FROM {target} WHERE ({on}) AND "
                            + " AND ".join(f"({p})" for p in predicates) + ")")
         return clauses
@@ -388,6 +421,8 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
         if m.ratio:
             if m.where:
                 raise SpecError(f"{m.name}: apply filters to its numerator and denominator measures")
+            if len(m.ratio) != 2 or any(r not in selects for r in m.ratio):
+                raise SpecError(f"{m.name}: ratio must name two non-ratio measures")
             a, b = m.ratio
             selects[m.name] = f"({selects[a]}) * 1.0 / NULLIF(({selects[b]}), 0)"
 
@@ -453,6 +488,9 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
         sql += "\nORDER BY " + ", ".join(str(i + 1) for i in range(len(list_cols)))
         return sql + f"\nLIMIT {spec.limit or 100}"
     cols = [f"{e} AS {n}" for n, e in groups] + [f"{e} AS {n}" for n, e in selects.items()]
+    output_names = [n for n, _ in groups] + [m.name for m in spec.measures] + [f"{s}_share" for s in spec.shares]
+    if len(output_names) != len(set(output_names)):
+        raise SpecError("result columns must have unique names; a measure collides with a split")
     partition = f"PARTITION BY q.{spec.time.grain}" if spec.time and spec.time.grain else ""
     inner = f"SELECT {', '.join(cols)}\nFROM {base}" + "".join(f"\n{j}" for j in joins)
     inner += ("\nWHERE " + " AND ".join(where)) if where else ""
@@ -473,6 +511,76 @@ def compile_spec(spec: QuerySpec, cat: Catalog) -> str:
     elif groups and spec.measures:
         sql += f"\nORDER BY {spec.measures[0].name} DESC NULLS LAST"
     sqlglot.parse_one(sql, read="duckdb")                # never hand out SQL that does not parse
+    return sql
+
+
+def compile_multifact(spec: QuerySpec, cat: Catalog) -> str:
+    """Aggregate each fact at its own grain, then join the aggregates on conformed dimensions.
+
+    No raw fact-to-fact joins, early ranking, zero filling of missing populations, or aggregation of ratios.
+    Each stage uses the existing compiler and cardinality checks. Unsupported scopes fail explicitly.
+    """
+    if spec.columns or spec.limit or spec.shares or any(m.agg for m in spec.measures):
+        raise SpecError("multi-fact plans support named metrics and their ratios, not row lists or raw aggregates")
+    if spec.time and spec.time.field:
+        raise SpecError("multi-fact periods use each metric's governed date; an explicit shared date is ambiguous")
+    if any("." in d for d in spec.dimensions) or any("." in f.field for f in spec.filters):
+        raise SpecError("multi-fact splits and global filters must use shared business concepts")
+    stages: dict[str, list[Measure]] = {}
+    names = [m.name for m in spec.measures]
+    if len(names) != len(set(names)) or any(not re.fullmatch(r"[a-z][a-z0-9_]*", n) for n in names):
+        raise SpecError("multi-fact measure names must be unique lowercase SQL identifiers")
+    for m in spec.measures:
+        if m.metric:
+            if m.metric not in cat.metrics.metrics:
+                raise SpecError(f"unknown metric {m.metric}")
+            stages.setdefault(cat.source_table(m.metric), []).append(m)
+    if spec.table not in stages or len(stages) < 2 or len(stages) > 4:
+        raise SpecError("multi-fact plans require two to four metric sources, including the base table")
+    ctes, keys, expressions = [], None, {}
+    for i, (table, measures) in enumerate(stages.items()):
+        child = spec.model_copy(update={"table": table, "measures": measures, "ranking": None})
+        problems = validate(child, cat)
+        if problems:
+            raise SpecError(f"{table} stage: {'; '.join(problems)}")
+        tree = sqlglot.parse_one(compile_spec(child, cat), read="duckdb")
+        tree.set("order", None)
+        stage_keys = [e.alias_or_name for e in tree.selects if e.alias_or_name not in {m.name for m in measures}]
+        if keys is not None and stage_keys != keys:
+            raise SpecError("multi-fact dimensions do not have the same identity keys on every source")
+        keys = stage_keys
+        # Identical concept names alone are insufficient (e.g. support channel vs marketing channel).
+        for d in [*spec.dimensions, *(f.field for f in spec.filters)]:
+            reference = cat.resolve(d, spec.table)[0]
+            if cat.resolve(d, table)[0] != reference:
+                raise SpecError(f"{d} is not a conformed dimension across these sources")
+        ctes.append(f"stage_{i} AS ({tree.sql(dialect='duckdb')})")
+        expressions.update({m.name: f"stage_{i}.{m.name}" for m in measures})
+    for m in spec.measures:
+        if m.ratio:
+            if m.where or len(m.ratio) != 2 or any(r not in {x.name for x in spec.measures if x.metric}
+                                                  for r in m.ratio):
+                raise SpecError(f"{m.name}: ratio must name two unfiltered stage measures")
+            a, b = (expressions[r] for r in m.ratio)
+            expressions[m.name] = f"({a}) * 1.0 / NULLIF({b}, 0)"
+    count = len(stages)
+    keys = keys or []
+    if set(keys) & set(names):
+        raise SpecError("a measure name collides with a split")
+    coalesced = lambda k, n: "COALESCE(" + ", ".join(f"stage_{j}.{k}" for j in range(n)) + ")" if n > 1 \
+        else f"stage_0.{k}"  # noqa: E731
+    columns = [f"{coalesced(k, count)} AS {k}" for k in keys]
+    columns += [f"{expressions[m.name]} AS {m.name}" for m in spec.measures]
+    sql = "WITH " + ",\n".join(ctes) + "\nSELECT " + ", ".join(columns) + "\nFROM stage_0"
+    for i in range(1, count):
+        on = " AND ".join(f"{coalesced(k, i)} IS NOT DISTINCT FROM stage_{i}.{k}" for k in keys) or "TRUE"
+        sql += f"\nFULL OUTER JOIN stage_{i} ON {on}"
+    if spec.ranking:
+        if spec.ranking.by not in names:
+            raise SpecError("ranking must name a measure")
+        sql += f"\nORDER BY {spec.ranking.by} {spec.ranking.order.upper()} NULLS LAST LIMIT {spec.ranking.limit}"
+    elif keys:
+        sql += "\nORDER BY " + ", ".join(keys)
     return sql
 
 

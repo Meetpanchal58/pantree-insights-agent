@@ -1,98 +1,76 @@
 # Architecture
 
-## The design target
+A model chooses an analytical request; governed Python code validates and compiles SQL. LangGraph retains
+checkpointed clarification, deterministic execution, bounded repair, charting and memory. Verification describes
+the selected scope and numeric evidence, not a proof of natural-language understanding or causality.
 
-> Every number the user is shown is correct for the confirmed question, the governed definitions and the data
-> snapshot. When the system cannot reach that bar it asks, or says it cannot answer as a verified number yet. It
-> never guesses.
+## Conditional flow
 
-A question can produce an answer, clarification, a refusal, or a recoverable failure. A compiled query and
-checked numeric claims reduce errors, but do not prove the interpretation, definitions or compiler are correct.
-The [evaluation baseline](evaluation-baseline.md) measures these limits; its compiler results are not a claim
-of perfect model or business-answer accuracy.
-
-The design follows *structural abstention* ([Never the Number, 2026](https://arxiv.org/html/2608.13926)): a
-language model may decide **which question** is answered, never **which value** is returned. The model reads and
-writes language; code builds every query.
-
-## Flow (LangGraph, `src/pantree_insights/graph.py`)
-
-```
-check_input     code: personal data, injection, length                         -> decline
-interpret       interpret.py:
-                  ambiguity register (glossary.yaml `ambiguous`)               -> ask
-                  interpreter: question -> QuerySpec | template | clarify | unanswerable | decline
-                  validate against the catalog, normalise values, one repair   -> ask if still invalid
-                  contrast: alternative readings compiled and RUN; numbers differ -> ask
-                  premise: a period outside the data is stated
-clarify         pause (LangGraph interrupt): questions, then the read-back built from the spec; nothing runs
-                until the user confirms; a correction goes back to interpret
-execute         spec.py compiles the spec, templates.py builds a reviewed analysis; same safety checks as ever;
-                cached by (SQL, data snapshot)                                  -> trust: verified
-analyse         analyst writes text with {c1} placeholders; code fills numbers from the result; a sentence whose
-                number cannot be checked is removed
-chart, remember  chart; verified insight saved to memory
+```text
+input safety -> context (once per request) -> intent
+  reviewed complete KPI grammar, no prior context -> validated QuerySpec
+  otherwise -> interpreter -> structural + explicit intent checks -> at most one repair
+    material ambiguity -> clarification checkpoint
+    valid spec -> semantic contrast (no speculative SQL) -> read-back confirmation
+    valid template -> parameter and supported-scope checks -> read-back confirmation
+  -> single-source or grain-aware multi-fact compiler -> SQL safety -> execution
+  -> snapshot check -> immediate result event
+  -> deterministic KPI summary or analyst -> numeric/unit/prose checks -> at most one rewrite
+  -> remove unsupported claims -> recompute accepted values -> chart -> scoped memory
 ```
 
-## Layers
+A grammar match consumes the whole question. Unknown filters, modifiers, date forms, prior chat, answers or
+business context use the interpreter. Relative dates follow the snapshot's last day and are disclosed. A known
+ambiguous phrase is checked before either path. Unresolved interpretations stop after six clarification rounds.
+No metric is invented for an unsupported concept such as an undefined NMV.
 
-| Layer | Files | Role |
-|---|---|---|
-| Knowledge | `semantic/schema.yaml`, `metrics.yaml`, `concepts.yaml`, `glossary.yaml`, `catalog.yaml` (generated) | what each table, column, value and metric means; splits per subject; business terms; two-meaning phrases |
-| Request | `spec.py` | the QuerySpec (metrics or catalog aggregates, splits, filters, period and grain, ranking, share of total, row lists); validation; deterministic compiler from metrics + concept map + measured join graph (`joins.py`, `profile.py`) |
-| Analyses | `templates.py` | reviewed SQL for multi-step questions: event lift, ROAS from own attribution, platform vs recorded orders, repeat purchase within N days |
-| Understanding | `interpret.py`, `prompts/agents.yaml` | interpreter and contrast calls, ambiguity register, premise checks, read-back |
-| Orchestration | `graph.py` | the flow above, pause/resume, cache, trust label |
-| Explanation | `agents.py`, `grounding.py`, `charts.py` | analyst output, claim verification, charts |
-| Safety | `guardrails.py`, `db.py` | input guard; read-only DuckDB views without blocked columns; SQL checks on every query |
-| App | `web.py`, `auth.py`, `store.py`, `memory.py`, `pulse.py`, `demos.py`, `static/` | FastAPI app, sign-in, chats and projects, memory, KPI pulse, offline demos |
+## Query planning
 
-## What can go wrong, and the control
+`spec.py` retains QuerySpec and compiles each named metric from `semantic/metrics.yaml`. A multi-fact spec may
+combine named metrics from two to four sources and ratios of their results. Each stage aggregates at its native
+grain, applies its own governed date and population rules, and then joins on conformed concept keys. Ranking
+happens after the join. Missing populations stay NULL; zero denominators produce NULL. Shared dimension and
+filter expressions must match across sources; same names with different meanings are refused. Row lists,
+unreviewed aggregates and explicit cross-source dates are not allowed on this path.
 
-| Layer | Failure | Control |
-|---|---|---|
-| Understanding | a phrase with two meanings read one way ("wrong size") | ambiguity register: always asked |
-| | a confident misreading | contrast: alternative readings are run; different numbers -> the user chooses; the read-back states exact definitions and must be confirmed |
-| | an unknown term, value or column | validation fails -> one repair -> asked |
-| | a question no spec or template expresses | "can't answer as a verified number yet" (no free-form SQL) |
-| | a false premise (no data in the period) | stated in the read-back and the answer, never a silent zero |
-| Query | SQL differing from a definition | compiled from metrics.yaml; tested on every gold answer and every metric x dimension against an independent implementation (`tests/reference_sql.py`) |
-| | a join that repeats rows | refused using measured cardinality |
-| | names several IDs share (Payday Sale x 12) | grouped with their ID |
-| Explanation | a number typed by the model | numbers are claims rendered by code; an unverifiable sentence is removed |
-| Knowledge | a wrong or one-sided entry | knowledge-base lint (`tests/test_knowledge_base.py`): an alias maps to one value; a two-meaning phrase is never an alias |
+One-to-many filters use correlated EXISTS when they only express membership. Unsupported projections across
+fan-out joins still fail, rather than inflating measures. Measured join metadata is tied to the schema, profiler
+implementation and published dataset manifest. The data publisher must update the manifest on every refresh.
+Templates retain their reviewed SQL for event lift, channel ROAS, reconciliation and fixed-window repeat purchase.
+Unknown template parameters and unsupported date scope cannot silently disappear.
 
-## Why the model never writes SQL
+## Evidence and delivery
 
-Measured on this project: with the question already resolved, model-written SQL was still wrong on some questions
-(a missing filter, a missing share), and retries turned correct queries into wrong ones. Compiled SQL is the same
-every time, is tested exhaustively, and costs nothing. Industry results point the same way: semantic-layer
-compilation 98-100% vs 84-90% for text-to-SQL on the same data, and outside its scope it errors instead of guessing
-([dbt 2026](https://docs.getdbt.com/blog/semantic-layer-vs-text-to-sql-2026)); model choice matters far less than
-supplied business semantics ([2026 benchmark](https://arxiv.org/abs/2604.25149)).
+The database result is streamed before explanation. Model claims name a result column, row keys, an operation
+and a unit. The verifier checks those, rejects duplicate IDs, incomplete-population arithmetic, non-finite
+values, small ungrounded numbers and common unsupported causal assertions. It does not sum or average ratios
+without their underlying numerators and denominators. Accepted approximations are replaced by recomputed
+values before display. ROAS is a multiple, rather than a percentage. Chart text and follow-up text are also checked.
 
-## Testing the user loop
+These controls are not a complete theorem prover for prose. For example, arbitrary qualitative conclusions
+and unrecognised causal paraphrases remain a limitation of the model explanation path. Fast-path summaries
+use deterministic cell descriptions and make no causal claims. Model failures, unanswerable scope and material
+ambiguity are separate outcomes; unsafe input and SQL remain blocked.
 
-Evaluations run each answer question with a **simulated stakeholder** (`evals/run_eval.py`) who knows the intended
-spec (`evals/gold_specs.yaml`): it answers questions as the asker would and confirms a read-back only if it computes
-the intended thing, otherwise it states what it wants. It is never deployed. Release gate: every verified answer
-equal to the gold, zero silent wrong answers. Free checks: `evals/spec_eval.py` (every gold spec or template returns
-the gold answer) and the test suite.
+## Context and runtime
 
-## Speed, load and cost
+The full catalog is kept for the model path. An offline ablation of 66 named-metric cases found missing required
+metrics in 13 cases with keyword top-five retrieval and five cases with BM25 top-five or top-ten retrieval.
+This is metric recall, not model accuracy. No vector database was added. Stable catalog text is cached per
+catalog; business memory is fetched once per request, and provider clients are shared across runs while cost
+trackers remain private. SQL results remain bounded and keyed by snapshot.
 
-- 3 model calls per answer (interpreter, contrast, analyst); the catalog prompt prefix is identical for every
-  question, so the provider caches it. Measured about US$0.01 per answer on the Nov 18 smoke test.
-- Results cached by (SQL, data snapshot): a repeat question is exact and needs no query.
-- Web runner: at most `MAX_CONCURRENT_RUNS` questions at once per instance; others queue with a visible position;
-  provider calls are bounded by `MAX_PARALLEL_LLM_CALLS` with retry on rate limits.
+`pantree-profile --publish-joins` generates reusable metadata during data upload. A missing artifact safely
+falls back to measurement. KPI pulse runs outside web startup. The web queue, retained completed histories and
+in-memory terminal checkpoints are bounded/cleaned. Quota increments and email-code attempts are atomic.
+The app still uses one instance; active job leases and distributed event streaming are not implemented.
 
-## Research basis (Nov 2026)
+## Validation
 
-| Finding | Adopted as |
-|---|---|
-| structural abstention: generative shell, deterministic kernel, confirmation ([2026](https://arxiv.org/html/2608.13926)) | the whole flow |
-| disagreement between deliberately different readings finds material ambiguity ([DisGuAD](https://arxiv.org/html/2611.21645), [AIR](https://arxiv.org/html/2610.24248)) | contrast check with execution |
-| ambiguity taxonomy, multiple-choice clarification ([AmbiSQL](https://www.arxiv.org/pdf/2508.15276)) | ambiguity register |
-| reliability = correct answers + correct abstention ([TrustSQL](https://arxiv.org/pdf/2403.15879), [PremiseSQL](https://arxiv.org/pdf/2610.22158)) | unanswerable route, premise checks, silent-wrong gate |
-| verified question-query repositories ([Snowflake](https://docs.snowflake.com/user-guide/snowflake-cortex/cortex-analyst/verified-query-repository)) | templates; reviewed specs as the next step |
+`tests/reference_sql.py` and the gold SQL suites independently check the compiler. New adversarial fixtures
+exercise duplicate facts, NULL and absent groups, date boundaries, numerator/denominator behavior, concurrency,
+and grounding. `evals/fastpath_baseline.py` checks the five reviewed question examples without a model.
+`evals/context_retrieval.py` measures offline metric recall only. Paid evaluation reports first-turn outcomes
+before stakeholder assistance separately from later corrected outcomes.
+
+See [validation and audit](refactoring-validation.md) for the tested snapshot, results and remaining work.

@@ -1,0 +1,337 @@
+{
+  "kind": "offline_metric_recall_only",
+  "metrics": 28,
+  "catalog_characters": 56256,
+  "full_catalog_complete_cases": 66,
+  "summary": [
+    {
+      "mode": "keyword",
+      "metrics_supplied": 5,
+      "complete_cases": 53,
+      "cases": 66,
+      "misses": [
+        {
+          "id": "regression/e04",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "regression/e06",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "realized_revenue"
+          ]
+        },
+        {
+          "id": "regression/m02",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "regression/m10",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "negative_review_share"
+          ]
+        },
+        {
+          "id": "regression/m11",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "avg_csat",
+            "avg_first_response_minutes"
+          ]
+        },
+        {
+          "id": "regression/m12",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "orders",
+            "realized_revenue"
+          ]
+        },
+        {
+          "id": "regression/h01",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "sessions"
+          ]
+        },
+        {
+          "id": "regression/h02",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "net_sales",
+            "orders",
+            "realized_revenue"
+          ]
+        },
+        {
+          "id": "holdout/x03",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "holdout/y01",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "units_sold"
+          ]
+        },
+        {
+          "id": "holdout/y05",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "sessions"
+          ]
+        },
+        {
+          "id": "holdout/y10",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "rto_rate"
+          ]
+        },
+        {
+          "id": "flow/flow-context",
+          "mode": "keyword",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "keyword",
+      "metrics_supplied": 10,
+      "complete_cases": 58,
+      "cases": 66,
+      "misses": [
+        {
+          "id": "regression/e04",
+          "mode": "keyword",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "regression/m02",
+          "mode": "keyword",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "regression/m11",
+          "mode": "keyword",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "avg_csat",
+            "avg_first_response_minutes"
+          ]
+        },
+        {
+          "id": "regression/m12",
+          "mode": "keyword",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "regression/h01",
+          "mode": "keyword",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "sessions"
+          ]
+        },
+        {
+          "id": "regression/h02",
+          "mode": "keyword",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "net_sales",
+            "orders",
+            "realized_revenue"
+          ]
+        },
+        {
+          "id": "holdout/x03",
+          "mode": "keyword",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "flow/flow-context",
+          "mode": "keyword",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "bm25",
+      "metrics_supplied": 5,
+      "complete_cases": 61,
+      "cases": 66,
+      "misses": [
+        {
+          "id": "regression/e04",
+          "mode": "bm25",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "regression/m11",
+          "mode": "bm25",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "avg_csat",
+            "avg_first_response_minutes"
+          ]
+        },
+        {
+          "id": "regression/m12",
+          "mode": "bm25",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "regression/h01",
+          "mode": "bm25",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "sessions"
+          ]
+        },
+        {
+          "id": "regression/h02",
+          "mode": "bm25",
+          "k": 5,
+          "complete": false,
+          "missing": [
+            "net_sales",
+            "orders",
+            "realized_revenue"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "bm25",
+      "metrics_supplied": 10,
+      "complete_cases": 61,
+      "cases": 66,
+      "misses": [
+        {
+          "id": "regression/e04",
+          "mode": "bm25",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "regression/m11",
+          "mode": "bm25",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "avg_csat",
+            "avg_first_response_minutes"
+          ]
+        },
+        {
+          "id": "regression/m12",
+          "mode": "bm25",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "orders"
+          ]
+        },
+        {
+          "id": "regression/h01",
+          "mode": "bm25",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "sessions"
+          ]
+        },
+        {
+          "id": "regression/h02",
+          "mode": "bm25",
+          "k": 10,
+          "complete": false,
+          "missing": [
+            "net_sales",
+            "orders",
+            "realized_revenue"
+          ]
+        }
+      ]
+    }
+  ],
+  "vectors": "not measured: no embedding credentials or validated accuracy baseline",
+  "decision": "retain full context on the model path; reviewed grammar uses no catalog prompt",
+  "source_sha256": "36e21449e4271c18c511b26bac0a450dcaf21def807b0f64c82de73c857bf85e",
+  "parent_commit": "030d2ed",
+  "dataset_manifest_date": "2026-11-22"
+}

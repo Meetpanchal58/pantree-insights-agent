@@ -387,6 +387,10 @@ function onEvent(e, status) {
     }
     if (status && e.status === "started") status.querySelector(".txt").textContent = label + "…";
     if (!S.run.restoring) renderSteps();
+  } else if (e.type === "result") {
+    showResult({ ...e, status: "done", analysis: { headline: "Query result ready. Preparing the explanation…" } });
+    if (status) status.querySelector(".txt").textContent = "Result ready. Preparing the explanation…";
+    openPanel();
   } else if (e.type === "clarify") {
     if (status) status.remove();
     $("#messages").appendChild(clarifyCard(e)); scrollDown();

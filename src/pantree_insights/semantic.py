@@ -94,7 +94,7 @@ class Metric(BaseModel):
     source: str
     numerator: str                              # aggregate SQL expression
     denominator: str | None = None              # if set, value = numerator / denominator
-    unit: Literal["inr", "count", "ratio", "days", "minutes", "rating"]
+    unit: Literal["inr", "count", "ratio", "multiple", "days", "minutes", "rating"]
     higher_is_better: bool | None = None        # None = neither (e.g. order counts during events)
     notes: str | None = None
 
