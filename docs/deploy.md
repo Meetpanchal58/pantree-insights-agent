@@ -66,7 +66,7 @@ script set them). In the Cloud console of this project:
 Click **Run** on the trigger once to test it; builds show under Cloud Build → History. Use the deploy script
 again when secrets, the data or service settings change.
 
-The first request after an idle period starts a new instance. Publish measured join metadata with
+The first request after an idle period may start a new instance. Publish measured join metadata with
 `DATA_SIZE=full uv run pantree-profile --publish-joins` as part of the data upload (the upload script does this).
 A matching artifact avoids join scans; a missing or stale artifact safely falls back to profiling.
 KPI pulse work no longer runs at web startup: run `pantree-pulse` as a separate data-maintenance job and
@@ -88,11 +88,24 @@ the actual service before changing billing or resource settings.
 
 ## Cold starts
 
-The first question after an instance starts loads the catalog, connects DuckDB and checks profile metadata.
-Cloud Storage mount latency and missing profile artifacts can still increase preparation time. The question request returns at once and the app shows "Preparing the data"
-as a step, so the browser never times out. With `--cpu-throttling` the start-up warm-up only gets CPU while a
-request is open; `--no-cpu-throttling` (CPU always allocated) or `--min-instances 1` makes the first question fast
-at a higher idle cost.
+Data preparation loads the catalog, connects DuckDB and checks profile metadata. The signed-in browser calls
+authenticated `GET /api/ready` on opening the app and on focus after five minutes. This holds an actual request
+open while preparation runs in a thread, giving request-based Cloud Run CPU to the existing single-flight
+initializer. The UI remains usable, reports preparation status, and charges no question or model usage.
+This is not a periodic keep-alive and does not change hosting settings. Background lifespan warm-up alone
+cannot be relied on with `--cpu-throttling` once requests end.
+
+Scale-to-zero, image startup, Cloud Storage mount latency, missing profile artifacts, database connection and
+provider latency can still delay the first question. Minimum instances reduce idle cold starts but do not
+guarantee background CPU or fast inference. Always-allocated CPU also costs more; neither setting is changed
+by this patch. The question returns a run ID and streams preparation progress, but upstream timeouts and
+instance restarts are still possible.
+
+Measure these separately before tuning: platform startup, `agent_prepare` duckdb/joins/checkpoint phases,
+`/api/ready` duration, and the streamed interpretation/repair/contrast/query/analysis stages. Repeated
+interpretation steps are serial model work, not necessarily a cold start. Reproduce local preparation with
+`DATA_SIZE=small uv run python evals/startup_baseline.py`; this uses fresh processes and memory checkpoints,
+not Cloud Run, GCS or a live provider. See [the architectural follow-up](pr42-validation.md) for measured limits.
 
 
 ## Resource and concurrency controls

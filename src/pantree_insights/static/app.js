@@ -195,6 +195,7 @@ function renderUser() {
     <button class="icon-btn" data-action="theme" title="Light / dark">◐</button>
     <button class="icon-btn" data-action="logout" title="Sign out">⎋</button>`;
   if (typeof refreshAI === "function") refreshAI();
+  if (typeof warmAnalyst === "function") warmAnalyst();
   const l = S.me.limit;
   $("#limit-info").textContent = l.unlimited ? "Admin: unlimited questions" : `${l.used}/${l.per_day} live questions today`;
 }

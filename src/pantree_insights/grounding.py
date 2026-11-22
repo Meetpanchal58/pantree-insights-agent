@@ -186,6 +186,15 @@ def qualitative_problems(text: str, claims: list[Claim], frame: pd.DataFrame, tr
     problems = []
     by_id = {c.id: c for c in claims}
     for sentence in re.split(r"[.!?;]\s+", text):
+        # Match complete labels before their substrings: "Red" inside an observed product title
+        # is not a separate mention of the brand Red. An explicitly named Red elsewhere still is.
+        mentions = [(column, str(value).casefold(), match.start(), match.end())
+                    for column in frame.columns if not pd.api.types.is_numeric_dtype(frame[column])
+                    for value in frame[column].dropna().unique() if len(str(value)) >= 3
+                    for match in re.finditer(rf"(?<!\w){re.escape(str(value))}(?!\w)", sentence, re.I)]
+        mentions = [m for m in mentions if not any(
+            other[2] <= m[2] and other[3] >= m[3] and other[3] - other[2] > m[3] - m[2]
+            for other in mentions)]
         evidence = [by_id[i] for i in re.findall(r"\{(c\d+)\}", sentence) if i in by_id]
         for c in evidence:
             for key in [*c.row, *(c.against or [])]:
@@ -193,14 +202,12 @@ def qualitative_problems(text: str, claims: list[Claim], frame: pd.DataFrame, tr
                     continue
                 allowed = {k.value.casefold() for claim in evidence for k in [*claim.row, *(claim.against or [])]
                            if k.column == key.column}
-                mentioned = {str(v).casefold() for v in frame[key.column].dropna().unique() if len(str(v)) >= 3
-                             and re.search(rf"(?<!\w){re.escape(str(v))}(?!\w)", sentence, re.I)}
+                mentioned = {value for column, value, _, _ in mentions if column == key.column}
                 if mentioned - allowed:
                     problems.append("the named entity or period does not match this claim's evidence row")
                 # Bind each placeholder locally as well: two correct values must not swap their named rows.
                 own = {k.value.casefold() for k in [*c.row, *(c.against or [])] if k.column == key.column}
-                positions = [(match.start(), value) for value in mentioned for match in
-                             re.finditer(rf"(?<!\w){re.escape(value)}(?!\w)", sentence, re.I)]
+                positions = [(start, value) for column, value, start, _ in mentions if column == key.column]
                 for placeholder in re.finditer(re.escape("{" + c.id + "}"), sentence):
                     preceding = [(pos, value) for pos, value in positions if pos < placeholder.start()]
                     nearest = max(preceding, default=None) if preceding else min(positions, default=None)

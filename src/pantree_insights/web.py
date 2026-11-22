@@ -400,6 +400,20 @@ def create_app() -> FastAPI:
     def health():
         return {"ok": True}
 
+    @app.get("/api/ready")
+    async def ready(user=Depends(require_user)):
+        # Holding an authenticated request open gives request-based Cloud Run CPU to initialization.
+        # The browser stays usable; this performs no inference and reserves no analytical allowance.
+        started = time.perf_counter()
+        try:
+            await run_in_threadpool(lambda: runner.agent)
+        except Exception:
+            log.exception("analyst_readiness failed")
+            return JSONResponse({"ready": False, "message": "Data preparation failed. You can retry opening the app."},
+                                status_code=503, headers={"Cache-Control": "no-store"})
+        return JSONResponse({"ready": True, "seconds": round(time.perf_counter()-started, 3)},
+                            headers={"Cache-Control": "no-store"})
+
     # ------------------------------------------------------------------ me
     @app.get("/api/me")
     def me(user: dict | None = Depends(current_user), store: Store = Depends(get_store)):

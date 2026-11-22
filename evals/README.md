@@ -17,6 +17,10 @@
 
 ## Free checks
 
+`DATA_SIZE=small uv run python evals/startup_baseline.py` separates imports, analyst preparation and first/next
+deterministic proposals in fresh processes, comparing published profiles with a forced rebuild. It makes no
+model calls and does not measure full-answer, Cloud Run or remote storage latency.
+
 ```bash
 DATA_SIZE=full uv run python evals/run_eval.py --suite all --dry-run    # gold SQL runs, every answer has a gold spec
 ```
