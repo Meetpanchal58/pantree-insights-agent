@@ -100,6 +100,21 @@ class Alternatives(BaseModel):
     readings: list[QuerySpec] = Field(default_factory=list, description="Materially different readings, at most 2")
     why: list[str] = Field(default_factory=list, description="For each reading: the word it reads differently")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_malformed(cls, data):
+        """A malformed alternative is dropped, not the whole answer: the chosen reading already passed every check,
+        and an alternative that is not a valid spec could never be offered anyway."""
+        if isinstance(data, dict) and isinstance(data.get("readings"), list):
+            keep = []
+            for reading in data["readings"]:
+                try:
+                    keep.append(QuerySpec.model_validate(reading))
+                except (ValueError, TypeError):
+                    continue
+            data = {**data, "readings": keep}
+        return data
+
 
 class SpecPatch(BaseModel):
     """Only explicitly changed fields; omitted/null fields preserve the prior plan."""
