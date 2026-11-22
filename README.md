@@ -40,21 +40,27 @@ Every query needs confirmation. Follow-up questions retain the approved context.
 
 ## Results
 
-The fresh autonomous run completed **100 questions**: 56 answer cases and 44 behavior cases.
-Token-based cost: **$0.637558**, with **$0.00** in uncertain holds, below the $4 ceiling.
+The latest paid evaluation (22 November 2026, code `1df31b0`) used the same 100 questions as the previous run (seed 20261122): 56 answer cases and 44 behavior cases. It ran twice: once in autonomous mode and once in user mode. In autonomous mode, plans are confirmed blindly and the agent's questions go unanswered. In user mode, a simulated business user also picks one of the options the agent offers.
 
-| Measure | Fresh result |
-| --- | --- |
-| Correct answer tables | 27/56 (48.2%) |
-| Verified-labelled answers matching gold | 27/34 (79.4%) |
-| Verified-labelled reference mismatches | 7 |
-| All-case local latency, p50 / p95 | 6.851 / 27.283 seconds |
-| Free compiler check | 98/98 cases; 294/294 matches across three passes |
+| Measure | Previous run (autonomous) | Latest, autonomous | Latest, user mode |
+| --- | --- | --- | --- |
+| Correct answer tables | 27/56 (48.2%) | **49/56 (87.5%)** [78.5–94.7%] | 47/56 (83.9%) [75.0–92.9%] |
+| Verified-labelled answers matching gold | 27/34 (79.4%) | 49/51 (96.0%) | 47/52 (90.3%) |
+| Verified-labelled reference mismatches (silent wrong) | 7 | 2 | 5 |
+| Refusals of unsafe requests | - | 12/12 | 12/12 |
+| Vague questions correctly clarified | - | 5/6 | 5/6 |
+| Token cost (ceiling $4) | $0.64 | $0.87 | $0.82 + $0.13 held for unconfirmed calls |
 
-**The evaluation release gate failed.** [Full results, confidence intervals, and failure analysis](evals/reports/current/results.md) retain failed and unresolved cases.
-Some strict reference mismatches involve extra expected columns; the [failure audit](evals/reports/current/failure-audit.md) distinguishes them from interpretation errors without changing scores.
-Simulated data, one repeat, and overlapping host work limit these measurements. Narrative faithfulness is not measured.
-Only the [current evidence set](evals/reports/current/README.md) is published; earlier result artifacts were removed.
+Square brackets are 95% bootstrap intervals. In both modes the regression scores use the column rubric fixed before the latest run: each question lists the columns it asks for. On the previous run's saved answers, that rubric alone turns 4 of its 29 failures into passes; the remaining gain comes from the code changes.
+
+The release gate (every answer correct, no silent wrong answers) still fails. Remaining failures:
+- **Fixed after this run, not yet re-measured:** x11, a malformed contrast reading; z01, a declined period with no data.
+- **Plain ambiguity:** m10, h10 and a follow-up.
+- **Wrong row counts:** c24 and m11, by region and top 10.
+- **Provider errors in user mode:** two calls the provider didn't confirm; the paid run allows no retries.
+
+Reports: [autonomous](evals/reports/2026-11-22/autonomous/results.md), [user mode](evals/reports/2026-11-22/user/results.md), and the [previous run](evals/reports/current/results.md).
+These are simulated-data results from one repeat. Narrative faithfulness is not measured.
 
 ## Tech stack
 

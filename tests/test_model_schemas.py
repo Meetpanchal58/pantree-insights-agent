@@ -43,3 +43,15 @@ def test_template_call_names_every_template_and_parameter():
 def test_template_call_accepts_the_stored_shape():
     call = TemplateCall.model_validate({"name": "event_lift", "params": {"days_before": 14}})
     assert call.params == {"days_before": 14}
+
+
+def test_a_malformed_alternative_reading_is_dropped_not_fatal():
+    """holdout x11 ended in 'invalid analytical structure' in all four attempts of the latest paid run: one bad
+    alternative must not discard an answer whose chosen reading already passed every check."""
+    from pantree_insights.interpret.models import Alternatives
+
+    good = {"table": "sales", "measures": [{"name": "c", "metric": "cancellation_rate"}],
+            "dimensions": ["payment_type"]}
+    bad = {"table": "sales", "measures": [{"name": "c", "metric": "cancellation_rate", "agg": "count"}]}
+    parsed = Alternatives.model_validate({"readings": [bad, good], "why": ["grain", "split"]})
+    assert [r.dimensions for r in parsed.readings] == [["payment_type"]]

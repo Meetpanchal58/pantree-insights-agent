@@ -88,6 +88,8 @@ interpreter: |
     (COD vs prepaid, new vs repeat, sale-event days vs normal days) use the derived cut and no filter.
   - time: explicit inclusive dates. "in 2026" = 2026-01-01 to 2026-12-31; relative periods are counted back from
     the data's last day ({data_last_day}); the data starts on {data_first_day}; no period named = no dates.
+    A period partly or wholly outside the data is still a spec: never decline or call it unanswerable for that
+    reason. Code answers it for the observed days (zero or no rows when none) and tells the user the coverage.
     time.field only when another date than the table's main date is meant (delivered in, returns requested in).
   - ranking only for "top/bottom N" or "which ... most/highest/lowest" (default limit 10); its by is a measure.
   - shares: only additive measures across disjoint groups. For period_compare these are contributions to net

@@ -7,6 +7,7 @@ calls retain LangChain model configuration. Tests use FakeLLM or deterministic p
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -18,6 +19,8 @@ from typing import Any, Protocol, TypeVar
 from pydantic import BaseModel
 
 from .config import ROOT, get_settings
+
+log = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 SPEND_FILE = ROOT / ".cache" / "llm_spend.json"
@@ -241,7 +244,11 @@ class ChatLLM:
             gate.release()
         try:
             return schema.model_validate_json(value) if isinstance(value, str) else schema.model_validate(value)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as error:
+            # Where it failed (agent and field path, never the content) so a failed run can be diagnosed.
+            problems = getattr(error, "errors", list)()[:3]
+            where = "; ".join(".".join(map(str, e["loc"])) + ": " + e["msg"] for e in problems)
+            log.warning("invalid %s structure: %s", agent, where or type(error).__name__)
             raise providers.ProviderError('The model returned an invalid analytical structure. No result was trusted.',
                                           422) from None
 
