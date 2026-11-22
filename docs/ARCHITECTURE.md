@@ -1,10 +1,8 @@
 # Architecture
 
-A model chooses an analytical request; governed Python code validates and compiles SQL. LangGraph retains
-checkpointed clarification, deterministic execution, bounded repair, charting and memory. Verification describes
-the selected scope and numeric evidence, not a proof of natural-language understanding or causality.
+## Flow
 
-## Conditional flow
+The assistant turns a question into a plan and waits for confirmation. Follow-ups can reuse approved context, but extra investigation queries need new approval.
 
 ```text
 input safety -> standing constraints -> intent
@@ -40,8 +38,6 @@ An established ranked measure resolves generic performance questions about those
 repair ends with an explicit failure, not an empty clarification or a demand to rephrase. Real unresolved
 business choices (including a user-specified group absent from the snapshot) still require clarification.
 
-## Adaptive investigation and durable retrieval
-
 Investigations may add an evidence-review node after verified results. It proposes at most two governed
 queries with explicit cell citations and competing, unproven explanations. Each batch needs fresh approval.
 Three rounds/eight queries, repeated-query detection and pre-review spend/call gates bound the loop.
@@ -51,9 +47,37 @@ Relevant older completed runs are retrieved from durable storage using owner-and
 with explicit run IDs taking precedence. At most three older analyses enter the prompt. Historical result
 references include run IDs; stale populations cannot silently bind to a current snapshot. Retrieval supplements
 the recent conversation and eight-summary working context without loading the entire history.
-See [the implementation and validation limits](pr43-validation.md).
+See [the implementation and validation limits](history/pr43-validation.md).
 
-## Query planning
+`POST /api/chats/{id}/ask` accepts both new questions and replies. A reply carries `pending_run_id`,
+`plan_version`, a natural-language `question`, and an optional unique `idempotency_key`. The existing
+`/api/runs/{id}/answer` endpoint accepts `message`, `plan_version`, and that same retry key. A stale version
+returns 409. Only a positive full-message confirmation approves execution; corrections, blanks and unresolved
+questions do not. “Cancel” ends a pending plan without running it. Legacy Python `use_defaults` arguments are
+ignored; the UI and CLI have no automatic approval controls.
+
+The plan stores compiled, safety-checked SQL with its exact specs/templates before approval. After approval,
+execution checks its digest and data snapshot, streams each verified table, then grounds each explanation and
+builds its chart. The result panel switches between every approved query, including its exports. Changes to a
+multi-query plan explicitly target a numbered step, preserving other steps; no dynamic query expansion runs
+without a fresh proposal. Revision patches use the same interpreter and complete semantic catalog.
+
+Proposals and replies are durable messages. One admission lock serializes web replies; the database also allows
+only one paused-to-running transition. Duplicate reply keys replay events, including after process state is
+lost. Running work interrupted by a process failure is marked interrupted rather than automatically rerun.
+Paused PostgreSQL checkpoints can resume; in-memory checkpoints cannot survive a process restart.
+
+## Semantic layer
+
+YAML files define the business meaning of measures, dimensions, and table relationships. The model chooses from those definitions instead of inventing SQL.
+
+The definitions live in semantic/metrics.yaml, concepts.yaml, schema.yaml, and glossary.yaml. The catalog describes columns and observed values; profile metadata describes join cardinality, meaning how many rows can match a key.
+
+The model path retains the full catalog. The fresh offline retrieval comparison is in [current results](../evals/reports/current/context-retrieval.json). It tests whether required metric definitions survive keyword or BM25 retrieval; BM25 is a word-frequency ranking method. It does not test embeddings or model accuracy.
+
+## SQL compiler
+
+Python compiles the approved structured request into read-only SQL. Join and scope checks reject calculations that could change the intended population.
 
 `spec/` retains QuerySpec and compiles each named metric from `semantic/metrics.yaml`. A multi-fact spec may
 combine named metrics from two to four sources and ratios of their results. Each stage aggregates at its native
@@ -79,7 +103,9 @@ cohorts, strictly ordered session funnels and customer frequency/recency segment
 bounded parameters. Cohorts exclude immature buyers; funnels use first-step sessions as their denominator.
 Unknown template parameters and unsupported date scope cannot silently disappear.
 
-## Evidence and delivery
+## Verification
+
+The result table is the source of numeric evidence. Explanations must refer to values the verifier can recompute, but passing these checks does not prove every sentence is true.
 
 The database result is streamed before explanation. Model claims name a result column, row keys, an operation
 and a unit. The verifier checks those, rejects duplicate IDs, incomplete-population arithmetic, non-finite
@@ -95,11 +121,25 @@ and unrecognised causal paraphrases remain a limitation of the model explanation
 use deterministic cell descriptions and make no causal claims. Model failures, unanswerable scope and material
 ambiguity are separate outcomes; unsafe input and SQL remain blocked.
 
-## Context and runtime
+## Evaluation
 
-The full catalog is kept for the model path. An offline ablation of 66 named-metric cases found missing required
-metrics in 13 cases with keyword top-five retrieval and five cases with BM25 top-five or top-ten retrieval.
-This is metric recall, not model accuracy. No vector database was added. Stable catalog text is cached per
+Independent reference SQL checks result tables, while separate cases test clarification and refusal behavior. Model understanding and compiler correctness are reported separately.
+
+`tests/reference_sql.py` and the gold SQL suites independently check the compiler. New adversarial fixtures
+exercise duplicate facts, NULL and absent groups, date boundaries, numerator/denominator behavior, concurrency,
+and grounding. `evals/fastpath_baseline.py` checks the five reviewed question examples without a model.
+`evals/context_retrieval.py` measures offline metric recall only. Paid evaluation defaults to `--mode autonomous`: blind scripted confirmation of proposed plans, without gold-guided corrections. Actual unresolved
+clarification remains incomplete. Confirmation compliance is reported separately from interpretation accuracy.
+`--mode assisted` is an explicitly separate run. Reports refuse mixed modes and separate intended plans, gold
+result matches and checked evidence from unmeasured human narrative faithfulness. Legacy benchmark scripts remain reproducible tools; previous result artifacts have been removed.
+
+The current paid evaluation uses 100 preselected cases, autonomous blind confirmations, and a cumulative $4 reservation ledger. Budget exhaustion is reported as incomplete coverage; uncertain provider outcomes retain their reserved cost. See [evaluation instructions](../evals/README.md) and [current evidence](../evals/reports/current/README.md).
+
+## Runtime
+
+FastAPI serves the app and streams progress from a background run. PostgreSQL stores chats and paused checkpoints, but active workers still live in one application instance.
+
+Stable catalog text is cached per
 catalog; business memory is fetched once per request, and provider clients are shared across runs while cost
 trackers remain private. SQL results remain bounded and keyed by the dataset, semantic files and prompts. Definition caches refresh on
 version changes. Old paused runs without the current version fingerprint must be asked again.
@@ -113,36 +153,4 @@ an optional `idempotency_key` (8–128 letters/digits/underscores/hyphens), scop
 retrying returns the same run ID, and a changed payload returns 409. This does not resume interrupted model calls.
 The app still uses one instance; active job leases and distributed event streaming are not implemented.
 
-## Validation
-
-`tests/reference_sql.py` and the gold SQL suites independently check the compiler. New adversarial fixtures
-exercise duplicate facts, NULL and absent groups, date boundaries, numerator/denominator behavior, concurrency,
-and grounding. `evals/fastpath_baseline.py` checks the five reviewed question examples without a model.
-`evals/context_retrieval.py` measures offline metric recall only. Paid evaluation defaults to `--mode autonomous`: blind scripted confirmation of proposed plans, without gold-guided corrections. Actual unresolved
-clarification remains incomplete. Confirmation compliance is reported separately from interpretation accuracy.
-`--mode assisted` is an explicitly separate run. Reports refuse mixed modes and separate intended plans, gold
-result matches and checked evidence from unmeasured human narrative faithfulness. `evals/post38_benchmark.py`
-measures local startup, warm queries, PostgreSQL history/checkpoints and Parquet versus materialized DuckDB.
-
-See [PR #40 validation](pr40-validation.md) for current evidence and pending external measurements.
-
-
-## Conversation protocol
-
-`POST /api/chats/{id}/ask` accepts both new questions and replies. A reply carries `pending_run_id`,
-`plan_version`, a natural-language `question`, and an optional unique `idempotency_key`. The existing
-`/api/runs/{id}/answer` endpoint accepts `message`, `plan_version`, and that same retry key. A stale version
-returns 409. Only a positive full-message confirmation approves execution; corrections, blanks and unresolved
-questions do not. “Cancel” ends a pending plan without running it. Legacy Python `use_defaults` arguments are
-ignored; the UI and CLI have no automatic approval controls.
-
-The plan stores compiled, safety-checked SQL with its exact specs/templates before approval. After approval,
-execution checks its digest and data snapshot, streams each verified table, then grounds each explanation and
-builds its chart. The result panel switches between every approved query, including its exports. Changes to a
-multi-query plan explicitly target a numbered step, preserving other steps; no dynamic query expansion runs
-without a fresh proposal. Revision patches use the same interpreter and complete semantic catalog.
-
-Proposals and replies are durable messages. One admission lock serializes web replies; the database also allows
-only one paused-to-running transition. Duplicate reply keys replay events, including after process state is
-lost. Running work interrupted by a process failure is marked interrupted rather than automatically rerun.
-Paused PostgreSQL checkpoints can resume; in-memory checkpoints cannot survive a process restart.
+Sent-message edits preserve audit history. Correcting the latest unexecuted paused reply can resume that run; editing earlier questions or executed approvals creates a new chat copy without downstream answers. Regenerated plans need fresh confirmation.

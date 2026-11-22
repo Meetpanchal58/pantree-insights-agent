@@ -14,3 +14,14 @@ All 217 existing Python functions were compared structurally against the base co
 Known pre-existing issue: test_spec.py opens the simulator catalog during module import. This prevents a clean no-data collection. The separate test-hygiene commit moves it into a fixture. The other specifically listed test modules already carry data markers on the current main branch.
 
 No new production bug fix is included. Paid model evaluations are not run. Evaluation quality, latency, deployment topology, and model behavior are outside this phase.
+
+## PR #46 evaluation observations (no production fix included)
+
+The fresh autonomous evaluation exposes interpretation and evaluation-contract issues. Scores are not changed after seeing outcomes.
+
+- Campaign last-click revenue (regression/h05) was interpreted as realized sales revenue. Those are different definitions and source populations. Numeric grounding did not establish intent correctness.
+- The strict reference for regression/m06 includes shipped-line counts as well as the requested RTO rate. An answer containing a rate and order count fails that full-table contract; this alone does not establish that the displayed rate is wrong.
+- The strict reference for regression/m08 includes inbound quantity. An out-of-stock answer omitting that numeric column fails the current scorer. Required versus optional reference columns need a separately reviewed rubric before another evaluation.
+- Autonomous mode leaves business clarifications unanswered. Its raw questions counter records answered clarification turns; the new results builder derives actual asked questions from the trace and excludes confirmations.
+
+The evaluation-only driver uses the production managed adapter's reservations plus a cumulative ledger. The older general CLI's after-spend check is left intact and documented; it is not used for the bounded fresh run.

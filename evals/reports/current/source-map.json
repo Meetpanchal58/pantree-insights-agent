@@ -1,0 +1,7 @@
+{
+  "evaluated_local_commit": "b1b8b1ab8e66b846837276796068281ac3f45a59",
+  "published_identical_tree_commit": "a806325abad4ed92800580f79dc9958b8cbe0a79",
+  "git_tree": "5fec5dd0a937676767b0f9c4eb996a75ecb4e86e",
+  "driver_sha256": "ab4045e1490af80106ea3e04115952bd9906935fc171273c0d08ec1b0776d7d0",
+  "note": "The connector recreated commit metadata. The evaluated local commit and published commit have exactly the same Git tree; raw report commit IDs are not rewritten."
+}

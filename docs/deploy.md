@@ -105,7 +105,7 @@ Measure these separately before tuning: platform startup, `agent_prepare` duckdb
 `/api/ready` duration, and the streamed interpretation/repair/contrast/query/analysis stages. Repeated
 interpretation steps are serial model work, not necessarily a cold start. Reproduce local preparation with
 `DATA_SIZE=small uv run python evals/startup_baseline.py`; this uses fresh processes and memory checkpoints,
-not Cloud Run, GCS or a live provider. See [the architectural follow-up](pr42-validation.md) for measured limits.
+not Cloud Run, GCS or a live provider. See [the architectural follow-up](history/pr42-validation.md) for implementation history. Current results do not measure Cloud Run cold starts.
 
 
 ## Resource and concurrency controls

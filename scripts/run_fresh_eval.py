@@ -16,7 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'src'), str(ROOT / 'evals')]
 
-from run_eval import load_suite, run, summary  # noqa: E402
+from make_results import report  # noqa: E402
+from run_eval import load_suite, run  # noqa: E402
 from sqlalchemy import func, select  # noqa: E402
 
 from pantree_insights.config import get_settings  # noqa: E402
@@ -87,6 +88,10 @@ def main():
     if not math.isfinite(args.max_cost_usd) or not 0 < args.max_cost_usd <= 4:
         parser.error('max-cost-usd must be positive and at most 4')
     items = sample(load_suite('all'), args.questions, args.seed)
+    if (args.output_dir/'paid.json').exists() or (args.output_dir/'paid.partial.jsonl').exists():
+        parser.error('A paid run already exists here; do not overwrite or silently repeat paid work')
+    if args.yes and args.ledger.exists():
+        parser.error('Ledger already exists; inspect it before starting another paid run')
     args.output_dir.mkdir(parents=True, exist_ok=True)
     selection = {'seed': args.seed, 'planned': len(items), 'sampling': 'proportional suite/set strata, minimum one',
                  'cases': [{k: i[k] for k in ('suite','set','id','question')} for i in items]}
@@ -96,10 +101,6 @@ def main():
         return
     if not os.environ.get('OPENAI_API_KEY'):
         parser.error('OPENAI_API_KEY must be supplied securely in the environment')
-    if (args.output_dir/'paid.json').exists() or (args.output_dir/'paid.partial.jsonl').exists():
-        parser.error('A paid run already exists here; do not overwrite or silently repeat paid work')
-    if args.ledger.exists():
-        parser.error('Ledger already exists; inspect it before starting another paid run')
     settings = get_settings()
     if not settings.model_main.startswith('openai:'):
         parser.error('This fresh-run command currently supports the configured OpenAI model only')
@@ -118,7 +119,6 @@ def main():
     try:
         rows = run(items, live, mode=args.mode, llm_factory=factory, should_stop=lambda: store.stopped)
         (args.output_dir/'paid.json').write_text(json.dumps(rows, indent=1, default=str)+'\n')
-        (args.output_dir/'paid.md').write_text(summary(rows)+'\n')
         live.unlink(missing_ok=True)
     finally:
         metadata = {**selection, 'started_at': started, 'finished_at': datetime.now(UTC).isoformat(),
@@ -129,6 +129,9 @@ def main():
                     **store.totals()}
         (args.output_dir/'paid-budget.json').write_text(json.dumps(metadata, indent=2)+'\n')
         store.engine.dispose()
+    compiler_path = args.output_dir/'compiler.json'
+    compiler = json.loads(compiler_path.read_text()) if compiler_path.exists() else None
+    (args.output_dir/'results.md').write_text(report(rows, compiler, metadata))
     print(json.dumps({k: metadata[k] for k in ('known_usd','held_usd','uncertain_calls','budget_stopped')}))
 
 

@@ -1,7 +1,7 @@
 {
   "kind": "offline_metric_recall_only",
   "metrics": 28,
-  "catalog_characters": 56256,
+  "catalog_characters": 57418,
   "full_catalog_complete_cases": 66,
   "summary": [
     {
@@ -330,8 +330,5 @@
     }
   ],
   "vectors": "not measured: no embedding credentials or validated accuracy baseline",
-  "decision": "retain full context on the model path; reviewed grammar uses no catalog prompt",
-  "source_sha256": "36e21449e4271c18c511b26bac0a450dcaf21def807b0f64c82de73c857bf85e",
-  "parent_commit": "030d2ed",
-  "dataset_manifest_date": "2026-11-22"
+  "decision": "retain full context on the model path; reviewed grammar uses no catalog prompt"
 }

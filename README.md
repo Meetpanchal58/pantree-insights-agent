@@ -1,111 +1,85 @@
 # Pantree Insights Agent
 
-A verified AI data analyst for Pantree, a simulated Indian online fashion shop (catalogue, customers, visits,
-orders, returns, marketing, stock, support). Ask a business question in plain English; get a verified number,
-the SQL behind it, a chart and an explanation.
+An AI data analyst that answers business questions with verified numbers. The LLM never writes SQL.
+A large language model (LLM) interprets the question; Python builds the query and checks its numeric claims.
 
-### [▶ Live demo](https://pantree-insights-um7bylhdra-uc.a.run.app/)
+[Open the live demo](https://pantree-insights-um7bylhdra-uc.a.run.app/) · [Dataset and AI settings](docs/ai-settings.md)
 
-## How it answers
+<!-- Demo recording placeholder: docs/demo.gif. Add an actual recording before embedding it. -->
 
-1. **Understands** the question against the shop's catalog and business definitions, and turns it into a
-   structured request: metric, splits, filters, period.
-2. **Asks** when something is genuinely open: a phrase with two meanings, or two readings that give different
-   numbers.
-3. **Routes**: complete, context-free KPI questions use a reviewed grammar and deterministic summary with zero
-   model calls. Every analysis explains its plan and waits for explicit confirmation in the normal chat input.
-   Corrections preserve untouched requirements and produce a new version to confirm.
-4. **Computes** with SQL built by code from the governed definitions (or a reviewed analysis template). No model
-   writes SQL. One approval can cover up to four proposed queries; expanding scope needs another approval.
-5. **Delivers** the checked table immediately, then explains it. Accepted numerical claims are replaced with
-   recomputed values; units, incomplete populations and common unsupported causal assertions are checked.
+| Example question | Answer excerpt | Local median time |
+| --- | --- | --- |
+| What was yesterday's GMV? | Gross sales: ₹75,757.00 | 0.199 s |
+| What is the monthly return rate? | Latest observed month (2026-11): 18.01% | 0.406 s |
+| Show revenue by category. | Highest: Apparel — ₹12,622,125.87 | 0.530 s |
+| Which brands generated the highest sales? | Highest: Puma — ₹1,756,918.27 | 0.509 s |
 
-**Verified** describes the governed query and checked numeric evidence, not a proof that every interpretation
-or narrative conclusion is correct. A question it cannot answer that way gets "I can't answer this as a verified
-number yet", never a guess. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Examples use the small snapshot through 2026-11-22. Times are three-pass local medians for model-free paths, excluding startup and human confirmation; they are not live-demo response times.
 
-## Repository
+## Why it matters
 
+- Generated SQL can run successfully while answering the wrong business question.
+- Shared metric definitions and join checks catch unsupported calculations before execution.
+- A visible plan and checked numeric evidence make the answer easier to inspect and challenge.
+
+## How it works
+
+```mermaid
+flowchart LR
+  Q[Question] --> I[Interpret to QuerySpec]
+  I --> C[Clarify / Confirm]
+  C --> S[Compile SQL from semantic layer]
+  S --> D[Execute DuckDB]
+  D --> V[Verify numbers]
+  V --> E[Explain + chart]
 ```
-src/pantree_insights/   graph/ (flow) · interpret/ · spec/ (compiler) · templates.py · agents.py
-                        catalog.py · semantic.py · joins.py · profile.py · guardrails.py · grounding.py · db.py
-                        web/ · auth.py · store/ · memory.py · pulse.py · charts.py · demos.py · static/
-semantic/               schema, metrics, concepts, glossary (incl. two-meaning phrases), generated catalog
-prompts/agents.yaml     interpreter, contrast, analyst
-evals/                  questions, gold SQL, gold specs, autonomous/assisted evaluator, free compiler check
-tests/                  1,709 collected tests: compiler vs gold and vs an independent implementation, every flow route,
-                        guardrails, knowledge-base lint, web app
-```
+
+A QuerySpec is a structured request describing measures, filters, groups, and dates.
+The semantic layer is a collection of YAML files defining those business terms.
+Every query needs confirmation. Follow-up questions retain the approved context.
+
+## Results
+
+The fresh autonomous run completed **100 questions**: 56 answer cases and 44 behavior cases.
+Token-based cost: **$0.637558**, with **$0.00** in uncertain holds, below the $4 ceiling.
+
+| Measure | Fresh result |
+| --- | --- |
+| Correct answer tables | 27/56 (48.2%) |
+| Verified-labelled answers matching gold | 27/34 (79.4%) |
+| Verified-labelled reference mismatches | 7 |
+| All-case local latency, p50 / p95 | 6.851 / 27.283 seconds |
+| Free compiler check | 98/98 cases; 294/294 matches across three passes |
+
+**The evaluation release gate failed.** [Full results, confidence intervals, and failure analysis](evals/reports/current/results.md) retain failed and unresolved cases.
+Some strict reference mismatches involve extra expected columns; the [failure audit](evals/reports/current/failure-audit.md) distinguishes them from interpretation errors without changing scores.
+Simulated data, one repeat, and overlapping host work limit these measurements. Narrative faithfulness is not measured.
+Only the [current evidence set](evals/reports/current/README.md) is published; earlier result artifacts were removed.
+
+## Tech stack
+
+Python · LangGraph · Pydantic · DuckDB · SQLAlchemy/PostgreSQL · FastAPI · JavaScript ES modules · Cloud Run
 
 ## Quickstart
 
-Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). These three commands open the app and its model-free demos.
 
 ```bash
-uv sync
+uv sync --locked
+uv run pantree-data download --size small
+DATA_SIZE=small uv run pantree-web
 ```
 
-```bash
-uv run pantree-data download --size full      # ~470 MB; --size small (~170 MB) for a quick start
-```
-
-```bash
-uv run pantree-ask "How did Diwali 2026 do compared with Diwali 2025?"   # needs OPENAI_API_KEY in .env
-```
-
-```bash
-uv run pantree-web                            # the app at http://127.0.0.1:8000
-```
-
-```bash
-uv run pantree-catalog                        # regenerate semantic/catalog.yaml after a schema change
-```
-
-```bash
-DATA_SIZE=small uv run python scripts/build_offline_demos.py   # rebuild the four offline demos (no model calls)
-```
-
-Settings come from environment variables or `.env` (see `.env.example`).
-
-## Checks
-
-```bash
-uv run pytest -q
-```
-
-```bash
-DATA_SIZE=full uv run python evals/spec_eval.py           # every gold question compiles to the gold answer (free)
-```
-
-```bash
-DATA_SIZE=full uv run python evals/run_eval.py --suite all --yes --max-cost-usd 4 --gate   # paid, see evals/README.md
-```
-
-```bash
-DATA_SIZE=small uv run python evals/fastpath_baseline.py    # five reviewed questions vs independent SQL
-DATA_SIZE=small uv run python evals/context_retrieval.py    # lexical metric-retrieval ablation
-DATA_SIZE=small uv run python evals/conversation_benchmark.py # interpretation/revision/post-confirmation phases
-DATA_SIZE=small uv run python evals/post38_benchmark.py     # local storage/resources/PostgreSQL measurements
-```
-
-## Deploy
-
-Google Cloud Run, Neon Postgres, Google sign-in and email codes, data from Cloud Storage:
-[docs/deploy.md](docs/deploy.md).
+For live model questions, configure the provider securely as described in [the settings guide](docs/ai-settings.md).
+Never commit a provider key. [Deployment guide](docs/deploy.md) · [Evaluation commands](evals/README.md)
 
 ## Limitations
 
-- Simulated data: numbers describe the simulator, not a real shop.
-- Questions outside the request format and the analysis templates are declined until a template is added.
-- The model path still relies on accurate interpretation and the read-back. Explicit intent checks and contrast
-  reduce mistakes but do not prove semantic correctness.
-- Multi-fact plans require named metrics and conformed dimensions. Unsupported cohort definitions, per-group ranking and
-  ambiguous cross-source dates still require a reviewed template or safe abstention.
-- Active work is bounded to one process; deployment remains at one instance. PostgreSQL stores paused checkpoints.
-- See [measured changes and remaining limits](docs/pr40-validation.md).
+- Data is simulated; results do not describe a real business.
+- Verification checks numeric evidence, not every interpretation, narrative claim, or causal explanation.
+- Investigations and retrieved history have explicit bounds; unsupported scope needs clarification or a new query.
+- Active jobs run on one instance; distributed workers and a concurrent-user benchmark are not implemented.
 
-## License
+[Architecture](docs/ARCHITECTURE.md) · [Design decisions](docs/DESIGN_DECISIONS.md) · [Implementation history](docs/history/README.md)
 
-MIT
-
-Dataset browsing, personal provider credentials, daily allowances, and migration instructions: [PR #41 operator guide](docs/ai-settings.md). [Validation and actual UI screenshots](docs/pr41-validation.md).
+MIT license.

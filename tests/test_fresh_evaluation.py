@@ -43,3 +43,30 @@ def test_budget_keeps_unknown_calls_reserved_and_counts_all_days(tmp_path, monke
         assert store.totals() == {'known_usd':.5,'held_usd':3,'calls':2,'uncertain_calls':1}
     finally:
         store.engine.dispose()
+
+
+def test_results_keep_failed_answers_and_exclude_confirmation_prompts():
+    from make_results import clarification_count, report
+    rows = [dict(suite='holdout',set='answer',id='a',status='done',trust='verified',
+                 result_correct=True,passed=True,seconds=1,cost=.01,question='q',evaluation_mode='autonomous'),
+            dict(suite='holdout',set='answer',id='b',status='failed',trust=None,result_correct=False,
+                 passed=False,seconds=3,cost=None,question='q2',failure_type='api_error',reason='timeout',
+                 evaluation_mode='autonomous',trace=[{'type':'clarify','kind':'clarify','questions':[{},{}]},
+                                                   {'type':'clarify','kind':'confirm'}])]
+    text = report(rows)
+    assert '1/2 · 50.0%' in text and '1/1 · 100.0%' in text
+    assert '(1/2 known)' in text and '**api_error (1)**' in text
+    assert clarification_count(rows[1]) == 2
+    rows[1]['evaluation_mode'] = 'assisted'
+    with pytest.raises(ValueError, match='combine'):
+        report(rows)
+
+
+def test_preview_cannot_overwrite_an_existing_paid_selection(tmp_path):
+    import subprocess
+    (tmp_path/'paid.json').write_text('[]')
+    (tmp_path/'selection.json').write_text('preserved')
+    script = Path(__file__).resolve().parents[1]/'scripts/run_fresh_eval.py'
+    result = subprocess.run([sys.executable,str(script),'--output-dir',str(tmp_path)],capture_output=True,text=True)
+    assert result.returncode == 2 and 'already exists' in result.stderr
+    assert (tmp_path/'selection.json').read_text() == 'preserved'
