@@ -262,3 +262,19 @@ def test_web_runner_restores_original_model_after_settings_change(postgres, con,
         assert set(calls) == {('openai', 'original-shared-test-key', original_model)}
     finally:
         second.agent.close()
+
+
+def test_concurrent_credential_replacements_leave_only_current_version_active(postgres, monkeypatch):
+    from cryptography.fernet import Fernet
+    from pydantic import SecretStr
+
+    from pantree_insights.config import get_settings
+    store, _, _ = postgres
+    monkeypatch.setattr(get_settings(), 'credential_encryption_key', SecretStr(Fernet.generate_key().decode()))
+    user = store.upsert_user('key-race@example.test')
+    def replace(i):
+        return store.add_credential(user['id'], 'groq', f'concurrent-test-key-{i}', 'llama-3.3-70b-versatile')
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        versions = list(pool.map(replace, range(16)))
+    active = [cid for cid in versions if store.credential(user['id'], cid)]
+    assert active == [store.ai_profile(user['id'])['credential_id']]

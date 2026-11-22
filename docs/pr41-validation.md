@@ -30,8 +30,8 @@ No production deployment or billable provider inference was performed.
 | Check | Result |
 |---|---|
 | Full local pytest with real PostgreSQL | 1,639 passed; 1 skipped, 122.05 seconds |
-| Final provider/security follow-up, including four added partial-usage cases | 22 passed |
-| Real PostgreSQL integration, included in full run | 9 passed |
+| Final provider/security and PostgreSQL follow-up, including partial usage and revocation races | 33 passed |
+| Real PostgreSQL integration | 9 in full run; all 10 passed in final follow-up |
 | Existing browser regressions after final UI edits | Passed |
 | New workbook/settings browser contracts | Passed: desktop/mobile × light/dark |
 | Evaluation gold SQL | 129 valid queries; zero problems |
@@ -39,15 +39,16 @@ No production deployment or billable provider inference was performed.
 | Ruff, whitespace, locked dependency install | Passed |
 
 The single skip is the existing recorded-demo snapshot comparison when its fixture differs from the nightly
-simulator snapshot; it is not a skipped provider, budget or PostgreSQL test. The new four partial-usage cases
-were added after the full local run and passed in the final 22-test provider follow-up. GitHub CI runs the full
+simulator snapshot; it is not a skipped provider, budget or PostgreSQL test. Four partial-usage cases and two credential-revocation race cases
+were added after the full local run and passed in the final 33-test provider/PostgreSQL follow-up. GitHub CI runs the full
 suite, both browser suites, gold validation and compiler comparisons against the submitted branch.
 
 New checks cover encryption and owner binding; replacement/deletion and shared-key rotation; backend model
 membership; ordinary/admin authorization; safe validation/provider errors; fixed trusted endpoints; all four
 provider wire contracts and cached token accounting; no personal-to-shared fallback; missing/invalid pricing;
 partial usage; uncertain reservations; malformed output charging; single settlement under retries; SQLite and
-PostgreSQL concurrent limits across users/models; additive migration with preserved spend; and actual
+PostgreSQL concurrent limits across users/models; additive migration with preserved spend; serialized concurrent credential replacements;
+revocation while queued for a provider slot; and actual
 LangGraph pause/restart/resume using the original account/model after settings change.
 
 Workbook checks use real Parquet rows/types/counts and governed joins. Browser fixtures exercise account and

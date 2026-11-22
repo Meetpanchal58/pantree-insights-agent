@@ -215,6 +215,7 @@ class ChatLLM:
             raise TimeoutError('Model request queue is busy; retry later')
         cid = None
         try:
+            key = self.store.ai_key(pin)  # revocation may have occurred while waiting for the provider slot
             cid = self.store.reserve_api_call(pin, self.run_id, agent, reservation)
             inference = time.perf_counter()
             value, usage = providers.invoke(pin['provider'], key, pin['model'], schema, system, user)

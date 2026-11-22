@@ -283,3 +283,22 @@ def test_partial_usage_is_not_mistaken_for_a_free_call(provider, monkeypatch):
         'usage': {'input_tokens': 20}, 'usageMetadata': {'promptTokenCount': 20}}))
     _, usage = providers.invoke(provider, 'local-test-key', 'model', Answer, 's', 'u')
     assert usage['reported'] is False
+
+
+def test_waiting_call_rechecks_credential_revocation(account, monkeypatch):
+    from pantree_insights import llm as llm_module
+    store, user = account
+    store.add_credential(user['id'], 'groq', 'queued-personal-test-key', 'llama-3.3-70b-versatile')
+    pin = store.pin_ai(user)
+    monkeypatch.setattr(providers, 'discover', lambda *a, **kw: [{'id': pin['model']}])
+    class RevokingGate:
+        def acquire(self, **kwargs):
+            store.remove_credentials(user['id'])
+            return True
+        def release(self):
+            pass
+    monkeypatch.setattr(llm_module, '_provider_slots', lambda limit: RevokingGate())
+    monkeypatch.setattr(providers, 'invoke', lambda *a: pytest.fail('revoked queued call reached provider'))
+    with pytest.raises(providers.ProviderError, match='revoked'):
+        ChatLLM(selection=pin, store=store, run_id='queued').ask('analyst', Answer, 's', 'u')
+    assert store.api_call_history('queued', user['id']) == []

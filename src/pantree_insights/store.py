@@ -375,6 +375,8 @@ class Store:
         cid = uuid.uuid4().hex
         encrypted = encrypt_key(user_id, cid, provider, key)
         with self.engine.begin() as c:
+            # Serialize replacement/removal per owner, including concurrently inserted credential versions.
+            c.execute(select(users.c.id).where(users.c.id == user_id).with_for_update())
             # Replacement revokes the old version. Pending runs fail explicitly, never use the replacement key.
             c.execute(update(ai_credentials).where(ai_credentials.c.user_id == user_id)
                       .values(active=False, ciphertext=""))
@@ -391,6 +393,7 @@ class Store:
 
     def remove_credentials(self, user_id: str) -> None:
         with self.engine.begin() as c:
+            c.execute(select(users.c.id).where(users.c.id == user_id).with_for_update())
             c.execute(update(ai_credentials).where(ai_credentials.c.user_id == user_id)
                       .values(active=False, ciphertext="", suffix=""))
             c.execute(update(ai_profiles).where(ai_profiles.c.user_id == user_id).values(
