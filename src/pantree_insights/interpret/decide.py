@@ -136,7 +136,8 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             metrics = {m.metric for step in reading.steps if step.spec for m in step.spec.measures}
             for step in reading.steps:
                 if step.spec:
-                    step.spec = compared_members(effective_question, normalise(step.spec, cat, aliases), cat, aliases)
+                    step.spec = complete_ranking(effective_question, compared_members(
+                        effective_question, normalise(step.spec, cat, aliases), cat, aliases), cat)
                     problems += validate(step.spec, cat)
                     intent = intent_problems(effective_question, step.spec, cat, data["last_day"])
                     # Metrics may be answered by another approved step, but populations cannot silently disappear.
