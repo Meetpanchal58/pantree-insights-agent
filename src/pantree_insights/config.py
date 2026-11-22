@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +39,8 @@ class Settings(BaseSettings):
     # Sampling temperature. None = provider default: OpenAI reasoning models (gpt-6.x) do not accept a
     # temperature, so it is only sent when set. Reports record the value used.
     temperature: float | None = None
+    credential_encryption_key: SecretStr = SecretStr("")  # independent Fernet key, never SESSION_SECRET
+    daily_user_budget_usd: float = 1.00
     daily_budget_usd: float = 1.00               # live LLM calls stop for the day after this
 
     # Durable LangGraph checkpoints; use Postgres on Cloud Run, memory only for tests.

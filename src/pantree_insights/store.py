@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import secrets
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -138,8 +139,34 @@ feedback = Table(
 )
 usage = Table(
     "usage", metadata,
-    Column("user_id", String(16), primary_key=True), Column("day", String(10), primary_key=True),
+    Column("user_id", String(64), primary_key=True), Column("day", String(10), primary_key=True),
     Column("questions", Integer, default=0), Column("usd", Float, default=0.0),
+)
+
+
+ai_profiles = Table(
+    "ai_profiles", metadata,
+    Column("user_id", String(16), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("mode", String(16), default="shared"), Column("provider", String(20), default="openai"),
+    Column("model", String(200)), Column("credential_id", String(32)), Column("daily_limit", Float),
+)
+ai_credentials = Table(
+    "ai_credentials", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("user_id", String(16), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("provider", String(20), nullable=False), Column("ciphertext", Text, nullable=False),
+    Column("suffix", String(4)), Column("active", Boolean, default=True),
+    Column("created_at", DateTime, default=_now),
+)
+api_calls = Table(
+    "api_calls", metadata,
+    Column("id", String(32), primary_key=True), Column("user_id", String(16), index=True, nullable=False),
+    Column("run_id", String(32), index=True), Column("day", String(10), index=True, nullable=False),
+    Column("provider", String(20)), Column("model", String(200)), Column("credential_id", String(32)),
+    Column("billing", String(20)), Column("agent", String(40)), Column("status", String(20)),
+    Column("reserved_usd", Float), Column("usd", Float), Column("input_tokens", Integer, default=0),
+    Column("cached_tokens", Integer, default=0), Column("output_tokens", Integer, default=0),
+    Column("created_at", DateTime, default=_now),
 )
 
 
@@ -162,6 +189,12 @@ class Store:
             Path(url[len("sqlite:///"):]).parent.mkdir(parents=True, exist_ok=True)
         self.engine: Engine = create_engine(url, pool_pre_ping=True, future=True)
         metadata.create_all(self.engine)
+        if self.engine.dialect.name == "postgresql":
+            from sqlalchemy import inspect, text
+            column = next(c for c in inspect(self.engine).get_columns("usage") if c["name"] == "user_id")
+            if column["type"].length is not None and column["type"].length < 64:
+                with self.engine.begin() as connection:
+                    connection.execute(text("ALTER TABLE usage ALTER COLUMN user_id TYPE VARCHAR(64)"))
 
     def _one(self, stmt) -> dict | None:
         with self.engine.connect() as c:
@@ -178,10 +211,11 @@ class Store:
 
     # ------------------------------------------------------------------ run tracking and opt-in feedback
     def create_run(self, run_id: str, user_id: str, chat_id: str, question: str,
-                   snapshot: str | None = None, use_defaults: bool = False) -> None:
+                   snapshot: str | None = None, use_defaults: bool = False, ai: dict | None = None) -> None:
         self._exec(insert(run_records).values(id=run_id, user_id=user_id, chat_id=chat_id,
                                                question=question, status="running", events=[],
-                                               summary={"snapshot": snapshot, "use_defaults": use_defaults}))
+                                               summary={"snapshot": snapshot, "use_defaults": use_defaults,
+                                                        **({"ai": ai} if ai else {})}))
 
     def save_run(self, run_id: str, status: str, events: list[dict], summary: dict | None = None) -> None:
         values = {"status": status, "events": to_json(events), "updated_at": _now()}
@@ -249,8 +283,9 @@ class Store:
                           .on_conflict_do_update(index_elements=[investigations.c.chat_id],
                                                 set_={"context": to_json(context), "updated_at": _now()}))
             c.execute(update(chats).where(chats.c.id == row["chat_id"]).values(updated_at=_now()))
-            usd = (final.get("cost") or {}).get("usd", 0.0)
-            c.execute(self._upsert(usage).values(user_id=row["user_id"], day=str(date.today()), questions=0, usd=usd)
+            usd = 0.0 if summary.get("ai") else (final.get("cost") or {}).get("usd", 0.0)
+            c.execute(self._upsert(usage).values(user_id=row["user_id"], day=str(datetime.now(UTC).date()),
+                                               questions=0, usd=usd)
                 .on_conflict_do_update(index_elements=[usage.c.user_id, usage.c.day], set_={"usd": usage.c.usd + usd}))
             return True
 
@@ -323,6 +358,144 @@ class Store:
     def set_preferences(self, user_id: str, text: str) -> None:
         self._exec(update(users).where(users.c.id == user_id).values(preferences=text[:4000]))
 
+    # ------------------------------------------------------------------ provider selection and credentials
+    def ai_profile(self, user_id: str) -> dict:
+        row = self._one(select(ai_profiles).where(ai_profiles.c.user_id == user_id)) or {}
+        return {"mode": "shared", "provider": "openai", "model": get_settings().model_main.split(":", 1)[-1],
+                "credential_id": None, "daily_limit": None, **{k: v for k, v in row.items() if v is not None}}
+
+    def set_ai_profile(self, user_id: str, **values) -> None:
+        fields = ('mode', 'provider', 'model', 'credential_id', 'daily_limit')
+        allowed = {k: v for k, v in values.items() if k in fields}
+        self._exec(self._upsert(ai_profiles).values(user_id=user_id, **allowed).on_conflict_do_update(
+            index_elements=[ai_profiles.c.user_id], set_=allowed))
+
+    def add_credential(self, user_id: str, provider: str, key: str, model: str) -> str:
+        from .providers import encrypt_key
+        cid = uuid.uuid4().hex
+        encrypted = encrypt_key(user_id, cid, provider, key)
+        with self.engine.begin() as c:
+            # Serialize replacement/removal per owner, including concurrently inserted credential versions.
+            c.execute(select(users.c.id).where(users.c.id == user_id).with_for_update())
+            # Replacement revokes the old version. Pending runs fail explicitly, never use the replacement key.
+            c.execute(update(ai_credentials).where(ai_credentials.c.user_id == user_id)
+                      .values(active=False, ciphertext=""))
+            c.execute(insert(ai_credentials).values(id=cid, user_id=user_id, provider=provider,
+                      ciphertext=encrypted, suffix=key[-4:], active=True))
+            values = dict(mode="personal", provider=provider, model=model, credential_id=cid)
+            c.execute(self._upsert(ai_profiles).values(user_id=user_id, **values).on_conflict_do_update(
+                index_elements=[ai_profiles.c.user_id], set_=values))
+        return cid
+
+    def credential(self, user_id: str, cid: str | None) -> dict | None:
+        return self._one(select(ai_credentials).where(ai_credentials.c.id == cid,
+                          ai_credentials.c.user_id == user_id, ai_credentials.c.active.is_(True))) if cid else None
+
+    def remove_credentials(self, user_id: str) -> None:
+        with self.engine.begin() as c:
+            c.execute(select(users.c.id).where(users.c.id == user_id).with_for_update())
+            c.execute(update(ai_credentials).where(ai_credentials.c.user_id == user_id)
+                      .values(active=False, ciphertext="", suffix=""))
+            c.execute(update(ai_profiles).where(ai_profiles.c.user_id == user_id).values(
+                mode="shared", provider="openai", model=get_settings().model_main.split(":", 1)[-1],
+                credential_id=None))
+
+    def pin_ai(self, user: dict) -> dict:
+        import os
+
+        from .providers import key_version
+        profile = self.ai_profile(user['id'])
+        return {"user_id": user['id'], "mode": profile['mode'], "provider": profile['provider'],
+                "model": profile['model'],
+                "credential_id": profile.get('credential_id') if profile['mode'] == 'personal' else None,
+                "shared_version": key_version(os.getenv('OPENAI_API_KEY', '')) if profile['mode'] == 'shared' else None,
+                "billing": "personal" if profile['mode'] == 'personal' else "admin" if user['is_admin'] else "shared"}
+
+    def ai_key(self, pin: dict) -> str:
+        from .providers import ProviderError, decrypt_key, key_version, shared_key
+        if pin['mode'] == 'personal':
+            credential = self.credential(pin['user_id'], pin['credential_id'])
+            if not credential or credential['provider'] != pin['provider']:
+                raise ProviderError(
+                    'This run’s credential was revoked. Start a new request with your current settings.', 409)
+            return decrypt_key(pin['user_id'], credential)
+        key = shared_key()
+        if key_version(key) != pin['shared_version']:
+            raise ProviderError(
+                'Pantree credentials changed. Start a new request; this run will not switch credentials.', 409)
+        return key
+
+    def reserve_api_call(self, pin: dict, run_id: str, agent: str, amount: float) -> str:
+        from .llm import BUDGET_KEY, BudgetExceeded
+        cid, today = uuid.uuid4().hex, str(datetime.now(UTC).date())
+        if amount < 0 or not math.isfinite(amount):
+            raise ValueError('Invalid reservation')
+        with self.engine.begin() as c:
+            if pin['billing'] == 'shared':
+                profile = self.ai_profile(pin['user_id'])
+                limit = profile['daily_limit'] if profile.get('daily_limit') is not None else \
+                    get_settings().daily_user_budget_usd
+                for identity, budget in [(BUDGET_KEY, get_settings().daily_budget_usd), (pin['user_id'], limit)]:
+                    c.execute(self._upsert(usage).values(user_id=identity, day=today, usd=0, questions=0)
+                              .on_conflict_do_nothing())
+                    changed = c.execute(update(usage).where(usage.c.user_id == identity, usage.c.day == today,
+                        usage.c.usd + amount <= budget).values(usd=usage.c.usd + amount)).rowcount
+                    if not changed:
+                        raise BudgetExceeded('The shared daily spending allowance cannot cover this call. '
+                                             'Connect a personal API key or try again tomorrow.')
+            c.execute(insert(api_calls).values(id=cid, user_id=pin['user_id'], run_id=run_id, day=today,
+                provider=pin['provider'], model=pin['model'], credential_id=pin.get('credential_id'),
+                billing=pin['billing'], agent=agent, status='reserved', reserved_usd=amount))
+        return cid
+
+    def settle_api_call(self, cid: str, usd: float | None, tokens: dict, status: str = 'succeeded') -> None:
+        from .llm import BUDGET_KEY
+        with self.engine.begin() as c:
+            row = c.execute(update(api_calls).where(api_calls.c.id == cid, api_calls.c.status == 'reserved')
+                .values(status=status, usd=usd, input_tokens=tokens.get('input', 0),
+                        cached_tokens=tokens.get('cached', 0), output_tokens=tokens.get('output', 0))
+                .returning(api_calls)).mappings().first()
+            if not row:
+                return
+            if row['billing'] == 'shared':
+                # Unknown outcomes keep their reservation charged. Never free a possibly billed call on a timeout.
+                charged = row['reserved_usd'] if usd is None else usd
+                for identity in (BUDGET_KEY, row['user_id']):
+                    c.execute(update(usage).where(usage.c.user_id == identity, usage.c.day == row['day'])
+                              .values(usd=usage.c.usd + charged - row['reserved_usd']))
+
+    def api_usage(self, user_id: str | None = None) -> dict:
+        today = str(datetime.now(UTC).date())
+        stmt = select(api_calls).where(api_calls.c.day == today)
+        if user_id is not None:
+            stmt = stmt.where(api_calls.c.user_id == user_id)
+        rows = self._all(stmt)
+        groups = {}
+        for row in rows:
+            key = (row['user_id'], row['billing'], row['provider'], row['model'])
+            group = groups.setdefault(key, dict(user_id=key[0], billing=key[1], provider=key[2], model=key[3],
+                calls=0, input_tokens=0, cached_tokens=0, output_tokens=0, usd=0, uncertain_calls=0, reserved_usd=0))
+            group['calls'] += 1
+            for field in ('input_tokens', 'cached_tokens', 'output_tokens'):
+                group[field] += row[field] or 0
+            group['usd'] += row['usd'] or 0
+            if row['usd'] is None:
+                group['uncertain_calls'] += 1
+                group['reserved_usd'] += row['reserved_usd'] or 0
+        result = {"day": today, "timezone": "UTC", "groups": list(groups.values())}
+        if user_id is not None:
+            profile = self.ai_profile(user_id)
+            limit = (profile['daily_limit'] if profile.get('daily_limit') is not None
+                     else get_settings().daily_user_budget_usd)
+            used = self.usd_today(user_id)
+            result.update(requests=self.questions_today(user_id), shared_used=used,
+                          daily_limit=limit, remaining=max(0, limit-used))
+        return result
+
+    def api_call_history(self, run_id: str, user_id: str) -> list[dict]:
+        return self._all(select(api_calls).where(api_calls.c.run_id == run_id, api_calls.c.user_id == user_id)
+                         .order_by(api_calls.c.created_at))
+
     # ------------------------------------------------------------------ email codes
     def new_email_code(self, email: str, minutes: int = 10) -> str | None:
         """A 6-digit code, or None if one was sent less than 60 seconds ago (rate limit)."""
@@ -350,7 +523,7 @@ class Store:
 
     # ------------------------------------------------------------------ usage
     def questions_today(self, user_id: str) -> int:
-        row = self._one(select(usage).where(usage.c.user_id == user_id, usage.c.day == str(date.today())))
+        row = self._one(select(usage).where(usage.c.user_id == user_id, usage.c.day == str(datetime.now(UTC).date())))
         return row["questions"] if row else 0
 
     def count_question(self, user_id: str, usd: float = 0.0) -> None:
@@ -360,7 +533,7 @@ class Store:
         """Check the daily quota and increment it atomically, including concurrent first requests."""
         if limit is not None and limit < 1:
             return False
-        statement = self._upsert(usage).values(user_id=user_id, day=str(date.today()), questions=1, usd=usd)
+        statement = self._upsert(usage).values(user_id=user_id, day=str(datetime.now(UTC).date()), questions=1, usd=usd)
         statement = statement.on_conflict_do_update(index_elements=[usage.c.user_id, usage.c.day],
             set_={"questions": usage.c.questions + 1, "usd": usage.c.usd + usd},
             where=usage.c.questions < limit if limit is not None else None)
@@ -368,13 +541,14 @@ class Store:
             return c.execute(statement.returning(usage.c.user_id)).first() is not None
 
     def usd_today(self, key: str) -> float:
-        row = self._one(select(usage).where(usage.c.user_id == key, usage.c.day == str(date.today())))
+        row = self._one(select(usage).where(usage.c.user_id == key, usage.c.day == str(datetime.now(UTC).date())))
         return float(row["usd"]) if row else 0.0
 
     def add_usd_today(self, key: str, usd: float) -> None:
         """Add spend for today under a key (atomic update; the row is created on first use)."""
         with self.engine.begin() as c:
-            c.execute(self._upsert(usage).values(user_id=key, day=str(date.today()), questions=0, usd=usd)
+            c.execute(self._upsert(usage).values(user_id=key, day=str(datetime.now(UTC).date()),
+                                               questions=0, usd=usd)
                 .on_conflict_do_update(index_elements=[usage.c.user_id, usage.c.day], set_={"usd": usage.c.usd + usd}))
 
     # ------------------------------------------------------------------ projects

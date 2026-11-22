@@ -148,3 +148,133 @@ def test_investigation_survives_store_restart_and_history_window(postgres):
         assert restarted.investigation(user['id'], chat['id']) == {}
     finally:
         restarted.engine.dispose()
+
+
+def test_postgres_shared_model_budget_and_pinned_credentials_survive_restart(postgres, monkeypatch):
+    from cryptography.fernet import Fernet
+    from pydantic import SecretStr
+
+    from pantree_insights.config import get_settings
+    from pantree_insights.llm import BUDGET_KEY, BudgetExceeded, ChatLLM
+    from pantree_insights.providers import ProviderError
+    store, url, _ = postgres
+    monkeypatch.setenv('OPENAI_API_KEY', 'shared-postgres-test-key')
+    monkeypatch.setattr(get_settings(), 'credential_encryption_key', SecretStr(Fernet.generate_key().decode()))
+    initial = store.usd_today(BUDGET_KEY)
+    monkeypatch.setattr(get_settings(), 'daily_budget_usd', initial + 1)
+    monkeypatch.setattr(get_settings(), 'daily_user_budget_usd', .75)
+    people = [store.upsert_user(f'budget-{i}@example.test') for i in range(2)]
+    pins = [store.pin_ai(u) for u in people]
+    def reserve(i):
+        try:
+            return store.reserve_api_call({**pins[i % 2], 'model': f'model-{i % 3}'}, 'pg-budget', 'analyst', .25)
+        except BudgetExceeded:
+            return None
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        accepted = [cid for cid in pool.map(reserve, range(36)) if cid]
+    assert len(accepted) == 4
+    assert store.usd_today(BUDGET_KEY) == pytest.approx(initial + 1)
+    assert all(store.usd_today(u['id']) <= .75 for u in people)
+    user = people[0]
+    store.add_credential(user['id'], 'groq', 'personal-postgres-test-key', 'llama-3.3-70b-versatile')
+    pin = store.pin_ai(user)
+    chat = store.create_chat(user['id'])
+    store.create_run('pg-pin', user['id'], chat['id'], 'Orders', ai=pin)
+    proposal = {'type': 'clarify', 'plan_version': 1}
+    store.save_pause('pg-pin', chat['id'], [proposal], proposal)
+    cid = store.reserve_api_call(pin, 'pg-pin', 'interpreter', .5)
+    store.settle_api_call(cid, .02, {'input': 100, 'cached': 20, 'output': 5})
+    store.set_ai_profile(user['id'], model='next-model')
+    restarted = Store(url)
+    try:
+        saved = restarted.run_record(user['id'], 'pg-pin')['summary']['ai']
+        assert saved == pin and restarted.ai_key(saved) == 'personal-postgres-test-key'
+        assert ChatLLM(selection=saved, store=restarted, run_id='pg-pin').tracker.usd == .02
+        restarted.remove_credentials(user['id'])
+        with pytest.raises(ProviderError, match='revoked'):
+            restarted.ai_key(saved)
+    finally:
+        restarted.engine.dispose()
+
+
+def test_existing_postgres_usage_column_migrates_without_losing_spend(postgres):
+    from sqlalchemy import inspect, text
+    store, url, _ = postgres
+    # Simulate the old schema after removing only this test database's synthetic budget row.
+    with store.engine.begin() as connection:
+        connection.execute(text('DELETE FROM usage WHERE length(user_id) > 16'))
+        connection.execute(text('ALTER TABLE usage ALTER COLUMN user_id TYPE VARCHAR(16)'))
+    user = store.upsert_user('migration@example.test')
+    store.add_usd_today(user['id'], .35)
+    migrated = Store(url)
+    try:
+        assert next(c for c in inspect(migrated.engine).get_columns('usage')
+                    if c['name'] == 'user_id')['type'].length == 64
+        assert migrated.usd_today(user['id']) == .35
+    finally:
+        migrated.engine.dispose()
+
+
+def test_web_runner_restores_original_model_after_settings_change(postgres, con, monkeypatch):
+    from test_web import responder
+
+    from pantree_insights import providers
+    from pantree_insights.config import get_settings
+    from pantree_insights.db import snapshot_signature
+    from pantree_insights.graph import Agent
+    from pantree_insights.web import Runner
+    store, url, _ = postgres
+    monkeypatch.setattr(get_settings(), 'database_url', url)
+    monkeypatch.setattr(get_settings(), 'checkpoint_backend', 'postgres')
+    monkeypatch.setattr(get_settings(), 'daily_budget_usd', 10)
+    monkeypatch.setenv('OPENAI_API_KEY', 'original-shared-test-key')
+    user = store.upsert_user('runner-pin@example.test')
+    chat = store.create_chat(user['id'])
+    original_model = store.pin_ai(user)['model']
+    monkeypatch.setattr(providers, 'discover', lambda *a, **kw: [{'id': original_model}])
+    calls = []
+    def invoke(provider, key, model, schema, system, prompt):
+        calls.append((provider, key, model))
+        role = ('interpreter' if 'restated_question' in schema.model_fields else
+                'contrast' if 'readings' in schema.model_fields else 'analyst')
+        return responder(role, schema, system, prompt), {'input': 100, 'cached': 20, 'output': 30, 'reported': True}
+    monkeypatch.setattr(providers, 'invoke', invoke)
+    def make_runner():
+        runner = Runner()
+        runner._agent = Agent(con=con)
+        runner._snapshot = snapshot_signature()
+        return runner
+    first = make_runner()
+    run = first.start(store, user, chat, 'How much did we sell?')
+    assert run.segment_done.wait(30) and run.paused
+    prior_calls = len(calls)
+    first.agent.close()
+    store.set_ai_profile(user['id'], model='future-model')
+    second = make_runner()
+    try:
+        restored = second.restore(store, user, run.id)
+        assert restored.ai['model'] == original_model
+        assert len(second.agent._llms[run.id].tracker.calls) == prior_calls
+        second.answer(store, restored, 'Go ahead', restored.events[-1]['plan_version'])
+        assert restored.segment_done.wait(30)
+        assert restored.events[-1]['status'] == 'done'
+        assert len(calls) > prior_calls
+        assert set(calls) == {('openai', 'original-shared-test-key', original_model)}
+    finally:
+        second.agent.close()
+
+
+def test_concurrent_credential_replacements_leave_only_current_version_active(postgres, monkeypatch):
+    from cryptography.fernet import Fernet
+    from pydantic import SecretStr
+
+    from pantree_insights.config import get_settings
+    store, _, _ = postgres
+    monkeypatch.setattr(get_settings(), 'credential_encryption_key', SecretStr(Fernet.generate_key().decode()))
+    user = store.upsert_user('key-race@example.test')
+    def replace(i):
+        return store.add_credential(user['id'], 'groq', f'concurrent-test-key-{i}', 'llama-3.3-70b-versatile')
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        versions = list(pool.map(replace, range(16)))
+    active = [cid for cid in versions if store.credential(user['id'], cid)]
+    assert active == [store.ai_profile(user['id'])['credential_id']]

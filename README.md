@@ -107,3 +107,5 @@ Google Cloud Run, Neon Postgres, Google sign-in and email codes, data from Cloud
 ## License
 
 MIT
+
+Dataset browsing, personal provider credentials, daily allowances, and migration instructions: [PR #41 operator guide](docs/ai-settings.md). [Validation and actual UI screenshots](docs/pr41-validation.md).

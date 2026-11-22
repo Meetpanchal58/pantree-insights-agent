@@ -18,19 +18,22 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import demos as demo_runs
+from . import explorer, providers
 from .auth import current_user, methods, require_admin, require_user
 from .auth import router as auth_router
 from .config import get_settings
 from .db import manifest, snapshot_signature
+from .llm import BudgetExceeded, ChatLLM
 from .store import MemoryScope, Store, get_store, to_json
 
 log = logging.getLogger("pantree.web")
@@ -83,6 +86,22 @@ class PreferencesIn(BaseModel):
     text: str = Field("", max_length=4000)
 
 
+class AISettingsIn(BaseModel):
+    mode: Literal['shared', 'personal']
+    provider: providers.Provider = 'openai'
+    model: str = Field(min_length=1, max_length=200)
+    api_key: SecretStr | None = Field(None, min_length=8, max_length=512)
+
+
+class ConnectionIn(BaseModel):
+    provider: providers.Provider
+    api_key: SecretStr = Field(min_length=8, max_length=512)
+
+
+class AllowanceIn(BaseModel):
+    daily_limit: float = Field(ge=0, le=10000, allow_inf_nan=False)
+
+
 # ----------------------------------------------------------------------------- background runs
 @dataclass
 class Run:
@@ -96,10 +115,15 @@ class Run:
     finished: bool = False
     segment_done: threading.Event = field(default_factory=threading.Event)
     agent: object | None = None
+    ai: dict | None = None
 
 
 def failure_details(error: Exception) -> dict:
     """User-facing failures without raw provider/credential details."""
+    if isinstance(error, BudgetExceeded):
+        return {"message": str(error), "error_code": "budget_exhausted", "retryable": False}
+    if isinstance(error, providers.ProviderError):
+        return {"message": str(error), "error_code": "provider_error", "retryable": error.status_code >= 429}
     status = getattr(error, "status_code", None)
     name = type(error).__name__.lower()
     headers = getattr(getattr(error, "response", None), "headers", {}) or {}
@@ -157,10 +181,10 @@ class Runner:
         if chat["title"] == "New chat":
             store.update_chat(user["id"], chat["id"], title=question[:80])
         scope = MemoryScope(store, user, chat)
-        run = Run(run_id or uuid.uuid4().hex[:12], user, chat, question)
+        run = Run(run_id or uuid.uuid4().hex[:12], user, chat, question, ai=store.pin_ai(user))
         self.runs[run.id] = run
         store.create_run(run.id, user["id"], chat["id"], question, snapshot=snapshot_signature(),
-                         use_defaults=use_defaults)
+                         use_defaults=use_defaults, ai=run.ai)
 
         def events():
             cold = self._agent is None
@@ -175,6 +199,8 @@ class Runner:
                            "detail": {"seconds": round(time.time() - started, 2)}}
                 raise
             run.agent = agent
+            if self._agent_factory is None:
+                agent._llms[run.id] = ChatLLM(selection=run.ai, store=store, run_id=run.id)
             if cold:
                 yield {"type": "step", "step": "prepare", "status": "done", "t": time.time(),
                        "detail": {"seconds": round(time.time() - started, 2)}}
@@ -206,7 +232,12 @@ class Runner:
         if chat is None:
             return None
         agent = self.agent
-        run = Run(run_id, user, chat, saved["question"], agent=agent)
+        run = Run(run_id, user, chat, saved["question"], agent=agent, ai=(saved.get('summary') or {}).get('ai'))
+        if self._agent_factory is None:
+            if not run.ai:
+                store.save_run(run_id, 'interrupted', saved.get('events') or [])
+                return None  # pre-migration pauses have no pinned credential identity
+            agent._llms[run_id] = ChatLLM(selection=run.ai, store=store, run_id=run_id)
         run.events = saved["events"] or []
         run.started = min((e.get("t", time.time()) for e in run.events), default=time.time())
         run.paused = True
@@ -255,6 +286,8 @@ class Runner:
             try:
                 for event in events:
                     event = {**event, "t": event.get("t", time.time())}
+                    if run.ai:
+                        event['ai'] = {k: run.ai[k] for k in ('mode', 'provider', 'model')}
                     if event["type"] == "clarify":
                         store.save_pause(run.id, run.chat["id"], [*run.events, event], event)
                         run.paused = True
@@ -334,6 +367,18 @@ def create_app() -> FastAPI:
         return response
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_site="lax",
                        https_only=settings.app_env == "production", max_age=30 * 24 * 3600)
+    @app.exception_handler(providers.ProviderError)
+    async def provider_error(request, exc):
+        return JSONResponse({'detail': str(exc)}, status_code=exc.status_code,
+                            headers={'Cache-Control': 'no-store'})
+
+    from fastapi.exceptions import RequestValidationError
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc):
+        return JSONResponse({'detail': [{'loc': e['loc'], 'type': e['type'], 'msg': e['msg']}
+                                       for e in exc.errors()]}, status_code=422)
+
     app.include_router(auth_router)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -366,7 +411,99 @@ def create_app() -> FastAPI:
         used = store.questions_today(user["id"])
         return {**base, "user": {k: user[k] for k in ("id", "email", "name", "picture", "is_admin")},
                 "limit": {"per_day": settings.daily_question_limit, "used": used,
-                          "unlimited": bool(user["is_admin"])}}
+                          "unlimited": bool(user["is_admin"])}, "ai": public_ai(store, user)}
+
+    # ------------------------------------------------------------------ dataset browsing (no LLM or quota)
+    @app.get('/api/dataset')
+    def dataset(user=Depends(require_user)):
+        return JSONResponse(explorer.overview(), headers={'Cache-Control': 'private, no-store'})
+
+    @app.get('/api/dataset/{table}')
+    def dataset_table(table: str, version: str | None = None, user=Depends(require_user)):
+        try:
+            result = explorer.preview(table, version)
+        except KeyError:
+            raise HTTPException(404, 'Table not available') from None
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
+        return JSONResponse(result, headers={'Cache-Control': 'private, no-store'})
+
+    # ------------------------------------------------------------------ AI settings and accounting
+    def public_ai(store, user):
+        profile = store.ai_profile(user['id'])
+        credential = store.credential(user['id'], profile.get('credential_id'))
+        import os
+        return {**profile, 'credential_id': None, 'user_id': None,
+            'default_provider': 'openai', 'default_model': settings.model_main.split(':', 1)[-1],
+            'light_model': settings.model_light, 'encryption_ready': providers.encryption_ready(),
+            'shared_configured': bool(os.getenv('OPENAI_API_KEY')),
+            'personal': {'provider': credential['provider'], 'suffix': credential['suffix']} if credential else None,
+            'usage': store.api_usage(user['id']), 'exempt': bool(user['is_admin']) or profile['mode'] == 'personal'}
+
+    @app.get('/api/ai/settings')
+    def ai_settings(user=Depends(require_user), store: Store = Depends(get_store)):
+        return JSONResponse(public_ai(store, user), headers={'Cache-Control': 'no-store'})
+
+    def account_key(store, user, mode, provider):
+        if mode == 'shared':
+            if provider != 'openai':
+                raise HTTPException(400, 'Pantree default credentials use OpenAI')
+            return providers.shared_key()
+        profile = store.ai_profile(user['id'])
+        credential = store.credential(user['id'], profile.get('credential_id'))
+        if not credential or credential['provider'] != provider:
+            raise HTTPException(409, 'Connect a key for this provider first')
+        return providers.decrypt_key(user['id'], credential)
+
+    @app.get('/api/ai/models')
+    def ai_models(mode: Literal['shared', 'personal'] = 'shared', provider: providers.Provider = 'openai',
+                  user=Depends(require_user), store: Store = Depends(get_store)):
+        key = account_key(store, user, mode, provider)
+        return JSONResponse({'models': providers.discover(provider, key, user['id'])},
+                            headers={'Cache-Control': 'no-store'})
+
+    @app.post('/api/ai/test')
+    def ai_test(body: ConnectionIn, user=Depends(require_user)):
+        if not providers.encryption_ready():
+            raise HTTPException(503, 'The server must configure credential encryption before connecting personal keys')
+        models = providers.discover(body.provider, body.api_key.get_secret_value(), user['id'], refresh=True)
+        return {'connected': True, 'models': models,
+                'message': 'Credentials accepted by the model listing API. No billable inference was performed.'}
+
+    @app.put('/api/ai/settings')
+    def save_ai_settings(body: AISettingsIn, user=Depends(require_user), store: Store = Depends(get_store)):
+        if body.mode == 'shared' and (body.provider != 'openai' or body.api_key):
+            raise HTTPException(400, 'Personal keys cannot be saved as Pantree default credentials')
+        key = body.api_key.get_secret_value() if body.api_key else account_key(store, user, body.mode, body.provider)
+        models = providers.discover(body.provider, key, user['id'])
+        if body.model not in {m['id'] for m in models}:
+            raise HTTPException(400, 'Select a compatible model returned by your active provider account')
+        if body.api_key:
+            store.add_credential(user['id'], body.provider, key, body.model)
+        else:
+            store.set_ai_profile(user['id'], mode=body.mode, provider=body.provider, model=body.model)
+        return public_ai(store, user)
+
+    @app.delete('/api/ai/credentials')
+    def remove_ai_credentials(user=Depends(require_user), store: Store = Depends(get_store)):
+        store.remove_credentials(user['id'])
+        return public_ai(store, user)
+
+    @app.get('/api/admin/usage')
+    def admin_usage(user=Depends(require_admin), store: Store = Depends(get_store)):
+        from sqlalchemy import select
+
+        from .store import users
+        return {**store.api_usage(), 'shared_budget': settings.daily_budget_usd,
+                'users': [{'id': u['id'], 'name': u['name'], 'is_admin': u['is_admin'],
+                           'usage': store.api_usage(u['id'])} for u in store._all(select(users).limit(500))]}
+
+    @app.put('/api/admin/usage/{user_id}')
+    def set_allowance(user_id: str, body: AllowanceIn, user=Depends(require_admin), store: Store = Depends(get_store)):
+        if not store.user(user_id):
+            raise HTTPException(404, 'User not found')
+        store.set_ai_profile(user_id, daily_limit=body.daily_limit)
+        return store.api_usage(user_id)
 
     # ------------------------------------------------------------------ projects
 
