@@ -24,7 +24,7 @@ def test_manifest_signature_includes_version_and_location(tmp_path, monkeypatch)
 
 def test_runner_rebuilds_agent_on_data_refresh(monkeypatch):
     version = ["one"]
-    monkeypatch.setattr(web, "snapshot_signature", lambda: version[0])
+    monkeypatch.setattr("pantree_insights.web.runtime.snapshot_signature", lambda: version[0])
     monkeypatch.setattr(graph, "Agent", lambda: object())
     runner = web.Runner()
     first = runner.agent
@@ -48,6 +48,6 @@ def test_paused_run_resumes_with_its_own_agent(monkeypatch):
 def test_snapshot_change_stops_before_saving_an_insight(monkeypatch):
     agent = object.__new__(graph.Agent)
     agent.snapshot = "old"
-    monkeypatch.setattr(graph, "snapshot_signature", lambda: "new")
+    monkeypatch.setattr("pantree_insights.graph.nodes_deliver.snapshot_signature", lambda: "new")
     result = agent.remember({"run_id": "r", "analysis": {}, "question": "q"})
     assert result["status"] == "failed" and result["insight_id"] is None

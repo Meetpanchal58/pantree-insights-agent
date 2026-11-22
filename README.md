@@ -27,13 +27,13 @@ number yet", never a guess. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md
 ## Repository
 
 ```
-src/pantree_insights/   graph.py (flow) · interpret.py · spec.py (compiler) · templates.py · agents.py
+src/pantree_insights/   graph/ (flow) · interpret/ · spec/ (compiler) · templates.py · agents.py
                         catalog.py · semantic.py · joins.py · profile.py · guardrails.py · grounding.py · db.py
-                        web.py · auth.py · store.py · memory.py · pulse.py · charts.py · demos.py · static/
+                        web/ · auth.py · store/ · memory.py · pulse.py · charts.py · demos.py · static/
 semantic/               schema, metrics, concepts, glossary (incl. two-meaning phrases), generated catalog
 prompts/agents.yaml     interpreter, contrast, analyst
 evals/                  questions, gold SQL, gold specs, autonomous/assisted evaluator, free compiler check
-tests/                  1,600+ tests: compiler vs gold and vs an independent implementation, every flow route,
+tests/                  1,709 collected tests: compiler vs gold and vs an independent implementation, every flow route,
                         guardrails, knowledge-base lint, web app
 ```
 

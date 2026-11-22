@@ -32,6 +32,9 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      - name: Test without downloaded data
+        run: uv run pytest -q -m "not data"
+
       - name: Cache the small shop
         uses: actions/cache@v4
         with:

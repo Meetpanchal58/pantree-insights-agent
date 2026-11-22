@@ -40,6 +40,7 @@ const path = require('node:path');
       await route.fulfill({json});
     });
     await page.goto('https://app.test/');
+    await page.evaluate(async()=>Object.assign(window, await import('/static/app.js')));
     await page.waitForSelector('[data-action="replay"]');
     await page.waitForSelector('[data-action="open-chat"]');
     const sidebarRequests=requests.filter(x=>x==='/api/projects'||x==='/api/chats').length;
@@ -110,9 +111,10 @@ const path = require('node:path');
     await page.waitForTimeout(300);
     assert.equal(await page.locator('#dialog').isVisible(),false);
     assert.equal(await page.evaluate(()=>{
-      let calls=0;const original=renderSteps;renderSteps=()=>{calls++;original();};
+      let calls=0;const descriptor=Object.getOwnPropertyDescriptor(Element.prototype,"innerHTML");
+      Object.defineProperty(Element.prototype,"innerHTML",{...descriptor,set(value){if(this.id==="steps")calls++;descriptor.set.call(this,value);}});
       showRunInPanel({status:'declined',events:[{type:'step',step:'plan',status:'started'},{type:'step',step:'plan',status:'done'}]});
-      renderSteps=original;return calls;
+      Object.defineProperty(Element.prototype,"innerHTML",descriptor);return calls;
     }),1);
     await page.route('https://cdn.jsdelivr.net/**',async route=>{
       await new Promise(resolve=>setTimeout(resolve,100));
@@ -294,6 +296,7 @@ const path = require('node:path');
       await route.fulfill({status:429,headers:{'Retry-After':'20'},body:'busy'});
     });
     await page.reload({waitUntil:'domcontentloaded'});
+    await page.evaluate(async()=>Object.assign(window, await import('/static/app.js')));
     await page.waitForSelector('[data-action="replay"]');
     await page.waitForFunction(()=>S.me && !S.me.user);
     await page.locator('[data-action="replay"]').first().click();

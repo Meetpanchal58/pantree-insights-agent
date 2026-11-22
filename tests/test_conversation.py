@@ -79,7 +79,7 @@ def test_one_confirmation_executes_entire_bounded_plan(agent, monkeypatch):
     from pantree_insights.spec import Measure, QuerySpec
     steps = [AnalysisStep(purpose=metric, spec=QuerySpec(table='sales', measures=[Measure(name=metric, metric=metric)]))
              for metric in ['gross_sales', 'orders']]
-    monkeypatch.setattr('pantree_insights.graph.decide', lambda *a, **kw:
+    monkeypatch.setattr('pantree_insights.graph.nodes_interpret.decide', lambda *a, **kw:
                         Decision('investigation', steps=steps, restated='investigate sales volume and value'))
     calls = []
     query = agent.query
@@ -101,7 +101,7 @@ def test_batch_revision_requires_target_and_preserves_other_steps(agent, monkeyp
     from pantree_insights.spec import Measure, QuerySpec
     steps = [AnalysisStep(purpose=metric, spec=QuerySpec(table='sales', measures=[Measure(name=metric, metric=metric)]))
              for metric in ['gross_sales', 'orders']]
-    monkeypatch.setattr('pantree_insights.graph.decide', lambda *a, **kw:
+    monkeypatch.setattr('pantree_insights.graph.nodes_interpret.decide', lambda *a, **kw:
                         Decision('investigation', steps=steps, restated='investigate sales'))
     run_id, events = agent.start('Investigate sales')
     first = list(events)[-1]
@@ -132,7 +132,7 @@ def test_saved_evidence_enters_interpreter_beyond_recent_window(agent, monkeypat
     def decide(*a, **kw):
         captured.append(kw['background'])
         return Decision('unanswerable', reason='Needs evidence')
-    monkeypatch.setattr('pantree_insights.graph.decide', decide)
+    monkeypatch.setattr('pantree_insights.graph.nodes_interpret.decide', decide)
     context = {'objective': 'Investigate declining volume', 'origin_plan': [{'metric': 'orders'}],
                'evidence': [{'finding': 'Earlier verified result'}]}
     _, events = agent.start('What should we investigate next?', history='', investigation=context)
