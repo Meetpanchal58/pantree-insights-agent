@@ -15,7 +15,15 @@ from ..templates import build as build_template
 from .checks import coverage_problems, intent_problems, template_intent_problems
 from .models import MAX_ALTERNATIVES, MAX_REPAIRS, READINGS, Decision
 from .prompts import ask_alternatives, ask_model
-from .readings import canonical, immaterial, normalise, premise_notes, reading_options, register_questions
+from .readings import (
+    canonical,
+    compared_members,
+    immaterial,
+    normalise,
+    premise_notes,
+    reading_options,
+    register_questions,
+)
 
 
 def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], data: dict, question: str,
@@ -127,7 +135,7 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             metrics = {m.metric for step in reading.steps if step.spec for m in step.spec.measures}
             for step in reading.steps:
                 if step.spec:
-                    step.spec = normalise(step.spec, cat, aliases)
+                    step.spec = compared_members(effective_question, normalise(step.spec, cat, aliases), cat, aliases)
                     problems += validate(step.spec, cat)
                     intent = intent_problems(effective_question, step.spec, cat, data["last_day"])
                     # Metrics may be answered by another approved step, but populations cannot silently disappear.
@@ -172,7 +180,7 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             except TemplateError as error:
                 problems = [str(error)]
         elif reading.spec is not None:
-            spec = normalise(reading.spec, cat, aliases)
+            spec = compared_members(effective_question, normalise(reading.spec, cat, aliases), cat, aliases)
             problems = validate(spec, cat)
             if not problems:
                 problems = intent_problems(effective_question.strip(), spec, cat, data["last_day"])

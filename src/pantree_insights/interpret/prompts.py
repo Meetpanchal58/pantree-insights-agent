@@ -35,6 +35,9 @@ def catalog_text(cat: Catalog, terms: dict[str, str]) -> str:
     out.append("\n## Cuts (concept names usable as dimensions and filter fields, per table)")
     for subject, s in cat.concepts.subjects.items():
         cuts = [f"{c}={e[subject].sql() if e[subject].expression else e[subject].column}"
+                # A cut with its own join (sale events by date window) says so, or the model believes it is the
+                # stored key column and declines event comparisons it can answer.
+                + (f" (rows matched by date window, not by key: {e[subject].note})" if e[subject].join else "")
                 for c, e in cat.concepts.concepts.items() if subject in e]
         out.append(f"- {s.table}: " + "; ".join(cuts))
     out.append("\n## Columns (any table.column below may also be used; values are the exact stored spellings)")

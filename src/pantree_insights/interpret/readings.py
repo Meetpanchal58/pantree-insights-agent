@@ -117,6 +117,41 @@ def canonical(spec: QuerySpec) -> str:
     }, sort_keys=True, default=str)
 
 
+COMPARE = r"\b(?:versus|vs\.?|compared? (?:with|to)|against|between)\b"
+
+
+def compared_members(question: str, spec: QuerySpec, cat: Catalog, aliases: dict[str, str]) -> QuerySpec:
+    """"COD versus prepaid" split by payment type must not be filtered to COD alone: when a single-member filter
+    sits on a split the question compares, the filter becomes the members the question names (or goes, when they
+    are all the members)."""
+    if not re.search(COMPARE, question, re.I) or not spec.dimensions:
+        return spec
+
+    def said(value: str) -> bool:
+        names = [value] + [a for a, v in aliases.items() if v == value]
+        return any(re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", question, re.I) for n in names)
+    try:
+        split = {cat.resolve(d, spec.table)[0] for d in spec.dimensions}
+    except Exception:                                  # noqa: BLE001 - validation reports it
+        return spec
+    filters = []
+    for f in spec.filters:
+        try:
+            expression, _, entry = cat.resolve(f.field, spec.table)
+        except Exception:                              # noqa: BLE001 - validation reports it
+            filters.append(f)
+            continue
+        if f.op in ("eq", "in") and len(f.values) == 1 and expression in split:
+            members = entry.labels() if entry is not None and entry.expression else cat.values_of(expression) or []
+            named = [m for m in members if said(str(m))]
+            if len(named) >= 2:
+                if set(named) < set(members):
+                    filters.append(f.model_copy(update={"op": "in", "values": named}))
+                continue
+        filters.append(f)
+    return spec.model_copy(update={"filters": filters})
+
+
 GENERIC = {"marketing", "product", "customer", "sales", "avg", "pct", "total", "share", "the", "of", "by"}
 
 

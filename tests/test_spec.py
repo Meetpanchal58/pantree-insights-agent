@@ -156,3 +156,24 @@ def test_reading_checks_never_flag_a_gold_reading(key, CAT):
         spec = QuerySpec.model_validate(gold)
         problems = intent_problems(question, spec, CAT, data["last_day"]) + coverage_problems(spec, None, data)
     assert not problems, f"{key}: {question}\n{problems}"
+
+
+def test_a_compared_split_is_not_filtered_to_one_member(CAT):
+    """holdout x11: 'COD versus prepaid' was answered for COD only."""
+    from pantree_insights.interpret.readings import compared_members
+
+    question = "What is the cancellation rate for COD versus prepaid orders?"
+    one = QuerySpec(table="sales", measures=[Measure(name="c", metric="cancellation_rate")],
+                    dimensions=["payment_type"],
+                    filters=[Filter(field="payment_type", op="eq", values=["COD"])])
+    assert compared_members(question, one, CAT, {}).filters == []
+    assert compared_members("What is the cancellation rate for COD orders?", one, CAT, {}).filters == one.filters
+
+
+def test_the_prompt_says_sale_events_are_matched_by_date_window(CAT):
+    """regression h02: without this the model declined event comparisons it could answer."""
+    from pantree_insights.interpret.prompts import catalog_text
+
+    lines = catalog_text(CAT, {}).splitlines()
+    cuts = next(line for line in lines if line.startswith("- sales:") and "sale_event=" in line)
+    assert "sale_event=sale_events.name (rows matched by date window" in cuts
