@@ -177,3 +177,19 @@ def test_the_prompt_says_sale_events_are_matched_by_date_window(CAT):
     lines = catalog_text(CAT, {}).splitlines()
     cuts = next(line for line in lines if line.startswith("- sales:") and "sale_event=" in line)
     assert "sale_event=sale_events.name (rows matched by date window" in cuts
+
+
+def test_a_ranking_without_a_count_shows_every_group_of_a_small_split(CAT):
+    """regression m11: 'What do customers contact support about most?' was cut to a default top 10 of 16 issues
+    and labelled verified."""
+    from pantree_insights.interpret.readings import complete_ranking
+    from pantree_insights.spec import Ranking
+
+    spec = QuerySpec(table="support_contacts", measures=[Measure(name="contacts", agg="count")], dimensions=["issue"],
+                     ranking=Ranking(by="contacts", limit=10))
+    assert complete_ranking("What do customers contact support about most?", spec, CAT).ranking.limit == 16
+    assert complete_ranking("What are the top 5 support issues?", spec, CAT).ranking.limit == 10
+    brands = spec.model_copy(update={"table": "sales", "dimensions": ["brand"],
+                                     "measures": [Measure(name="orders", metric="orders")],
+                                     "ranking": Ranking(by="orders", limit=10)})
+    assert complete_ranking("Which brands sell most?", brands, CAT).ranking.limit == 10     # hundreds of brands

@@ -18,6 +18,7 @@ from .prompts import ask_alternatives, ask_model
 from .readings import (
     canonical,
     compared_members,
+    complete_ranking,
     immaterial,
     normalise,
     premise_notes,
@@ -180,7 +181,8 @@ def decide(llm, cat: Catalog, terms: dict[str, str], aliases: dict[str, str], da
             except TemplateError as error:
                 problems = [str(error)]
         elif reading.spec is not None:
-            spec = compared_members(effective_question, normalise(reading.spec, cat, aliases), cat, aliases)
+            spec = complete_ranking(effective_question, compared_members(
+                effective_question, normalise(reading.spec, cat, aliases), cat, aliases), cat)
             problems = validate(spec, cat)
             if not problems:
                 problems = intent_problems(effective_question.strip(), spec, cat, data["last_day"])

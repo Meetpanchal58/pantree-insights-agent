@@ -375,6 +375,7 @@ specs:
       - {name: impressions, agg: sum, field: marketing_spend.impressions}
       - {name: ad_ctr, ratio: [clicks, impressions]}
     dimensions: [region]
+    filters: [{field: channel_group, op: in, values: [Paid Search, Paid Social, Display]}]
     time: {start: 2026-01-01, end: 2026-12-31}
 
   # ------------------------------------------------------------------ conversation flow

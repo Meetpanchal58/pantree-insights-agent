@@ -117,6 +117,27 @@ def canonical(spec: QuerySpec) -> str:
     }, sort_keys=True, default=str)
 
 
+ALL_GROUPS = 30
+
+
+def complete_ranking(question: str, spec: QuerySpec, cat: Catalog) -> QuerySpec:
+    """"What do customers contact support about most?" names no count: a default top 10 of 16 issue categories
+    silently drops six of them. With no number in the question and a split of at most ALL_GROUPS members, rank
+    every group (still sorted, most first)."""
+    r = spec.ranking
+    if r is None or r.partition_by or len(spec.dimensions) != 1 or spec.time and spec.time.grain \
+            or re.search(r"\b\d+\b|\b(?:one|two|three|four|five|ten|twenty)\b", question, re.I):
+        return spec
+    try:
+        expression, _, entry = cat.resolve(spec.dimensions[0], spec.table)
+        members = entry.labels() if entry is not None and entry.expression else cat.values_of(expression)
+    except Exception:                                  # noqa: BLE001 - validation reports it
+        return spec
+    if not members or not r.limit < len(members) <= ALL_GROUPS:
+        return spec
+    return spec.model_copy(update={"ranking": r.model_copy(update={"limit": len(members)})})
+
+
 COMPARE = r"\b(?:versus|vs\.?|compared? (?:with|to)|against|between)\b"
 
 
