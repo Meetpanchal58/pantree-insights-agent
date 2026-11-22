@@ -4,119 +4,119 @@
     "size": "small",
     "seed": 42,
     "first_day": "2025-01-01",
-    "last_day": "2026-11-22",
+    "last_day": "2026-11-14",
     "package_version": "1.0.0",
     "n_products": 1500,
     "n_sellers": 80,
     "traffic_scale": 0.17,
     "daily_new_visitors": 30.0
   },
-  "preparation_seconds": 2.7921532330001355,
+  "preparation_seconds": 0.7521694920000073,
   "cache": "shared Agent SQL and OS caches; fresh conversational memory per request",
   "data_size": "small",
   "rows": [
     {
       "question": "What was yesterday's GMV?",
       "repeat": 0,
-      "seconds": 0.7693872899981216,
+      "seconds": 0.11232251199999155,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "What is the monthly return rate?",
       "repeat": 0,
-      "seconds": 1.8939461199988727,
+      "seconds": 0.3246132879999948,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "Show revenue by category.",
       "repeat": 0,
-      "seconds": 0.5515209750010399,
+      "seconds": 0.09259732000001009,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "Which brands generated the highest sales?",
       "repeat": 0,
-      "seconds": 1.120162078001158,
+      "seconds": 0.08810841199999686,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "Show sales for the last seven days.",
       "repeat": 0,
-      "seconds": 0.32694565600104397,
+      "seconds": 0.047585127000019156,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "What was yesterday's GMV?",
       "repeat": 1,
-      "seconds": 0.19872924000083003,
+      "seconds": 0.04161270700001296,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "What is the monthly return rate?",
       "repeat": 1,
-      "seconds": 0.24440333300299244,
+      "seconds": 0.07584572299998626,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "Show revenue by category.",
       "repeat": 1,
-      "seconds": 0.14461881600072957,
+      "seconds": 0.09829016200001206,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "Which brands generated the highest sales?",
       "repeat": 1,
-      "seconds": 0.47395485299784923,
+      "seconds": 0.06299972899998352,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "Show sales for the last seven days.",
       "repeat": 1,
-      "seconds": 0.26876822000122047,
+      "seconds": 0.050729994000022316,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "What was yesterday's GMV?",
       "repeat": 2,
-      "seconds": 0.1875834170023154,
+      "seconds": 0.035338983999992024,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "What is the monthly return rate?",
       "repeat": 2,
-      "seconds": 0.4064204720016278,
+      "seconds": 0.07406226000000515,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "Show revenue by category.",
       "repeat": 2,
-      "seconds": 0.5304518849989108,
+      "seconds": 0.06271023300001843,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "Which brands generated the highest sales?",
       "repeat": 2,
-      "seconds": 0.5085347070016724,
+      "seconds": 0.06821043100001134,
       "model_calls": 0,
       "reference_matched": true
     },
     {
       "question": "Show sales for the last seven days.",
       "repeat": 2,
-      "seconds": 0.21805334400050924,
+      "seconds": 0.03717428499999187,
       "model_calls": 0,
       "reference_matched": true
     }

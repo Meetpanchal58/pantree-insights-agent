@@ -1,31 +1,36 @@
 # Current evidence
 
-This directory is the only published evaluation set. It replaces previous generated reports; the reproducible evaluator code and independent reference suites remain under evals/.
+This directory is the only published evaluation set. Earlier runs were removed; the evaluator code, question suites, reference SQL and gold specifications under evals/ reproduce it.
 
-The paid run selects 100 cases before inference, with seed 20261122: 56 answer cases and 44 behavior cases. It uses the configured OpenAI model through the production managed adapter, autonomous blind plan confirmations, isolated conversational memory, and a cumulative $4 ceiling. All 100 selected cases completed. Known token-based cost: $0.637558; uncertain holds: $0.000000. The all-pass evaluation gate failed.
+The paid run is autonomous: blind plan confirmations, and no answers to the agent's clarifying questions. It used code `24b3f1e` on 22 November 2026, the configured OpenAI model through the production managed adapter, isolated conversational memory and a cumulative $2 ceiling. It selected 100 cases before inference with seed 20261122: 56 answer cases and 44 behavior cases. All 100 completed. Known token cost was $0.926527, with $0 in uncertain holds. The all-pass evaluation gate failed.
+
+| Result | Value |
+| --- | --- |
+| Correct answer tables | 51/56 (91.0%) [83.9–98.3%] |
+| Holdout answer tables | 18/18 |
+| Verified-labelled answers matching the reference | 51/53 (96.2%) |
+| Silent wrong answers | 2 (m11: contacts vs tickets; c21: correct counts in rows instead of columns) |
+| Correctly declined | 12/12 |
+| Correctly clarified | 6/6 |
 
 | Artifact | Meaning |
 | --- | --- |
 | [results.md](results.md) | Canonical table with confidence intervals and observed failure types |
 | [paid.json](paid.json) | All 100 raw scored attempts and traces, including failures |
-| [paid-budget.json](paid-budget.json) | Known cost, uncertain holds, configured rates, and run settings |
-| [failure-audit.md](failure-audit.md) | Review of strict-reference mismatches; scores unchanged |
-| [source-map.json](source-map.json) | Evaluated local commit mapped to an identical published Git tree |
-| [selection.json](selection.json) | Exact selected case IDs, categories, and questions |
-| [compiler.json](compiler.json) | Intended specifications versus independent SQL, three passes, with provenance |
-| [compiler.md](compiler.md) | Free compiler timings and limitations |
+| [paid-budget.json](paid-budget.json) | Known cost, uncertain holds, configured rates and run settings |
+| [selection.json](selection.json) | Exact selected case IDs, categories and questions |
+| [compiler.json](compiler.json) / [compiler.md](compiler.md) | Intended specifications versus independent SQL: 294/294 across three passes, no model calls |
 | [spec-check.txt](spec-check.txt) | All 98 compiler/template references match |
-| [gold-check.txt](gold-check.txt) | All 129 reference SQL queries validate |
-| [fastpath.json](fastpath.json) | Five reviewed deterministic questions, three passes; no model calls |
+| [gold-check.txt](gold-check.txt) | All 129 reference SQL queries validate (172 items, 0 problems) |
+| [fastpath.json](fastpath.json) | Reviewed deterministic questions, three passes; no model calls |
 | [context-retrieval.json](context-retrieval.json) | Required-metric recall for keyword/BM25 top-k retrieval; no embeddings measured |
-| [examples.json](examples.json) | README answer excerpts and the independent SQL behind them |
 
-Free checks use the small simulator snapshot through 2026-11-22. Latency is local, shares process/OS caches, and excludes user confirmation time. Free checks were run concurrently on the same host; their timings are descriptive, not a controlled performance comparison. Paid calls run sequentially; provider caching is uncontrolled. Local regression tests overlapped part of the paid run, so timings also include host contention.
+Scoring notes:
+- Regression cases list the columns their question asks for, and supporting counts are optional; holdout and coverage cases already worked this way.
+- A singular superlative may be answered by its winner.
+- The c24 reference was corrected before this run (paid ad spend excludes CRM and affiliates) and is marked `tuned_on`.
+- The suites were used during development, including the holdout, so these are development-benchmark results, not an unseen external test.
 
-Raw reports retain hashes of the source, selected cases, and dataset. A local commit ID records the evaluated checkout; source and data hashes are the reproduction identity. Later documentation edits do not change the evaluated analytical behavior.
+After this run, the f05 behaviour failure ("customers who placed orders") was fixed. That fix has not been re-measured.
 
-No result here establishes narrative faithfulness, causal accuracy, Cloud Run response time, or concurrent-user capacity. Model and compiler correctness have different denominators. Keep failures, unresolved cases, and uncertain cost in the report.
-
-## Software checks
-
-Local regression checks passed: 1,711 tests with one existing skip; 548 no-data tests; desktop/mobile frontend and workspace suites; Ruff and local-link checks. Four final budget/reporting tests also passed after adding overwrite protection. These software checks do not override the paid evaluation gate failure.
+Free checks were run on the small simulator snapshot through 2026-11-22. Latency is local, shares process/OS caches and excludes user confirmation time. Paid calls run sequentially; provider caching is uncontrolled. Nothing here establishes narrative faithfulness, causal accuracy, Cloud Run response time or concurrent-user capacity.

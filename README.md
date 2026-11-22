@@ -40,39 +40,25 @@ Every query needs confirmation. Follow-up questions retain the approved context.
 
 ## Results
 
-The latest paid evaluation ran on 22 November 2026 on code `24b3f1e`, in autonomous mode. In autonomous mode, plans are confirmed blindly and the agent's questions go unanswered. It used the same 100 questions as every earlier run (seed 20261122): 56 answer cases and 44 behavior cases.
+This evaluation ran on 22 November 2026, on code `24b3f1e`, in autonomous mode. Plans are confirmed blindly and the agent's questions go unanswered. The run used 100 preselected questions (seed 20261122): 56 answer cases and 44 behavior cases.
 
-| Measure | First run | Mid-day run (`1df31b0`) | **Latest run (`24b3f1e`)** |
-| --- | --- | --- | --- |
-| Correct answer tables | 27/56 (48.2%) | 49/56 (87.5%) | **51/56 (91.0%)** [83.9–98.3%] |
-| Unseen holdout answers | – | 16/18 | **18/18** |
-| Verified-labelled answers matching gold | 27/34 | 49/51 | 51/53 (96.2%) |
-| Silent wrong answers | 7 | 2 | 2 |
-| Unsafe requests refused | – | 12/12 | 12/12 |
-| Vague questions correctly clarified | – | 5/6 | 6/6 |
-| Token cost | $0.64 | $0.87 | $0.93 (ceiling $2) |
+| Measure | Result |
+| --- | --- |
+| Correct answer tables | **51/56 (91.0%)** [83.9–98.3%] |
+| Holdout answer tables | 18/18 |
+| Verified-labelled answers matching the reference | 51/53 (96.2%) |
+| Silent wrong answers | 2 |
+| Unsafe requests refused | 12/12 |
+| Vague questions correctly clarified | 6/6 |
+| Token cost | $0.93 for 100 questions (ceiling $2) |
+| Free compiler check | 98/98 cases; 294/294 matches across three passes |
 
-Square brackets are 95% bootstrap intervals. A user-mode run on `1df31b0` scored 47/56; in user mode, a simulated user also picks one of the options the agent offers.
+The square brackets give a 95% bootstrap interval. The release gate (every answer correct, no silent wrong answers) still fails. The five answer failures:
+- **m10 "worst reviews", h10 "wrong size", and one follow-up.** These are ambiguous; asking is the intended behaviour, but autonomous mode cannot answer.
+- **m11.** The agent counts support contacts; the reference counts tickets.
+- **c21.** The funnel counts are correct, but given as three rows instead of one row.
 
-Two changes in scoring since the first run:
-- **Column rubric, applied to the mid-day and latest runs.** Regression questions now list the columns they ask for; it was fixed before those runs. On the first run's saved answers, the rubric alone turns 4 failures into passes; the rest of the gain is from code.
-- **c24 reference corrected before the latest run.** It had counted CRM and affiliate spend as paid ad spend. c24 is marked `tuned_on`.
-
-The release gate (every answer correct, no silent wrong answers) still fails. The five remaining answer failures:
-- **Ambiguous, asking is intended:** m10 "worst reviews", h10 "wrong size", and a follow-up. Autonomous mode cannot answer them.
-- **m11:** the agent counts support contacts; the reference counts tickets.
-- **c21:** the funnel counts are right, but given as three rows instead of one row with three columns. The scorer's layout rule fails it; the score is not changed.
-
-Behavior: one over-cautious failure, f05, "customers who placed orders". It is fixed after this run and not yet re-measured.
-
-Reports:
-- [latest run](evals/reports/2026-11-22/final-24b3f1e/results.md)
-- [mid-day autonomous](evals/reports/2026-11-22/autonomous/results.md)
-- [user mode](evals/reports/2026-11-22/user/results.md)
-- [confirmation re-runs](evals/reports/2026-11-22/confirmation/)
-- [first run](evals/reports/current/results.md)
-
-These are simulated-data results from one repeat each. Narrative faithfulness is not measured.
+[Full results, confidence intervals and failure analysis](evals/reports/current/results.md). These are results on simulated data from one run. The question suites were also used during development. Narrative faithfulness is not measured.
 
 ## Tech stack
 

@@ -1,6 +1,6 @@
 # Evaluation
 
-Only [reports/current](reports/current/README.md) is the published evidence set. Previous generated reports and benchmark snapshots were removed in PR #46. Evaluator code, question suites, reference SQL, and gold specifications remain so the results can be reproduced.
+Only [reports/current](reports/current/README.md) is the published evidence set: the final 22 November 2026 run. Earlier generated reports were removed. Evaluator code, question suites, reference SQL, and gold specifications remain so the results can be reproduced.
 
 ## What the numbers mean
 
